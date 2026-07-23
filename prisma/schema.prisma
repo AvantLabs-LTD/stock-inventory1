@@ -1,0 +1,347 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── CORE MODELS ────────────────────────────────────────────────────────────
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  password      String
+  name          String
+  role          String   @default("VIEWER") // SUPER_ADMIN, INVENTORY_ADMIN, STORE_KEEPER, DEPARTMENT_USER, VIEWER
+  status        String   @default("ACTIVE") // ACTIVE, INACTIVE
+  phone         String?
+  avatar        String?
+  departmentId  String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  department        Department?          @relation(fields: [departmentId], references: [id])
+  issuedItems       InventoryIssue[]
+  requestedItems    InventoryRequest[]
+  receivedItems     GoodsReceived[]
+  adjustedItems     StockAdjustment[]
+  auditLogs         AuditLog[]
+  reservationsBy    ReservedInventory[]
+  releasedItems     ReservedInventory[] @relation("ReleasedBy")
+  returnedItems     InventoryReturn[]
+
+  @@index([email])
+  @@index([role])
+  @@index([departmentId])
+}
+
+model Department {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  code        String   @unique
+  description String?
+  headName    String?
+  phone       String?
+  status      String   @default("ACTIVE")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users     User[]
+  projects  Project[]
+  issues    InventoryIssue[]
+  requests  InventoryRequest[]
+  returns   InventoryReturn[]
+
+  @@index([name])
+}
+
+model Project {
+  id            String   @id @default(cuid())
+  name          String
+  code          String   @unique
+  departmentId  String
+  description   String?
+  startDate     DateTime?
+  endDate       DateTime?
+  status        String   @default("ACTIVE") // ACTIVE, COMPLETED, ON_HOLD, CANCELLED
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  department   Department          @relation(fields: [departmentId], references: [id])
+  issues       InventoryIssue[]
+  requests     InventoryRequest[]
+  reservations ReservedInventory[]
+  returns      InventoryReturn[]
+
+  @@index([departmentId])
+  @@index([status])
+}
+
+// ─── INVENTORY MASTER ───────────────────────────────────────────────────────
+
+model Category {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  code        String   @unique
+  description String?
+  parentId    String?
+  status      String   @default("ACTIVE")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryTree")
+  products Product[]
+
+  @@index([parentId])
+}
+
+model Supplier {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  contactPerson String?
+  phone         String?
+  email         String?
+  address       String?
+  notes         String?
+  status        String   @default("ACTIVE")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  products      Product[]
+  goodsReceived GoodsReceived[]
+
+  @@index([name])
+}
+
+model Product {
+  id              String   @id @default(cuid())
+  code            String   @unique
+  name            String
+  sku             String   @unique
+  categoryId      String?
+  supplierId      String?
+  manufacturer    String?
+  modelNumber     String?
+  unit            String   @default("pcs")
+  image           String?
+  description     String?
+  storageLocation String?
+  minimumStock    Int      @default(0)
+  unitCost        Float    @default(0)
+  status          String   @default("ACTIVE") // ACTIVE, INACTIVE, DISCONTINUED
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  category       Category?              @relation(fields: [categoryId], references: [id])
+  supplier       Supplier?              @relation(fields: [supplierId], references: [id])
+  transactions   InventoryTransaction[]
+  issues         InventoryIssue[]
+  reservations   ReservedInventory[]
+  requests       InventoryRequest[]
+  goodsReceived  GoodsReceived[]
+  returns        InventoryReturn[]
+  adjustments    StockAdjustment[]
+
+  @@index([categoryId])
+  @@index([supplierId])
+  @@index([status])
+  @@index([sku])
+}
+
+// ─── INVENTORY TRANSACTIONS ───────────────────────────────────────────────
+
+model InventoryTransaction {
+  id        String   @id @default(cuid())
+  productId String
+  type      String   // OPENING_STOCK, GOODS_RECEIVED, ISSUED, RETURNED, ADJUSTMENT_IN, ADJUSTMENT_OUT
+  quantity  Int
+  unitCost  Float?
+  reference String?
+  remarks   String?
+  date      DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([type])
+  @@index([date])
+}
+
+model GoodsReceived {
+  id                String   @id @default(cuid())
+  productId         String
+  supplierId        String?
+  source            String?
+  purchaseReference String?
+  invoiceNumber     String?
+  quantity          Int
+  unitCost          Float
+  date              DateTime @default(now())
+  receivedBy        String
+  remarks           String?
+  createdAt         DateTime @default(now())
+
+  product        Product   @relation(fields: [productId], references: [id])
+  supplier       Supplier? @relation(fields: [supplierId], references: [id])
+  receivedByUser User      @relation(fields: [receivedBy], references: [id])
+
+  @@index([productId])
+  @@index([supplierId])
+  @@index([date])
+}
+
+// ─── INVENTORY ISSUE ───────────────────────────────────────────────────────
+
+model InventoryIssue {
+  id            String   @id @default(cuid())
+  productId     String
+  departmentId  String
+  projectId     String
+  issuedBy      String
+  employeeName  String
+  quantity      Int
+  remarks       String?
+  date          DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  product      Product    @relation(fields: [productId], references: [id])
+  department   Department @relation(fields: [departmentId], references: [id])
+  project      Project    @relation(fields: [projectId], references: [id])
+  issuedByUser User       @relation(fields: [issuedBy], references: [id])
+
+  @@index([productId])
+  @@index([departmentId])
+  @@index([projectId])
+  @@index([date])
+}
+
+// ─── INVENTORY RETURN ─────────────────────────────────────────────────────
+
+model InventoryReturn {
+  id            String   @id @default(cuid())
+  productId     String
+  departmentId  String
+  projectId     String
+  returnedBy    String
+  employeeName  String
+  quantity      Int
+  remarks       String?
+  date          DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  product         Product    @relation(fields: [productId], references: [id])
+  department      Department @relation(fields: [departmentId], references: [id])
+  project         Project    @relation(fields: [projectId], references: [id])
+  returnedByUser  User       @relation(fields: [returnedBy], references: [id])
+
+  @@index([productId])
+  @@index([departmentId])
+  @@index([projectId])
+  @@index([date])
+}
+
+// ─── RESERVED INVENTORY ────────────────────────────────────────────────────
+
+model ReservedInventory {
+  id          String   @id @default(cuid())
+  productId   String
+  projectId   String
+  quantity    Int
+  reason      String?
+  status      String   @default("ACTIVE") // ACTIVE, RELEASED
+  reservedBy  String
+  releasedBy  String?
+  releasedAt  DateTime?
+  remarks     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  product         Product           @relation(fields: [productId], references: [id])
+  project         Project           @relation(fields: [projectId], references: [id])
+  reservedByUser  User              @relation(fields: [reservedBy], references: [id])
+  releasedByUser  User?             @relation("ReleasedBy", fields: [releasedBy], references: [id])
+
+  @@index([productId])
+  @@index([projectId])
+  @@index([status])
+}
+
+// ─── INVENTORY REQUESTS ─────────────────────────────────────────────────────
+
+model InventoryRequest {
+  id            String   @id @default(cuid())
+  productId     String
+  departmentId  String
+  projectId     String
+  requestedBy   String
+  employeeName  String
+  quantity      Int
+  approvedQty   Int      @default(0)
+  priority      String   @default("MEDIUM") // LOW, MEDIUM, HIGH, URGENT
+  reason        String?
+  status        String   @default("PENDING") // PENDING, APPROVED, REJECTED, PARTIAL_APPROVED, COMPLETED, CANCELLED
+  approvedBy    String?
+  approvedAt    DateTime?
+  completedBy   String?
+  completedAt   DateTime?
+  remarks       String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  product          Product    @relation(fields: [productId], references: [id])
+  department       Department @relation(fields: [departmentId], references: [id])
+  project          Project    @relation(fields: [projectId], references: [id])
+  requestedByUser  User       @relation(fields: [requestedBy], references: [id])
+
+  @@index([productId])
+  @@index([departmentId])
+  @@index([projectId])
+  @@index([status])
+  @@index([priority])
+}
+
+// ─── STOCK ADJUSTMENTS ─────────────────────────────────────────────────────
+
+model StockAdjustment {
+  id          String   @id @default(cuid())
+  productId   String
+  type        String   // ADJUSTMENT_IN, ADJUSTMENT_OUT
+  quantity    Int
+  reason      String?
+  remarks     String?
+  adjustedBy  String
+  date        DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  product         Product @relation(fields: [productId], references: [id])
+  adjustedByUser  User    @relation(fields: [adjustedBy], references: [id])
+
+  @@index([productId])
+  @@index([type])
+  @@index([date])
+}
+
+// ─── AUDIT LOG ─────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  userName   String?
+  action     String
+  entityType String?
+  entityId   String?
+  details    String?
+  ipAddress  String?
+  date       DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([action])
+  @@index([date])
+  @@index([entityType])
+}

@@ -1,0 +1,936 @@
+     1→'use client'
+     2→
+     3→import { useCallback, useEffect, useState } from 'react'
+     4→import { format } from 'date-fns'
+     5→import {
+     6→  BarChart3,
+     7→  Download,
+     8→  Loader2,
+     9→  ArrowLeft,
+    10→  Search,
+    11→  X,
+    12→  Package,
+    13→  TrendingDown,
+    14→  TrendingUp,
+    15→  AlertTriangle,
+    16→  DollarSign,
+    17→  BoxIcon,
+    18→  Building2,
+    19→  FolderKanban,
+    20→} from 'lucide-react'
+    21→import {
+    22→  Table,
+    23→  TableBody,
+    24→  TableCell,
+    25→  TableHead,
+    26→  TableHeader,
+    27→  TableRow,
+    28→} from '@/components/ui/table'
+    29→import { Button } from '@/components/ui/button'
+    30→import { Input } from '@/components/ui/input'
+    31→import { Badge } from '@/components/ui/badge'
+    32→import { Skeleton } from '@/components/ui/skeleton'
+    33→import { Card, CardContent } from '@/components/ui/card'
+    34→import {
+    35→  Select,
+    36→  SelectContent,
+    37→  SelectItem,
+    38→  SelectTrigger,
+    39→  SelectValue,
+    40→} from '@/components/ui/select'
+    41→import { PageHeader } from '@/components/shared/page-header'
+    42→import { useAppStore, type AppPage } from '@/stores/app-store'
+    43→import { hasPermission } from '@/lib/permissions'
+    44→import { useAuthStore } from '@/stores/auth-store'
+    45→import { toast } from 'sonner'
+    46→
+    47→function formatCurrency(amount: number) {
+    48→  return new Intl.NumberFormat('en-US', {
+    49→    style: 'currency',
+    50→    currency: 'USD',
+    51→    minimumFractionDigits: 2,
+    52→  }).format(amount)
+    53→}
+    54→
+    55→const REPORT_LABELS: Record<string, string> = {
+    56→  'inventory-summary': 'Inventory Summary',
+    57→  'inventory-ledger': 'Inventory Ledger',
+    58→  'goods-received': 'Goods Received',
+    59→  'goods-issued': 'Goods Issued',
+    60→  'department-usage': 'Department Usage',
+    61→  'project-usage': 'Project Usage',
+    62→  'reserved-inventory': 'Reserved Inventory',
+    63→  'low-stock': 'Low Stock Alert',
+    64→}
+    65→
+    66→interface FilterOption {
+    67→  id: string
+    68→  name: string
+    69→}
+    70→
+    71→interface StatCard {
+    72→  label: string
+    73→  value: string | number
+    74→  icon: React.ElementType
+    75→  color: string
+    76→}
+    77→
+    78→export function ReportView() {
+    79→  const reportType = useAppStore((s) => s.selectedProductId) as string
+    80→  const navigate = useAppStore((s) => s.navigate)
+    81→  const user = useAuthStore((s) => s.user)
+    82→
+    83→  const [data, setData] = useState<unknown[]>([])
+    84→  const [summary, setSummary] = useState<Record<string, number>>({})
+    85→  const [loading, setLoading] = useState(true)
+    86→  const [exporting, setExporting] = useState(false)
+    87→
+    88→  // Filters
+    89→  const [dateFrom, setDateFrom] = useState('')
+    90→  const [dateTo, setDateTo] = useState('')
+    91→  const [categoryId, setCategoryId] = useState('')
+    92→  const [departmentId, setDepartmentId] = useState('')
+    93→  const [projectId, setProjectId] = useState('')
+    94→  const [status, setStatus] = useState('')
+    95→  const [productId, setProductId] = useState('')
+    96→  const [supplierId, setSupplierId] = useState('')
+    97→
+    98→  // Dropdown options
+    99→  const [categories, setCategories] = useState<FilterOption[]>([])
+   100→  const [departments, setDepartments] = useState<FilterOption[]>([])
+   101→  const [projects, setProjects] = useState<FilterOption[]>([])
+   102→  const [products, setProducts] = useState<FilterOption[]>([])
+   103→  const [suppliers, setSuppliers] = useState<FilterOption[]>([])
+   104→
+   105→  const reportLabel = REPORT_LABELS[reportType] || 'Report'
+   106→
+   107→  // Determine which filters are relevant per report type
+   108→  const showDateFilter = !['reserved-inventory', 'low-stock'].includes(reportType)
+   109→  const showCategoryFilter = reportType === 'inventory-summary'
+   110→  const showStatusFilter = reportType === 'inventory-summary'
+   111→  const showDepartmentFilter = ['inventory-summary', 'goods-issued', 'project-usage'].includes(reportType)
+   112→  const showProjectFilter = ['goods-issued', 'project-usage'].includes(reportType)
+   113→  const showProductFilter = reportType === 'inventory-ledger'
+   114→  const showSupplierFilter = ['goods-received'].includes(reportType)
+   115→
+   116→  // Fetch dropdown options
+   117→  useEffect(() => {
+   118→    async function fetchOptions() {
+   119→      const fetches: Promise<void>[] = []
+   120→      if (showCategoryFilter) {
+   121→        fetches.push(
+   122→          fetch('/api/categories?limit=200')
+   123→            .then((r) => r.json())
+   124→            .then((d) => setCategories((d.data || []).map((c: { id: string; name: string }) => ({ id: c.id, name: c.name }))))
+   125→            .catch(() => {})
+   126→        )
+   127→      }
+   128→      if (showDepartmentFilter) {
+   129→        fetches.push(
+   130→          fetch('/api/departments')
+   131→            .then((r) => r.json())
+   132→            .then((d) => setDepartments((d.data || d || []).map((dp: { id: string; name: string }) => ({ id: dp.id, name: dp.name }))))
+   133→            .catch(() => {})
+   134→        )
+   135→      }
+   136→      if (showProjectFilter || showDepartmentFilter) {
+   137→        fetches.push(
+   138→          fetch('/api/projects?limit=200')
+   139→            .then((r) => r.json())
+   140→            .then((d) => setProjects((d.data || []).map((p: { id: string; name: string }) => ({ id: p.id, name: p.name }))))
+   141→            .catch(() => {})
+   142→        )
+   143→      }
+   144→      if (showProductFilter) {
+   145→        fetches.push(
+   146→          fetch('/api/products?limit=200')
+   147→            .then((r) => r.json())
+   148→            .then((d) => setProducts((d.data || []).map((p: { id: string; name: string }) => ({ id: p.id, name: p.name }))))
+   149→            .catch(() => {})
+   150→        )
+   151→      }
+   152→      if (showSupplierFilter) {
+   153→        fetches.push(
+   154→          fetch('/api/suppliers?limit=200')
+   155→            .then((r) => r.json())
+   156→            .then((d) => setSuppliers((d.data || []).map((s: { id: string; name: string }) => ({ id: s.id, name: s.name }))))
+   157→            .catch(() => {})
+   158→        )
+   159→      }
+   160→      await Promise.all(fetches)
+   161→    }
+   162→    fetchOptions()
+   163→  }, [showCategoryFilter, showDepartmentFilter, showProjectFilter, showProductFilter, showSupplierFilter])
+   164→
+   165→  // Fetch report data
+   166→  const fetchReport = useCallback(async () => {
+   167→    if (!reportType) return
+   168→    setLoading(true)
+   169→    try {
+   170→      const params = new URLSearchParams()
+   171→      if (dateFrom) params.set('dateFrom', dateFrom)
+   172→      if (dateTo) params.set('dateTo', dateTo)
+   173→      if (categoryId) params.set('categoryId', categoryId)
+   174→      if (departmentId) params.set('departmentId', departmentId)
+   175→      if (projectId) params.set('projectId', projectId)
+   176→      if (status) params.set('status', status)
+   177→      if (productId) params.set('productId', productId)
+   178→      if (supplierId) params.set('supplierId', supplierId)
+   179→
+   180→      const res = await fetch(`/api/reports/${reportType}?${params}`)
+   181→      if (res.ok) {
+   182→        const json = await res.json()
+   183→        setData(json.data || [])
+   184→        setSummary(json.summary || {})
+   185→      } else {
+   186→        const json = await res.json()
+   187→        toast.error(json.error || 'Failed to load report')
+   188→      }
+   189→    } catch {
+   190→      toast.error('Network error')
+   191→    } finally {
+   192→      setLoading(false)
+   193→    }
+   194→  }, [reportType, dateFrom, dateTo, categoryId, departmentId, projectId, status, productId, supplierId])
+   195→
+   196→  useEffect(() => {
+   197→    fetchReport()
+   198→  }, [fetchReport])
+   199→
+   200→  function clearFilters() {
+   201→    setDateFrom('')
+   202→    setDateTo('')
+   203→    setCategoryId('')
+   204→    setDepartmentId('')
+   205→    setProjectId('')
+   206→    setStatus('')
+   207→    setProductId('')
+   208→    setSupplierId('')
+   209→  }
+   210→
+   211→  const hasFilters = dateFrom || dateTo || categoryId || departmentId || projectId || status || productId || supplierId
+   212→
+   213→  // Export CSV
+   214→  async function handleExport() {
+   215→    setExporting(true)
+   216→    try {
+   217→      const params = new URLSearchParams({ reportType })
+   218→      if (dateFrom) params.set('dateFrom', dateFrom)
+   219→      if (dateTo) params.set('dateTo', dateTo)
+   220→      if (categoryId) params.set('categoryId', categoryId)
+   221→      if (departmentId) params.set('departmentId', departmentId)
+   222→      if (projectId) params.set('projectId', projectId)
+   223→      if (status) params.set('status', status)
+   224→      if (productId) params.set('productId', productId)
+   225→      if (supplierId) params.set('supplierId', supplierId)
+   226→
+   227→      const res = await fetch(`/api/reports/export/excel?${params}`)
+   228→      if (!res.ok) {
+   229→        toast.error('Export failed')
+   230→        return
+   231→      }
+   232→      const blob = await res.blob()
+   233→      const url = URL.createObjectURL(blob)
+   234→      const a = document.createElement('a')
+   235→      a.href = url
+   236→      const disposition = res.headers.get('Content-Disposition')
+   237→      const filename = disposition
+   238→        ? disposition.split('filename=')[1]?.replace(/"/g, '')
+   239→        : `${reportType}.csv`
+   240→      a.download = filename
+   241→      document.body.appendChild(a)
+   242→      a.click()
+   243→      document.body.removeChild(a)
+   244→      URL.revokeObjectURL(url)
+   245→      toast.success('Report exported successfully')
+   246→    } catch {
+   247→      toast.error('Export failed')
+   248→    } finally {
+   249→      setExporting(false)
+   250→    }
+   251→  }
+   252→
+   253→  // Build stat cards based on report type
+   254→  function getStatCards(): StatCard[] {
+   255→    switch (reportType) {
+   256→      case 'inventory-summary':
+   257→        return [
+   258→          { label: 'Total Products', value: summary.totalProducts ?? 0, icon: Package, color: 'text-sky-600 bg-sky-50 dark:bg-sky-950/30' },
+   259→          { label: 'Total Available', value: (summary.totalAvailable ?? 0).toLocaleString(), icon: BoxIcon, color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30' },
+   260→          { label: 'Total Value', value: formatCurrency(summary.totalValue ?? 0), icon: DollarSign, color: 'text-amber-600 bg-amber-50 dark:bg-amber-950/30' },
+   261→          { label: 'Low Stock Items', value: summary.lowStockCount ?? 0, icon: AlertTriangle, color: 'text-red-600 bg-red-50 dark:bg-red-950/30' },
+   262→        ]
+   263→      case 'inventory-ledger':
+   264→        return [
+   265→          { label: 'Products', value: (data as Array<{ productId: string }>).length, icon: Package, color: 'text-sky-600 bg-sky-50 dark:bg-sky-950/30' },
+   266→          { label: 'Total Transactions', value: (data as Array<{ transactions: unknown[] }>).reduce((s: number, d: { transactions: unknown[] }) => s + d.transactions.length, 0), icon: TrendingUp, color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30' },
+   267→        ]
+   268→      case 'goods-received':
+   269→        return [
+   270→          { label: 'Total Records', value: summary.totalRecords ?? 0, icon: PackageCheck, color: 'text-sky-600 bg-sky-50 dark:bg-sky-950/30' },
+   271→          { label: 'Total Quantity', value: (summary.totalQuantity ?? 0).toLocaleString(), icon: TrendingUp, color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30' },
+   272→          { label: 'Total Value', value: formatCurrency(summary.totalValue ?? 0), icon: DollarSign, color: 'text-amber-600 bg-amber-50 dark:bg-amber-950/30' },
+   273→        ]
+   274→      case 'goods-issued':
+   275→        return [
+   276→          { label: 'Total Records', value: summary.totalRecords ?? 0, icon: ArrowUpFromLine, color: 'text-orange-600 bg-orange-50 dark:bg-orange-950/30' },
+   277→          { label: 'Total Issued', value: (summary.totalIssued ?? 0).toLocaleString(), icon: TrendingUp, color: 'text-sky-600 bg-sky-50 dark:bg-sky-950/30' },
+   278→          { label: 'Products', value: summary.uniqueProducts ?? 0, icon: Package, color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30' },
+   279→          { label: 'Departments', value: summary.uniqueDepartments ?? 0, icon: Building2, color: 'text-violet-600 bg-violet-50 dark:bg-violet-950/30' },
+   280→        ]
+   281→      case 'department-usage':
+   282→        return [
+   283→          { label: 'Departments', value: summary.totalDepartments ?? 0, icon: Building2, color: 'text-violet-600 bg-violet-50 dark:bg-violet-950/30' },
+   284→          { label: 'Total Issued', value: (summary.totalIssued ?? 0).toLocaleString(), icon: TrendingUp, color: 'text-sky-600 bg-sky-50 dark:bg-sky-950/30' },
+   285→          { label: 'Total Returned', value: (summary.totalReturned ?? 0).toLocaleString(), icon: TrendingDown, color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30' },
+   286→          { label: 'Net Usage', value: (summary.netUsage ?? 0).toLocaleString(), icon: BarChart3, color: 'text-amber-600 bg-amber-50 dark:bg-amber-950/30' },
+   287→        ]
+   288→      case 'project-usage':
+   289→        return [
+   290→          { label: 'Projects', value: summary.totalProjects ?? 0, icon: FolderKanban, color: 'text-pink-600 bg-pink-50 dark:bg-pink-950/30' },
+   291→          { label: 'Total Issued', value: (summary.totalIssued ?? 0).toLocaleString(), icon: TrendingUp, color: 'text-sky-600 bg-sky-50 dark:bg-sky-950/30' },
+   292→          { label: 'Total Returned', value: (summary.totalReturned ?? 0).toLocaleString(), icon: TrendingDown, color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30' },
+   293→          { label: 'Total Reserved', value: (summary.totalReserved ?? 0).toLocaleString(), icon: Lock, color: 'text-amber-600 bg-amber-50 dark:bg-amber-950/30' },
+   294→        ]
+   295→      case 'reserved-inventory':
+   296→        return [
+   297→          { label: 'Reservations', value: summary.totalRecords ?? 0, icon: Lock, color: 'text-amber-600 bg-amber-50 dark:bg-amber-950/30' },
+   298→          { label: 'Total Reserved', value: (summary.totalReserved ?? 0).toLocaleString(), icon: TrendingUp, color: 'text-sky-600 bg-sky-50 dark:bg-sky-950/30' },
+   299→          { label: 'Products', value: summary.uniqueProducts ?? 0, icon: Package, color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30' },
+   300→          { label: 'Projects', value: summary.uniqueProjects ?? 0, icon: FolderKanban, color: 'text-pink-600 bg-pink-50 dark:bg-pink-950/30' },
+   301→        ]
+   302→      case 'low-stock':
+   303→        return [
+   304→          { label: 'Low Stock Items', value: summary.totalLowStock ?? 0, icon: AlertTriangle, color: 'text-red-600 bg-red-50 dark:bg-red-950/30' },
+   305→          { label: 'Out of Stock', value: summary.outOfStockCount ?? 0, icon: AlertTriangle, color: 'text-orange-600 bg-orange-50 dark:bg-orange-950/30' },
+   306→          { label: 'Total Deficit', value: (summary.totalDeficit ?? 0).toLocaleString(), icon: TrendingDown, color: 'text-sky-600 bg-sky-50 dark:bg-sky-950/30' },
+   307→          { label: 'Value at Risk', value: formatCurrency(summary.totalValueAtRisk ?? 0), icon: DollarSign, color: 'text-amber-600 bg-amber-50 dark:bg-amber-950/30' },
+   308→        ]
+   309→      default:
+   310→        return []
+   311→    }
+   312→  }
+   313→
+   314→  // Import icons used in stat cards
+   315→  const { PackageCheck, ArrowUpFromLine, Lock } = require('lucide-react')
+   316→
+   317→  function renderTable() {
+   318→    if (loading) {
+   319→      return (
+   320→        <div className="rounded-lg border">
+   321→          <Table>
+   322→            <TableHeader>
+   323→              <TableRow>
+   324→                {Array.from({ length: 6 }).map((_, i) => (
+   325→                  <TableHead key={i}><Skeleton className="h-4 w-24" /></TableHead>
+   326→                ))}
+   327→              </TableRow>
+   328→            </TableHeader>
+   329→            <TableBody>
+   330→              {Array.from({ length: 5 }).map((_, i) => (
+   331→                <TableRow key={i}>
+   332→                  {Array.from({ length: 6 }).map((_, j) => (
+   333→                    <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
+   334→                  ))}
+   335→                </TableRow>
+   336→              ))}
+   337→            </TableBody>
+   338→          </Table>
+   339→        </div>
+   340→      )
+   341→    }
+   342→
+   343→    if (data.length === 0) {
+   344→      return (
+   345→        <div className="rounded-lg border">
+   346→          <div className="flex flex-col items-center justify-center py-16">
+   347→            <BarChart3 className="size-12 text-muted-foreground/50 mb-4" />
+   348→            <p className="text-lg font-medium">No data found</p>
+   349→            <p className="text-sm text-muted-foreground mt-1">
+   350→              {hasFilters ? 'Try adjusting your filters.' : 'No records match this report.'}
+   351→            </p>
+   352→          </div>
+   353→        </div>
+   354→      )
+   355→    }
+   356→
+   357→    switch (reportType) {
+   358→      case 'inventory-summary': return renderInventorySummary()
+   359→      case 'inventory-ledger': return renderInventoryLedger()
+   360→      case 'goods-received': return renderGoodsReceived()
+   361→      case 'goods-issued': return renderGoodsIssued()
+   362→      case 'department-usage': return renderDepartmentUsage()
+   363→      case 'project-usage': return renderProjectUsage()
+   364→      case 'reserved-inventory': return renderReservedInventory()
+   365→      case 'low-stock': return renderLowStock()
+   366→      default:
+   367→        return <p className="text-sm text-muted-foreground py-8 text-center">Unknown report type</p>
+   368→    }
+   369→  }
+   370→
+   371→  function renderInventorySummary() {
+   372→    const rows = data as Array<Record<string, unknown>>
+   373→    return (
+   374→      <div className="rounded-lg border overflow-auto max-h-[600px]">
+   375→        <Table>
+   376→          <TableHeader>
+   377→            <TableRow>
+   378→              <TableHead>Product</TableHead>
+   379→              <TableHead className="hidden md:table-cell">Category</TableHead>
+   380→              <TableHead className="hidden lg:table-cell">Supplier</TableHead>
+   381→              <TableHead className="text-center">Opening</TableHead>
+   382→              <TableHead className="text-center">Received</TableHead>
+   383→              <TableHead className="text-center">Issued</TableHead>
+   384→              <TableHead className="text-center">Returned</TableHead>
+   385→              <TableHead className="text-center">Reserved</TableHead>
+   386→              <TableHead className="text-center font-semibold">Available</TableHead>
+   387→              <TableHead className="hidden sm:table-cell text-right">Unit Cost</TableHead>
+   388→              <TableHead className="text-right font-semibold">Total Value</TableHead>
+   389→              <TableHead className="hidden lg:table-cell text-center">Status</TableHead>
+   390→            </TableRow>
+   391→          </TableHeader>
+   392→          <TableBody>
+   393→            {rows.map((row) => (
+   394→              <TableRow key={row.id as string}>
+   395→                <TableCell>
+   396→                  <div>
+   397→                    <p className="font-medium text-sm max-w-[180px] truncate">{row.name as string}</p>
+   398→                    <p className="text-xs text-muted-foreground font-mono">{row.code as string}</p>
+   399→                  </div>
+   400→                </TableCell>
+   401→                <TableCell className="hidden md:table-cell text-sm">{row.category as string || '—'}</TableCell>
+   402→                <TableCell className="hidden lg:table-cell text-sm">{row.supplier as string || '—'}</TableCell>
+   403→                <TableCell className="text-center text-sm">{row.opening as number}</TableCell>
+   404→                <TableCell className="text-center text-sm text-emerald-600">{row.received as number}</TableCell>
+   405→                <TableCell className="text-center text-sm text-orange-600">{row.issued as number}</TableCell>
+   406→                <TableCell className="text-center text-sm text-sky-600">{row.returned as number}</TableCell>
+   407→                <TableCell className="text-center text-sm text-amber-600">{row.reserved as number}</TableCell>
+   408→                <TableCell className="text-center font-semibold">
+   409→                  <span className={((row.available as number) <= 0) ? 'text-red-600' : (row.isLowStock as boolean) ? 'text-amber-600' : ''}>
+   410→                    {Math.max(0, row.available as number)}
+   411→                  </span>
+   412→                </TableCell>
+   413→                <TableCell className="hidden sm:table-cell text-right text-sm">{formatCurrency(row.unitCost as number)}</TableCell>
+   414→                <TableCell className="text-right text-sm font-semibold">{formatCurrency(row.totalValue as number)}</TableCell>
+   415→                <TableCell className="hidden lg:table-cell text-center">
+   416→                  {(row.isLowStock as boolean) ? (
+   417→                    <Badge variant={(row.available as number) <= 0 ? 'destructive' : 'secondary'} className="text-[10px]">
+   418→                      {(row.available as number) <= 0 ? 'Out of Stock' : 'Low Stock'}
+   419→                    </Badge>
+   420→                  ) : (
+   421→                    <Badge variant="outline" className="text-[10px] text-emerald-600">Healthy</Badge>
+   422→                  )}
+   423→                </TableCell>
+   424→              </TableRow>
+   425→            ))}
+   426→          </TableBody>
+   427→        </Table>
+   428→      </div>
+   429→    )
+   430→  }
+   431→
+   432→  function renderInventoryLedger() {
+   433→    const groups = data as Array<{
+   434→      productId: string
+   435→      product: { name: string; code: string; sku: string; unit: string }
+   436→      transactions: Array<{
+   437→        id: string; type: string; quantity: number; unitCost: number | null
+   438→        reference: string | null; remarks: string | null; date: string; runningBalance: number
+   439→      }>
+   440→    }>
+   441→    return (
+   442→      <div className="space-y-6">
+   443→        {groups.map((group) => (
+   444→          <div key={group.productId} className="rounded-lg border">
+   445→            <div className="px-4 py-3 border-b bg-muted/30">
+   446→              <div className="flex items-center gap-3">
+   447→                <Package className="size-4 text-muted-foreground" />
+   448→                <div>
+   449→                  <p className="font-semibold text-sm">{group.product.name}</p>
+   450→                  <p className="text-xs text-muted-foreground font-mono">{group.product.code} · {group.product.sku} · {group.product.unit}</p>
+   451→                </div>
+   452→              </div>
+   453→            </div>
+   454→            <div className="overflow-auto max-h-96">
+   455→              <Table>
+   456→                <TableHeader>
+   457→                  <TableRow>
+   458→                    <TableHead>Date</TableHead>
+   459→                    <TableHead>Type</TableHead>
+   460→                    <TableHead className="text-center">Qty In</TableHead>
+   461→                    <TableHead className="text-center">Qty Out</TableHead>
+   462→                    <TableHead className="hidden sm:table-cell">Reference</TableHead>
+   463→                    <TableHead className="hidden md:table-cell">Remarks</TableHead>
+   464→                    <TableHead className="text-right font-semibold">Balance</TableHead>
+   465→                  </TableRow>
+   466→                </TableHeader>
+   467→                <TableBody>
+   468→                  {group.transactions.map((tx) => {
+   469→                    const isIn = ['OPENING_STOCK', 'GOODS_RECEIVED', 'RETURNED', 'ADJUSTMENT_IN'].includes(tx.type)
+   470→                    return (
+   471→                      <TableRow key={tx.id}>
+   472→                        <TableCell className="text-sm whitespace-nowrap">{format(new Date(tx.date), 'MMM dd, yyyy')}</TableCell>
+   473→                        <TableCell>
+   474→                          <Badge variant="outline" className="text-[10px] whitespace-nowrap">
+   475→                            {tx.type.replace(/_/g, ' ')}
+   476→                          </Badge>
+   477→                        </TableCell>
+   478→                        <TableCell className={`text-center text-sm font-medium ${isIn ? 'text-emerald-600' : ''}`}>{isIn ? tx.quantity : ''}</TableCell>
+   479→                        <TableCell className={`text-center text-sm font-medium ${!isIn ? 'text-orange-600' : ''}`}>{!isIn ? tx.quantity : ''}</TableCell>
+   480→                        <TableCell className="hidden sm:table-cell text-sm font-mono text-muted-foreground">{tx.reference || '—'}</TableCell>
+   481→                        <TableCell className="hidden md:table-cell text-sm text-muted-foreground max-w-[200px] truncate">{tx.remarks || '—'}</TableCell>
+   482→                        <TableCell className={`text-right text-sm font-semibold ${tx.runningBalance < 0 ? 'text-red-600' : ''}`}>
+   483→                          {tx.runningBalance}
+   484→                        </TableCell>
+   485→                      </TableRow>
+   486→                    )
+   487→                  })}
+   488→                </TableBody>
+   489→              </Table>
+   490→            </div>
+   491→          </div>
+   492→        ))}
+   493→      </div>
+   494→    )
+   495→  }
+   496→
+   497→  function renderGoodsReceived() {
+   498→    const rows = data as Array<Record<string, unknown>>
+   499→    return (
+   500→      <div className="rounded-lg border overflow-auto max-h-[600px]">
+   501→        <Table>
+   502→          <TableHeader>
+   503→            <TableRow>
+   504→              <TableHead>Date</TableHead>
+   505→              <TableHead>Product</TableHead>
+   506→              <TableHead className="hidden md:table-cell">Supplier</TableHead>
+   507→              <TableHead className="hidden lg:table-cell">Invoice #</TableHead>
+   508→              <TableHead className="text-center">Qty</TableHead>
+   509→              <TableHead className="hidden sm:table-cell text-right">Unit Cost</TableHead>
+   510→              <TableHead className="text-right font-semibold">Total Cost</TableHead>
+   511→              <TableHead className="hidden lg:table-cell">Received By</TableHead>
+   512→            </TableRow>
+   513→          </TableHeader>
+   514→          <TableBody>
+   515→            {rows.map((row) => {
+   516→              const product = row.product as { name: string; code: string; unit: string }
+   517→              const supplier = row.supplier as { name: string } | null
+   518→              const receivedByUser = row.receivedByUser as { name: string }
+   519→              return (
+   520→                <TableRow key={row.id as string}>
+   521→                  <TableCell className="text-sm whitespace-nowrap">{format(new Date(row.date as string), 'MMM dd, yyyy')}</TableCell>
+   522→                  <TableCell>
+   523→                    <p className="font-medium text-sm max-w-[180px] truncate">{product.name}</p>
+   524→                    <p className="text-xs text-muted-foreground font-mono">{product.code}</p>
+   525→                  </TableCell>
+   526→                  <TableCell className="hidden md:table-cell text-sm">{supplier?.name || '—'}</TableCell>
+   527→                  <TableCell className="hidden lg:table-cell text-sm font-mono">{(row.invoiceNumber as string) || '—'}</TableCell>
+   528→                  <TableCell className="text-center font-medium text-sm">{row.quantity as number} {product.unit}</TableCell>
+   529→                  <TableCell className="hidden sm:table-cell text-right text-sm">{formatCurrency(row.unitCost as number)}</TableCell>
+   530→                  <TableCell className="text-right font-semibold text-sm">{formatCurrency(row.totalCost as number)}</TableCell>
+   531→                  <TableCell className="hidden lg:table-cell text-sm">{receivedByUser.name}</TableCell>
+   532→                </TableRow>
+   533→              )
+   534→            })}
+   535→          </TableBody>
+   536→        </Table>
+   537→      </div>
+   538→    )
+   539→  }
+   540→
+   541→  function renderGoodsIssued() {
+   542→    const rows = data as Array<Record<string, unknown>>
+   543→    return (
+   544→      <div className="rounded-lg border overflow-auto max-h-[600px]">
+   545→        <Table>
+   546→          <TableHeader>
+   547→            <TableRow>
+   548→              <TableHead>Date</TableHead>
+   549→              <TableHead>Product</TableHead>
+   550→              <TableHead className="hidden sm:table-cell">Department</TableHead>
+   551→              <TableHead className="hidden md:table-cell">Project</TableHead>
+   552→              <TableHead className="hidden lg:table-cell">Employee</TableHead>
+   553→              <TableHead className="text-center">Qty</TableHead>
+   554→              <TableHead className="hidden lg:table-cell">Issued By</TableHead>
+   555→            </TableRow>
+   556→          </TableHeader>
+   557→          <TableBody>
+   558→            {rows.map((row) => {
+   559→              const product = row.product as { name: string; code: string; unit: string }
+   560→              const department = row.department as { name: string }
+   561→              const project = row.project as { name: string }
+   562→              const issuedByUser = row.issuedByUser as { name: string }
+   563→              return (
+   564→                <TableRow key={row.id as string}>
+   565→                  <TableCell className="text-sm whitespace-nowrap">{format(new Date(row.date as string), 'MMM dd, yyyy')}</TableCell>
+   566→                  <TableCell>
+   567→                    <p className="font-medium text-sm max-w-[180px] truncate">{product.name}</p>
+   568→                    <p className="text-xs text-muted-foreground font-mono">{product.code}</p>
+   569→                  </TableCell>
+   570→                  <TableCell className="hidden sm:table-cell text-sm">{department.name}</TableCell>
+   571→                  <TableCell className="hidden md:table-cell text-sm">{project.name}</TableCell>
+   572→                  <TableCell className="hidden lg:table-cell text-sm">{row.employeeName as string}</TableCell>
+   573→                  <TableCell className="text-center font-medium text-sm">{row.quantity as number} {product.unit}</TableCell>
+   574→                  <TableCell className="hidden lg:table-cell text-sm">{issuedByUser.name}</TableCell>
+   575→                </TableRow>
+   576→              )
+   577→            })}
+   578→          </TableBody>
+   579→        </Table>
+   580→      </div>
+   581→    )
+   582→  }
+   583→
+   584→  function renderDepartmentUsage() {
+   585→    const rows = data as Array<Record<string, unknown>>
+   586→    return (
+   587→      <div className="rounded-lg border overflow-auto max-h-[600px]">
+   588→        <Table>
+   589→          <TableHeader>
+   590→            <TableRow>
+   591→              <TableHead>Department</TableHead>
+   592→              <TableHead className="hidden sm:table-cell">Code</TableHead>
+   593→              <TableHead className="text-center">Total Issued</TableHead>
+   594→              <TableHead className="hidden sm:table-cell text-center">Issue Count</TableHead>
+   595→              <TableHead className="text-center">Total Returned</TableHead>
+   596→              <TableHead className="hidden sm:table-cell text-center">Return Count</TableHead>
+   597→              <TableHead className="text-right font-semibold">Net Usage</TableHead>
+   598→            </TableRow>
+   599→          </TableHeader>
+   600→          <TableBody>
+   601→            {rows.map((row, idx) => (
+   602→              <TableRow key={idx}>
+   603→                <TableCell className="font-medium text-sm">{row.departmentName as string}</TableCell>
+   604→                <TableCell className="hidden sm:table-cell text-sm font-mono text-muted-foreground">{row.departmentCode as string}</TableCell>
+   605→                <TableCell className="text-center text-sm font-medium text-orange-600">{(row.totalIssued as number).toLocaleString()}</TableCell>
+   606→                <TableCell className="hidden sm:table-cell text-center text-sm text-muted-foreground">{row.issueCount as number}</TableCell>
+   607→                <TableCell className="text-center text-sm font-medium text-emerald-600">{(row.totalReturned as number).toLocaleString()}</TableCell>
+   608→                <TableCell className="hidden sm:table-cell text-center text-sm text-muted-foreground">{row.returnCount as number}</TableCell>
+   609→                <TableCell className={`text-right font-semibold text-sm ${(row.netUsage as number) > 0 ? '' : 'text-emerald-600'}`}>
+   610→                  {(row.netUsage as number).toLocaleString()}
+   611→                </TableCell>
+   612→              </TableRow>
+   613→            ))}
+   614→          </TableBody>
+   615→        </Table>
+   616→      </div>
+   617→    )
+   618→  }
+   619→
+   620→  function renderProjectUsage() {
+   621→    const rows = data as Array<Record<string, unknown>>
+   622→    return (
+   623→      <div className="rounded-lg border overflow-auto max-h-[600px]">
+   624→        <Table>
+   625→          <TableHeader>
+   626→            <TableRow>
+   627→              <TableHead>Project</TableHead>
+   628→              <TableHead className="hidden sm:table-cell">Department</TableHead>
+   629→              <TableHead className="hidden lg:table-cell">Status</TableHead>
+   630→              <TableHead className="text-center">Total Issued</TableHead>
+   631→              <TableHead className="text-center">Total Returned</TableHead>
+   632→              <TableHead className="text-center">Reserved</TableHead>
+   633→              <TableHead className="text-right font-semibold">Net Usage</TableHead>
+   634→            </TableRow>
+   635→          </TableHeader>
+   636→          <TableBody>
+   637→            {rows.map((row, idx) => (
+   638→              <TableRow key={idx}>
+   639→                <TableCell>
+   640→                  <p className="font-medium text-sm max-w-[180px] truncate">{row.projectName as string}</p>
+   641→                  <p className="text-xs text-muted-foreground font-mono">{row.projectCode as string}</p>
+   642→                </TableCell>
+   643→                <TableCell className="hidden sm:table-cell text-sm">{row.departmentName as string || '—'}</TableCell>
+   644→                <TableCell className="hidden lg:table-cell">
+   645→                  <Badge variant="outline" className="text-[10px]">{row.projectStatus as string}</Badge>
+   646→                </TableCell>
+   647→                <TableCell className="text-center text-sm font-medium text-orange-600">{(row.totalIssued as number).toLocaleString()}</TableCell>
+   648→                <TableCell className="text-center text-sm font-medium text-emerald-600">{(row.totalReturned as number).toLocaleString()}</TableCell>
+   649→                <TableCell className="text-center text-sm font-medium text-amber-600">{(row.totalReserved as number).toLocaleString()}</TableCell>
+   650→                <TableCell className={`text-right font-semibold text-sm ${(row.netUsage as number) > 0 ? '' : 'text-emerald-600'}`}>
+   651→                  {(row.netUsage as number).toLocaleString()}
+   652→                </TableCell>
+   653→              </TableRow>
+   654→            ))}
+   655→          </TableBody>
+   656→        </Table>
+   657→      </div>
+   658→    )
+   659→  }
+   660→
+   661→  function renderReservedInventory() {
+   662→    const rows = data as Array<Record<string, unknown>>
+   663→    return (
+   664→      <div className="rounded-lg border overflow-auto max-h-[600px]">
+   665→        <Table>
+   666→          <TableHeader>
+   667→            <TableRow>
+   668→              <TableHead>Product</TableHead>
+   669→              <TableHead className="hidden sm:table-cell">Project</TableHead>
+   670→              <TableHead className="hidden md:table-cell">Department</TableHead>
+   671→              <TableHead className="text-center">Quantity</TableHead>
+   672→              <TableHead className="hidden lg:table-cell">Reason</TableHead>
+   673→              <TableHead className="hidden sm:table-cell">Reserved By</TableHead>
+   674→              <TableHead className="hidden lg:table-cell">Date</TableHead>
+   675→            </TableRow>
+   676→          </TableHeader>
+   677→          <TableBody>
+   678→            {rows.map((row) => {
+   679→              const product = row.product as { name: string; code: string; unit: string }
+   680→              const project = row.project as { name: string; code: string; department: { name: string } }
+   681→              const reservedByUser = row.reservedByUser as { name: string }
+   682→              return (
+   683→                <TableRow key={row.id as string}>
+   684→                  <TableCell>
+   685→                    <p className="font-medium text-sm max-w-[180px] truncate">{product.name}</p>
+   686→                    <p className="text-xs text-muted-foreground font-mono">{product.code}</p>
+   687→                  </TableCell>
+   688→                  <TableCell className="hidden sm:table-cell text-sm">
+   689→                    <p>{project.name}</p>
+   690→                    <p className="text-xs text-muted-foreground font-mono">{project.code}</p>
+   691→                  </TableCell>
+   692→                  <TableCell className="hidden md:table-cell text-sm">{project.department.name}</TableCell>
+   693→                  <TableCell className="text-center font-medium text-sm">{row.quantity as number} {product.unit}</TableCell>
+   694→                  <TableCell className="hidden lg:table-cell text-sm text-muted-foreground max-w-[200px] truncate">{(row.reason as string) || '—'}</TableCell>
+   695→                  <TableCell className="hidden sm:table-cell text-sm">{reservedByUser.name}</TableCell>
+   696→                  <TableCell className="hidden lg:table-cell text-sm">{format(new Date(row.createdAt as string), 'MMM dd, yyyy')}</TableCell>
+   697→                </TableRow>
+   698→              )
+   699→            })}
+   700→          </TableBody>
+   701→        </Table>
+   702→      </div>
+   703→    )
+   704→  }
+   705→
+   706→  function renderLowStock() {
+   707→    const rows = data as Array<Record<string, unknown>>
+   708→    return (
+   709→      <div className="rounded-lg border overflow-auto max-h-[600px]">
+   710→        <Table>
+   711→          <TableHeader>
+   712→            <TableRow>
+   713→              <TableHead>Product</TableHead>
+   714→              <TableHead className="hidden md:table-cell">Category</TableHead>
+   715→              <TableHead className="hidden lg:table-cell">Supplier</TableHead>
+   716→              <TableHead className="text-center">Min Stock</TableHead>
+   717→              <TableHead className="text-center font-semibold">Available</TableHead>
+   718→              <TableHead className="text-center font-semibold">Deficit</TableHead>
+   719→              <TableHead className="hidden sm:table-cell text-right">Unit Cost</TableHead>
+   720→              <TableHead className="text-right">Value</TableHead>
+   721→              <TableHead className="text-center">Status</TableHead>
+   722→            </TableRow>
+   723→          </TableHeader>
+   724→          <TableBody>
+   725→            {rows.map((row) => (
+   726→              <TableRow key={row.id as string} className={(row.isOutOfStock as boolean) ? 'bg-red-50/50 dark:bg-red-950/10' : ''}>
+   727→                <TableCell>
+   728→                  <p className="font-medium text-sm max-w-[180px] truncate">{row.name as string}</p>
+   729→                  <p className="text-xs text-muted-foreground font-mono">{row.code as string}</p>
+   730→                </TableCell>
+   731→                <TableCell className="hidden md:table-cell text-sm">{row.category as string || '—'}</TableCell>
+   732→                <TableCell className="hidden lg:table-cell text-sm">{row.supplier as string || '—'}</TableCell>
+   733→                <TableCell className="text-center text-sm">{row.minimumStock as number}</TableCell>
+   734→                <TableCell className="text-center font-semibold text-sm">
+   735→                  <span className={(row.available as number) <= 0 ? 'text-red-600' : 'text-amber-600'}>
+   736→                    {Math.max(0, row.available as number)}
+   737→                  </span>
+   738→                </TableCell>
+   739→                <TableCell className="text-center font-semibold text-sm text-red-600">
+   740→                  {(row.deficit as number) > 0 ? (row.deficit as number) : '0'}
+   741→                </TableCell>
+   742→                <TableCell className="hidden sm:table-cell text-right text-sm">{formatCurrency(row.unitCost as number)}</TableCell>
+   743→                <TableCell className="text-right text-sm">{formatCurrency(row.totalValue as number)}</TableCell>
+   744→                <TableCell className="text-center">
+   745→                  {(row.isOutOfStock as boolean) ? (
+   746→                    <Badge variant="destructive" className="text-[10px]">Out of Stock</Badge>
+   747→                  ) : (
+   748→                    <Badge variant="secondary" className="text-[10px] text-amber-600 bg-amber-50 dark:bg-amber-950/30">Low Stock</Badge>
+   749→                  )}
+   750→                </TableCell>
+   751→              </TableRow>
+   752→            ))}
+   753→          </TableBody>
+   754→        </Table>
+   755→      </div>
+   756→    )
+   757→  }
+   758→
+   759→  if (!reportType) return null
+   760→
+   761→  const canView = user ? hasPermission(user.role, 'reports', 'view') : false
+   762→  if (!canView) {
+   763→    return (
+   764→      <div className="space-y-6">
+   765→        <PageHeader title="Reports" description="Access denied" icon={BarChart3} />
+   766→        <div className="rounded-lg border">
+   767→          <div className="flex flex-col items-center justify-center py-16">
+   768→            <p className="text-lg font-medium">Access Denied</p>
+   769→            <p className="text-sm text-muted-foreground mt-1">You do not have permission to view reports.</p>
+   770→          </div>
+   771→        </div>
+   772→      </div>
+   773→    )
+   774→  }
+   775→
+   776→  const statCards = getStatCards()
+   777→
+   778→  return (
+   779→    <div className="space-y-6">
+   780→      <PageHeader
+   781→        title={reportLabel}
+   782→        description="View and export report data"
+   783→        icon={BarChart3}
+   784→      >
+   785→        <div className="flex items-center gap-2">
+   786→          <Button variant="outline" size="sm" onClick={() => navigate('reports')}>
+   787→            <ArrowLeft className="mr-2 size-4" />
+   788→            Back
+   789→          </Button>
+   790→          <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting || loading}>
+   791→            {exporting ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Download className="mr-2 size-4" />}
+   792→            Export CSV
+   793→          </Button>
+   794→        </div>
+   795→      </PageHeader>
+   796→
+   797→      {/* Summary stat cards */
+   798→      }
+   799→      {statCards.length > 0 && (
+   800→        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+   801→          {statCards.map((stat) => (
+   802→            <Card key={stat.label}>
+   803→              <CardContent className="p-4">
+   804→                <div className="flex items-center gap-3">
+   805→                  <div className={`inline-flex items-center justify-center size-9 rounded-lg ${stat.color}`}>
+   806→                    <stat.icon className="size-4" />
+   807→                  </div>
+   808→                  <div className="min-w-0">
+   809→                    <p className="text-xs text-muted-foreground truncate">{stat.label}</p>
+   810→                    <p className="text-lg font-bold leading-tight truncate">{stat.value}</p>
+   811→                  </div>
+   812→                </div>
+   813→              </CardContent>
+   814→            </Card>
+   815→          ))}
+   816→        </div>
+   817→      )}
+   818→
+   819→      {/* Filters */}
+   820→      {(showDateFilter || showCategoryFilter || showDepartmentFilter || showProjectFilter || showStatusFilter || showProductFilter || showSupplierFilter) && (
+   821→        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:flex-wrap">
+   822→          {showDateFilter && (
+   823→            <div className="flex items-center gap-2">
+   824→              <Input
+   825→                type="date"
+   826→                className="w-[140px]"
+   827→                value={dateFrom}
+   828→                onChange={(e) => setDateFrom(e.target.value)}
+   829→                placeholder="From"
+   830→              />
+   831→              <Input
+   832→                type="date"
+   833→                className="w-[140px]"
+   834→                value={dateTo}
+   835→                onChange={(e) => setDateTo(e.target.value)}
+   836→                placeholder="To"
+   837→              />
+   838→            </div>
+   839→          )}
+   840→          {showCategoryFilter && categories.length > 0 && (
+   841→            <Select value={categoryId} onValueChange={setCategoryId}>
+   842→              <SelectTrigger className="w-[160px]">
+   843→                <SelectValue placeholder="All Categories" />
+   844→              </SelectTrigger>
+   845→              <SelectContent>
+   846→                <SelectItem value="all">All Categories</SelectItem>
+   847→                {categories.map((c) => (
+   848→                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+   849→                ))}
+   850→              </SelectContent>
+   851→            </Select>
+   852→          )}
+   853→          {showStatusFilter && (
+   854→            <Select value={status} onValueChange={setStatus}>
+   855→              <SelectTrigger className="w-[140px]">
+   856→                <SelectValue placeholder="All Status" />
+   857→              </SelectTrigger>
+   858→              <SelectContent>
+   859→                <SelectItem value="all">All Status</SelectItem>
+   860→                <SelectItem value="ACTIVE">Active</SelectItem>
+   861→                <SelectItem value="INACTIVE">Inactive</SelectItem>
+   862→                <SelectItem value="DISCONTINUED">Discontinued</SelectItem>
+   863→              </SelectContent>
+   864→            </Select>
+   865→          )}
+   866→          {showDepartmentFilter && departments.length > 0 && (
+   867→            <Select value={departmentId} onValueChange={(v) => { setDepartmentId(v); setProjectId('') }}>
+   868→              <SelectTrigger className="w-[160px]">
+   869→                <SelectValue placeholder="All Departments" />
+   870→              </SelectTrigger>
+   871→              <SelectContent>
+   872→                <SelectItem value="all">All Departments</SelectItem>
+   873→                {departments.map((d) => (
+   874→                  <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+   875→                ))}
+   876→              </SelectContent>
+   877→            </Select>
+   878→          )}
+   879→          {showProjectFilter && projects.length > 0 && (
+   880→            <Select value={projectId} onValueChange={setProjectId}>
+   881→              <SelectTrigger className="w-[160px]">
+   882→                <SelectValue placeholder="All Projects" />
+   883→              </SelectTrigger>
+   884→              <SelectContent>
+   885→                <SelectItem value="all">All Projects</SelectItem>
+   886→                {projects
+   887→                  .filter((p) => !departmentId || departmentId === 'all')
+   888→                  .map((p) => (
+   889→                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+   890→                  ))}
+   891→              </SelectContent>
+   892→            </Select>
+   893→          )}
+   894→          {showProductFilter && products.length > 0 && (
+   895→            <Select value={productId} onValueChange={setProductId}>
+   896→              <SelectTrigger className="w-[200px]">
+   897→                <SelectValue placeholder="All Products" />
+   898→              </SelectTrigger>
+   899→              <SelectContent className="max-h-64">
+   900→                <SelectItem value="all">All Products</SelectItem>
+   901→                {products.map((p) => (
+   902→                  <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+   903→                ))}
+   904→              </SelectContent>
+   905→            </Select>
+   906→          )}
+   907→          {showSupplierFilter && suppliers.length > 0 && (
+   908→            <Select value={supplierId} onValueChange={setSupplierId}>
+   909→              <SelectTrigger className="w-[160px]">
+   910→                <SelectValue placeholder="All Suppliers" />
+   911→              </SelectTrigger>
+   912→              <SelectContent className="max-h-64">
+   913→                <SelectItem value="all">All Suppliers</SelectItem>
+   914→                {suppliers.map((s) => (
+   915→                  <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+   916→                ))}
+   917→              </SelectContent>
+   918→            </Select>
+   919→          )}
+   920→          {hasFilters && (
+   921→            <Button variant="ghost" size="icon" className="size-8" onClick={clearFilters}>
+   922→              <X className="size-4" />
+   923→            </Button>
+   924→          )}
+   925→        </div>
+   926→      )}
+   927→
+   928→      {/* Table */}
+   929→      {renderTable()}
+   930→    </div>
+   931→  )
+   932→}
+   933→
+   934→// Need to import these for JSX usage
+   935→import { PackageCheck, ArrowUpFromLine, Lock } from 'lucide-react'
+   936→
