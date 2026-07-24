@@ -10,6 +10,33 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Package } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 
+const MAX_RETRIES = 3
+const RETRY_DELAY_MS = 2000
+
+async function fetchWithRetry(url: string, options: RequestInit, retries = MAX_RETRIES): Promise<Response> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(url, { ...options, signal: AbortSignal.timeout(15000) })
+      // If we got a valid HTTP response (even 4xx), return it
+      if (res.status < 500) return res
+      // 5xx server error — retry
+      if (attempt < retries) {
+        await new Promise(r => setTimeout(r, RETRY_DELAY_MS * (attempt + 1)))
+        continue
+      }
+      return res
+    } catch (err) {
+      // Network error or timeout — retry
+      if (attempt < retries) {
+        await new Promise(r => setTimeout(r, RETRY_DELAY_MS * (attempt + 1)))
+        continue
+      }
+      throw err
+    }
+  }
+  throw new Error("Max retries exceeded")
+}
+
 export function LoginForm() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -24,7 +51,7 @@ export function LoginForm() {
     setIsLoading(true)
 
     try {
-      const res = await fetch("/api/auth/login", {
+      const res = await fetchWithRetry("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
@@ -41,7 +68,7 @@ export function LoginForm() {
       router.push("/")
       router.refresh()
     } catch {
-      setError("An unexpected error occurred")
+      setError("An unexpected error occurred. The server may be starting up — please try again.")
     } finally {
       setIsLoading(false)
     }
@@ -105,7 +132,7 @@ export function LoginForm() {
                 {isLoading ? (
                   <div className="flex items-center gap-2">
                     <div className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                    Signing in...
+                    Signing in{isLoading ? "..." : ""}
                   </div>
                 ) : (
                   "Sign In"
