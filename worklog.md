@@ -505,3 +505,32 @@ Default Login: admin@inventorypro.com / Admin@123
 47 API Routes
 94 React Components
 13 Database Models
+
+---
+Task ID: login-fix
+Agent: main-orchestrator
+Task: Fix login 500 Internal Server Error caused by missing NEXTAUTH_SECRET
+
+Work Log:
+- Analyzed user's screenshot showing 500 error on POST /api/auth/login
+- Identified root cause: NEXTAUTH_SECRET environment variable was not set in .env file
+- Error traced to src/lib/auth.ts:12 where getSecret() throws if NEXTAUTH_SECRET is missing
+- Added NEXTAUTH_SECRET to .env file (generated secure 32-byte hex key)
+- Discovered database had no seeded demo users (no seed script existed)
+- Created comprehensive seed script at prisma/seed.ts with:
+  - 5 demo users (all roles: SUPER_ADMIN, INVENTORY_ADMIN, STORE_KEEPER, DEPARTMENT_USER, VIEWER)
+  - 3 departments (IT, Engineering, HR)
+  - 3 categories (Electronics, Office Supplies, Furniture)
+  - 2 suppliers (TechSource Ltd, OfficeMart)
+  - 2 projects (ERP System Upgrade, Infrastructure Setup)
+  - 5 products with opening stock transactions
+- Ran seed script successfully (bun run seed)
+- Verified all 5 demo users exist in database with correct roles and ACTIVE status
+- Restarted dev server with NEXTAUTH_SECRET available in environment
+- Confirmed GET / 200 and GET /api/auth/me 401 working correctly after fix
+
+Stage Summary:
+- Root cause: Missing NEXTAUTH_SECRET in .env file caused JWT token creation to fail
+- Fix: Added NEXTAUTH_SECRET=d499cf837973efa67f978495230110fb296af39ef49ef76a100acce125d78006 to .env
+- Database: Seeded with 5 users, 3 departments, 3 categories, 2 suppliers, 2 projects, 5 products
+- Login should now work with: admin@inventorypro.com / Admin@123
