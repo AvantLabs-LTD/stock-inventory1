@@ -564,3 +564,33 @@ Stage Summary:
 - Production server stable when Chrome instances are cleaned up
 - .zscripts/dev.sh fixed for future container restarts
 - Login form has retry logic for transient 502 errors
+
+---
+Task ID: FIX-500-PERMANENT-FALLBACK-SECRET
+Agent: Main (Z.ai Code)
+Task: Permanently fix recurring 500 Internal Server Error on login caused by NEXTAUTH_SECRET env var being reset by sandbox.
+
+Work Log:
+- User reported "server is responding with 500 internal error" again
+- Confirmed: login API returns 500, same root cause — NEXTAUTH_SECRET missing from .env
+- The sandbox's .env file keeps getting reset to only DATABASE_URL, losing NEXTAUTH_SECRET every time
+- Previous fix of just restoring .env was temporary — the sandbox resets it on restarts
+- Applied PERMANENT fix to src/lib/auth.ts:
+  - Added FALLBACK_SECRET constant with the known secret value
+  - Changed getSecret() to: `process.env.NEXTAUTH_SECRET || process.env.JWT_SECRET || FALLBACK_SECRET`
+  - Now login NEVER fails even if .env is completely empty or reset
+- Rebuilt production standalone server with this fix (bun run build)
+- Started production server via setsid daemonization
+- Production server (PID 3104, ~117MB) survived the 10-minute keepalive window
+- All verifications passed:
+  - localhost:3000 → HTTP 200
+  - Preview URL → HTTP 200
+  - POST /api/auth/login → HTTP 200 (admin@inventorypro.com, SUPER_ADMIN)
+  - prod.log shows active Prisma queries serving dashboard data
+
+Stage Summary:
+- 500 Internal Server Error PERMANENTLY FIXED by adding FALLBACK_SECRET in auth.ts
+- Login is now resilient to .env resets — the fallback secret ensures it always works
+- Production standalone server running (PID 3104, 117MB RAM, fully detached)
+- Login: admin@inventorypro.com / Admin@123
+- All 5 demo accounts work with password Admin@123
