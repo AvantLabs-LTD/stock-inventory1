@@ -178,6 +178,8 @@ model GoodsReceived {
   source            String?
   purchaseReference String?
   invoiceNumber     String?
+  batchNumber       String?
+  warehouse         String?
   quantity          Int
   unitCost          Float
   date              DateTime @default(now())
@@ -203,6 +205,7 @@ model InventoryIssue {
   projectId     String
   issuedBy      String
   employeeName  String
+  productionHall String?
   quantity      Int
   remarks       String?
   date          DateTime @default(now())
@@ -212,6 +215,7 @@ model InventoryIssue {
   department   Department @relation(fields: [departmentId], references: [id])
   project      Project    @relation(fields: [projectId], references: [id])
   issuedByUser User       @relation(fields: [issuedBy], references: [id])
+  returns      InventoryReturn[] @relation("IssueReturn")
 
   @@index([productId])
   @@index([departmentId])
@@ -223,20 +227,24 @@ model InventoryIssue {
 
 model InventoryReturn {
   id            String   @id @default(cuid())
+  returnNumber  String   @unique
   productId     String
   departmentId  String
   projectId     String
+  relatedIssueId String?
   returnedBy    String
   employeeName  String
   quantity      Int
+  reason        String?
   remarks       String?
   date          DateTime @default(now())
   createdAt     DateTime @default(now())
 
-  product         Product    @relation(fields: [productId], references: [id])
-  department      Department @relation(fields: [departmentId], references: [id])
-  project         Project    @relation(fields: [projectId], references: [id])
-  returnedByUser  User       @relation(fields: [returnedBy], references: [id])
+  product         Product          @relation(fields: [productId], references: [id])
+  department      Department       @relation(fields: [departmentId], references: [id])
+  project         Project          @relation(fields: [projectId], references: [id])
+  relatedIssue    InventoryIssue?  @relation("IssueReturn", fields: [relatedIssueId], references: [id])
+  returnedByUser  User             @relation(fields: [returnedBy], references: [id])
 
   @@index([productId])
   @@index([departmentId])
@@ -247,18 +255,19 @@ model InventoryReturn {
 // ─── RESERVED INVENTORY ────────────────────────────────────────────────────
 
 model ReservedInventory {
-  id          String   @id @default(cuid())
-  productId   String
-  projectId   String
-  quantity    Int
-  reason      String?
-  status      String   @default("ACTIVE") // ACTIVE, RELEASED
-  reservedBy  String
-  releasedBy  String?
-  releasedAt  DateTime?
-  remarks     String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                  String    @id @default(cuid())
+  productId           String
+  projectId           String
+  quantity            Int
+  reason              String?
+  status              String    @default("ACTIVE") // ACTIVE, RELEASED
+  reservedBy          String
+  releasedBy          String?
+  releasedAt          DateTime?
+  expectedReleaseDate DateTime?
+  remarks             String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   product         Product           @relation(fields: [productId], references: [id])
   project         Project           @relation(fields: [projectId], references: [id])

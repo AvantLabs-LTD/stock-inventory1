@@ -35,19 +35,23 @@ import { toast } from 'sonner'
 
 interface ReturnItem {
   id: string
+  returnNumber: string | null
   productId: string
   departmentId: string
   projectId: string
+  relatedIssueId: string | null
   returnedBy: string
   employeeName: string
   quantity: number
   remarks: string | null
+  reason: string | null
   date: string
   createdAt: string
   product: { id: string; name: string; code: string; unit: string }
   department: { id: string; name: string; code: string }
   project: { id: string; name: string; code: string }
   returnedByUser: { id: string; name: string }
+  relatedIssue: { id: string; date: string; product: { name: string } } | null
 }
 
 interface DepartmentOption {
@@ -179,7 +183,7 @@ export function ReturnsPage() {
           <div className="relative flex-1 sm:max-w-xs">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
             <Input
-              placeholder="Search by product, department, project, employee..."
+              placeholder="Search by return #, product, department, employee..."
               className="pl-9"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
@@ -242,13 +246,15 @@ export function ReturnsPage() {
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead>Return #</TableHead>
               <TableHead>Date</TableHead>
               <TableHead>Product</TableHead>
               <TableHead className="hidden sm:table-cell">Department</TableHead>
               <TableHead className="hidden md:table-cell">Project</TableHead>
-              <TableHead className="hidden lg:table-cell">Employee</TableHead>
+              <TableHead className="hidden md:table-cell">Reason</TableHead>
+              <TableHead className="hidden lg:table-cell">Related Issue</TableHead>
               <TableHead className="text-center">Qty</TableHead>
-              <TableHead className="hidden lg:table-cell">Returned By</TableHead>
+              <TableHead className="hidden xl:table-cell">Returned By</TableHead>
               <TableHead className="hidden xl:table-cell">Remarks</TableHead>
             </TableRow>
           </TableHeader>
@@ -256,7 +262,7 @@ export function ReturnsPage() {
             {loading ? (
               Array.from({ length: 5 }).map((_, i) => (
                 <TableRow key={i}>
-                  {Array.from({ length: 8 }).map((_, j) => (
+                  {Array.from({ length: 10 }).map((_, j) => (
                     <TableCell key={j}>
                       <Skeleton className="h-4 w-full" />
                     </TableCell>
@@ -265,7 +271,7 @@ export function ReturnsPage() {
               ))
             ) : items.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8}>
+                <TableCell colSpan={10}>
                   <div className="flex flex-col items-center justify-center py-12">
                     <RotateCcw className="size-12 text-muted-foreground/50 mb-4" />
                     <p className="text-lg font-medium">No returns recorded yet</p>
@@ -282,6 +288,9 @@ export function ReturnsPage() {
             ) : (
               items.map((item) => (
                 <TableRow key={item.id}>
+                  <TableCell className="text-sm font-mono whitespace-nowrap">
+                    {item.returnNumber || '—'}
+                  </TableCell>
                   <TableCell className="text-sm whitespace-nowrap">
                     {format(new Date(item.date), 'MMM dd, yyyy')}
                   </TableCell>
@@ -303,14 +312,26 @@ export function ReturnsPage() {
                       <p className="text-xs text-muted-foreground font-mono">{item.project.code}</p>
                     </div>
                   </TableCell>
+                  <TableCell className="hidden md:table-cell text-sm">
+                    {item.reason || <span className="text-muted-foreground">—</span>}
+                  </TableCell>
                   <TableCell className="hidden lg:table-cell text-sm">
-                    {item.employeeName}
+                    {item.relatedIssue ? (
+                      <div>
+                        <p className="text-xs text-muted-foreground">
+                          {format(new Date(item.relatedIssue.date), 'MMM dd, yyyy')}
+                        </p>
+                        <p className="text-sm truncate max-w-[140px]">{item.relatedIssue.product.name}</p>
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
                   </TableCell>
                   <TableCell className="text-center font-semibold text-sm">
                     <span className="text-green-600">+{item.quantity}</span>
                     <span className="text-xs text-muted-foreground ml-0.5">{item.product.unit}</span>
                   </TableCell>
-                  <TableCell className="hidden lg:table-cell text-sm">
+                  <TableCell className="hidden xl:table-cell text-sm">
                     {item.returnedByUser.name}
                   </TableCell>
                   <TableCell className="hidden xl:table-cell text-sm max-w-[180px]">

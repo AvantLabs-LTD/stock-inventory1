@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
         { product: { name: { contains: search } } },
         { product: { code: { contains: search } } },
         { supplier: { name: { contains: search } } },
-        { invoiceNumber: { contains: search } },
+        { invoiceNumber: { contains: search } } as Record<string, unknown>,
       ]
     }
 
@@ -52,8 +52,15 @@ export async function GET(request: NextRequest) {
       db.goodsReceived.count({ where }),
     ])
 
+    // Serialize dates
+    const serializedItems = items.map((item) => ({
+      ...item,
+      date: item.date.toISOString(),
+      createdAt: item.createdAt.toISOString(),
+    }))
+
     return Response.json({
-      data: items,
+      data: serializedItems,
       pagination: {
         page,
         limit,
@@ -84,6 +91,8 @@ export async function POST(request: NextRequest) {
       source,
       purchaseReference,
       invoiceNumber,
+      batchNumber,
+      warehouse,
       quantity,
       unitCost,
       date,
@@ -126,6 +135,8 @@ export async function POST(request: NextRequest) {
           source: source || null,
           purchaseReference: purchaseReference || null,
           invoiceNumber: invoiceNumber || null,
+          batchNumber: batchNumber || null,
+          warehouse: warehouse || null,
           quantity,
           unitCost,
           date: date ? new Date(date) : new Date(),
@@ -145,7 +156,7 @@ export async function POST(request: NextRequest) {
           quantity,
           unitCost,
           reference: invoiceNumber || null,
-          remarks: remarks || `Goods received${source ? ` from ${source}` : ''}`,
+          remarks: remarks || `Goods received${source ? ` from ${source}` : ''}${batchNumber ? `, batch: ${batchNumber}` : ''}${warehouse ? `, warehouse: ${warehouse}` : ''}`,
           date: date ? new Date(date) : new Date(),
         },
       }),
@@ -159,11 +170,15 @@ export async function POST(request: NextRequest) {
         action: 'GOODS_RECEIVED',
         entityType: 'GoodsReceived',
         entityId: goodsReceived.id,
-        details: `Received ${quantity} units of ${product.name} (${product.id}) at $${unitCost}/unit${invoiceNumber ? `, invoice: ${invoiceNumber}` : ''}`,
+        details: `Received ${quantity} units of ${product.name} (${product.id}) at $${unitCost}/unit${invoiceNumber ? `, invoice: ${invoiceNumber}` : ''}${batchNumber ? `, batch: ${batchNumber}` : ''}${warehouse ? `, warehouse: ${warehouse}` : ''}`,
       },
     })
 
-    return Response.json(goodsReceived, { status: 201 })
+    return Response.json({
+      ...goodsReceived,
+      date: goodsReceived.date.toISOString(),
+      createdAt: goodsReceived.createdAt.toISOString(),
+    }, { status: 201 })
   } catch (error) {
     console.error('POST /api/stock/received error:', error)
     return Response.json({ error: 'Failed to record goods received' }, { status: 500 })

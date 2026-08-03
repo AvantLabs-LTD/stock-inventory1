@@ -8,8 +8,11 @@ import {
   Plus,
   Minus,
   Search,
-  Filter,
+  X,
   History,
+  Lock,
+  Unlock,
+  User,
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -31,7 +34,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { useAppStore } from "@/stores/app-store"
 import { hasPermission } from "@/lib/permissions"
 import { useAuthStore } from "@/stores/auth-store"
 
@@ -43,16 +45,56 @@ interface Transaction {
   reference: string | null
   remarks: string | null
   date: string
+  userName: string | null
   product: { name: string; code: string; sku: string } | null
 }
 
+interface FilterOption {
+  id: string
+  name: string
+}
+
 const TYPE_CONFIG: Record<string, { label: string; color: string; icon: React.ElementType }> = {
-  OPENING_STOCK: { label: "Opening Stock", color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400", icon: ArrowDownToLine },
-  GOODS_RECEIVED: { label: "Goods Received", color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400", icon: Plus },
-  ISSUED: { label: "Issued", color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400", icon: ArrowUpFromLine },
-  RETURNED: { label: "Returned", color: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400", icon: RotateCcw },
-  ADJUSTMENT_IN: { label: "Adjustment In", color: "bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400", icon: Plus },
-  ADJUSTMENT_OUT: { label: "Adjustment Out", color: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400", icon: Minus },
+  OPENING_STOCK: {
+    label: "Opening Stock",
+    color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
+    icon: ArrowDownToLine,
+  },
+  GOODS_RECEIVED: {
+    label: "Goods Received",
+    color: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+    icon: Plus,
+  },
+  ISSUED: {
+    label: "Issued",
+    color: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
+    icon: ArrowUpFromLine,
+  },
+  RETURNED: {
+    label: "Returned",
+    color: "bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400",
+    icon: RotateCcw,
+  },
+  ADJUSTMENT_IN: {
+    label: "Adjustment In",
+    color: "bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400",
+    icon: Plus,
+  },
+  ADJUSTMENT_OUT: {
+    label: "Adjustment Out",
+    color: "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400",
+    icon: Minus,
+  },
+  RESERVE: {
+    label: "Reserved",
+    color: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+    icon: Lock,
+  },
+  RELEASE_RESERVATION: {
+    label: "Released",
+    color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+    icon: Unlock,
+  },
 }
 
 const TRANSACTION_TYPES = [
@@ -63,6 +105,8 @@ const TRANSACTION_TYPES = [
   { value: "RETURNED", label: "Returned" },
   { value: "ADJUSTMENT_IN", label: "Adjustment In" },
   { value: "ADJUSTMENT_OUT", label: "Adjustment Out" },
+  { value: "RESERVE", label: "Reserved" },
+  { value: "RELEASE_RESERVATION", label: "Released" },
 ]
 
 function formatQuantity(type: string, quantity: number): { text: string; color: string } {
@@ -81,11 +125,40 @@ export function HistoryPage() {
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState("")
   const [typeFilter, setTypeFilter] = useState("")
+  const [departmentFilter, setDepartmentFilter] = useState("")
+  const [projectFilter, setProjectFilter] = useState("")
   const [dateFrom, setDateFrom] = useState("")
   const [dateTo, setDateTo] = useState("")
+  const [departments, setDepartments] = useState<FilterOption[]>([])
+  const [projects, setProjects] = useState<FilterOption[]>([])
   const limit = 25
 
   const canView = user ? hasPermission(user.role, "stock" as never, "view" as never) : false
+
+  const hasFilters = !!(search || typeFilter || departmentFilter || projectFilter || dateFrom || dateTo)
+
+  const clearAllFilters = useCallback(() => {
+    setSearch("")
+    setTypeFilter("")
+    setDepartmentFilter("")
+    setProjectFilter("")
+    setDateFrom("")
+    setDateTo("")
+    setPage(1)
+  }, [])
+
+  // Fetch departments and projects on mount
+  useEffect(() => {
+    fetch("/api/departments")
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data: FilterOption[]) => setDepartments(data || []))
+      .catch(() => setDepartments([]))
+
+    fetch("/api/projects")
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data: FilterOption[]) => setProjects(data || []))
+      .catch(() => setProjects([]))
+  }, [])
 
   const fetchHistory = useCallback(async () => {
     if (!canView) return
@@ -97,6 +170,8 @@ export function HistoryPage() {
       })
       if (search) params.set("search", search)
       if (typeFilter) params.set("type", typeFilter)
+      if (departmentFilter) params.set("departmentId", departmentFilter)
+      if (projectFilter) params.set("projectId", projectFilter)
       if (dateFrom) params.set("dateFrom", dateFrom)
       if (dateTo) params.set("dateTo", dateTo)
 
@@ -111,7 +186,7 @@ export function HistoryPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, search, typeFilter, dateFrom, dateTo, canView])
+  }, [page, search, typeFilter, departmentFilter, projectFilter, dateFrom, dateTo, canView])
 
   useEffect(() => {
     fetchHistory()
@@ -143,49 +218,111 @@ export function HistoryPage() {
       {/* Filters */}
       <Card>
         <CardContent className="p-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-              <Input
-                placeholder="Search products..."
-                value={search}
-                onChange={(e) => { setSearch(e.target.value); setPage(1) }}
-                className="pl-9"
-              />
-            </div>
-            <Select value={typeFilter} onValueChange={(v) => { setTypeFilter(v); setPage(1) }}>
-              <SelectTrigger className="w-full sm:w-[180px]">
-                <SelectValue placeholder="All Types" />
-              </SelectTrigger>
-              <SelectContent>
-                {TRANSACTION_TYPES.map((t) => (
-                  <SelectItem key={t.value || "all"} value={t.value || "all"}>
-                    {t.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => { setDateFrom(e.target.value); setPage(1) }}
-              className="w-full sm:w-auto"
-            />
-            <Input
-              type="date"
-              value={dateTo}
-              onChange={(e) => { setDateTo(e.target.value); setPage(1) }}
-              className="w-full sm:w-auto"
-            />
-            {(search || typeFilter || dateFrom || dateTo) && (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => { setSearch(""); setTypeFilter(""); setDateFrom(""); setDateTo(""); setPage(1) }}
+          <div className="flex flex-col gap-3">
+            {/* Row 1: Search, Type, Department, Project */}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search products..."
+                  value={search}
+                  onChange={(e) => {
+                    setSearch(e.target.value)
+                    setPage(1)
+                  }}
+                  className="pl-9"
+                />
+              </div>
+              <Select
+                value={typeFilter || "all"}
+                onValueChange={(v) => {
+                  setTypeFilter(v === "all" ? "" : v)
+                  setPage(1)
+                }}
               >
-                <Filter className="size-4" />
-              </Button>
-            )}
+                <SelectTrigger className="w-full sm:w-[170px]">
+                  <SelectValue placeholder="All Types" />
+                </SelectTrigger>
+                <SelectContent>
+                  {TRANSACTION_TYPES.map((t) => (
+                    <SelectItem key={t.value || "all"} value={t.value || "all"}>
+                      {t.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
+                value={departmentFilter || "all"}
+                onValueChange={(v) => {
+                  setDepartmentFilter(v === "all" ? "" : v)
+                  setPage(1)
+                }}
+              >
+                <SelectTrigger className="w-full sm:w-[170px]">
+                  <SelectValue placeholder="All Departments" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Departments</SelectItem>
+                  {departments.map((d) => (
+                    <SelectItem key={d.id} value={d.id}>
+                      {d.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
+                value={projectFilter || "all"}
+                onValueChange={(v) => {
+                  setProjectFilter(v === "all" ? "" : v)
+                  setPage(1)
+                }}
+              >
+                <SelectTrigger className="w-full sm:w-[170px]">
+                  <SelectValue placeholder="All Projects" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Projects</SelectItem>
+                  {projects.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Row 2: Date range + Clear All */}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <Input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => {
+                  setDateFrom(e.target.value)
+                  setPage(1)
+                }}
+                className="w-full sm:w-auto"
+              />
+              <Input
+                type="date"
+                value={dateTo}
+                onChange={(e) => {
+                  setDateTo(e.target.value)
+                  setPage(1)
+                }}
+                className="w-full sm:w-auto"
+              />
+              {hasFilters && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={clearAllFilters}
+                  className="gap-1.5"
+                >
+                  <X className="size-3.5" />
+                  Clear All Filters
+                </Button>
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -209,7 +346,7 @@ export function HistoryPage() {
               <History className="size-12 text-muted-foreground mb-4" />
               <h3 className="text-lg font-semibold">No transactions found</h3>
               <p className="text-sm text-muted-foreground mt-1">
-                {search || typeFilter || dateFrom || dateTo
+                {hasFilters
                   ? "Try adjusting your filters."
                   : "Inventory transactions will appear here once stock operations begin."}
               </p>
@@ -224,7 +361,8 @@ export function HistoryPage() {
                       <TableHead>Product</TableHead>
                       <TableHead>Type</TableHead>
                       <TableHead className="text-right w-[100px]">Quantity</TableHead>
-                      <TableHead>Reference</TableHead>
+                      <TableHead className="hidden lg:table-cell">Reference</TableHead>
+                      <TableHead className="hidden lg:table-cell">User</TableHead>
                       <TableHead className="hidden md:table-cell">Remarks</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -236,7 +374,7 @@ export function HistoryPage() {
 
                       return (
                         <TableRow key={tx.id}>
-                          <TableCell className="text-sm text-muted-foreground">
+                          <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                             {new Date(tx.date).toLocaleDateString()}
                           </TableCell>
                           <TableCell>
@@ -254,8 +392,16 @@ export function HistoryPage() {
                           <TableCell className={`text-right font-mono font-medium ${qty.color}`}>
                             {qty.text}
                           </TableCell>
-                          <TableCell className="text-sm text-muted-foreground">
+                          <TableCell className="hidden lg:table-cell text-sm text-muted-foreground font-mono">
                             {tx.reference || "—"}
+                          </TableCell>
+                          <TableCell className="hidden lg:table-cell">
+                            <div className="flex items-center gap-1.5">
+                              <User className="size-3.5 text-muted-foreground" />
+                              <span className="text-sm text-muted-foreground">
+                                {tx.userName || "—"}
+                              </span>
+                            </div>
                           </TableCell>
                           <TableCell className="hidden md:table-cell text-sm text-muted-foreground max-w-[200px] truncate">
                             {tx.remarks || "—"}

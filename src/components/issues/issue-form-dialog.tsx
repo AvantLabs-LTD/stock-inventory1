@@ -63,6 +63,7 @@ const issueSchema = z.object({
   projectId: z.string().min(1, 'Please select a project'),
   productId: z.string().min(1, 'Please select a product'),
   quantity: z.coerce.number().int().positive('Quantity must be at least 1'),
+  productionHall: z.string().max(200).optional(),
   remarks: z.string().max(500).optional(),
 })
 
@@ -106,6 +107,7 @@ export function IssueFormDialog({
       projectId: '',
       productId: '',
       quantity: 1,
+      productionHall: '',
       remarks: '',
     },
     mode: 'onChange',
@@ -125,6 +127,7 @@ export function IssueFormDialog({
         projectId: '',
         productId: '',
         quantity: 1,
+        productionHall: '',
         remarks: '',
       })
       setAvailableStock(null)
@@ -602,6 +605,23 @@ export function IssueFormDialog({
                     </div>
                   </div>
                 </div>
+
+                <FormField
+                  control={form.control}
+                  name="productionHall"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Production Hall</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="e.g. Hall A, Line 3"
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
 
                 <FormField
                   control={form.control}

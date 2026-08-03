@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Loader2, Package, Building2, FolderKanban, User, Hash, MessageSquare } from 'lucide-react'
+import { Loader2, Package, Building2, FolderKanban, User, Hash, MessageSquare, Link2 } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -32,6 +32,7 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Badge } from '@/components/ui/badge'
+import { format } from 'date-fns'
 
 interface Department {
   id: string
@@ -55,12 +56,32 @@ interface Product {
   status: string
 }
 
+interface RelatedIssue {
+  id: string
+  date: string
+  quantity: number
+  product: { name: string; code: string; unit: string }
+  department: { name: string }
+  project: { name: string }
+  employeeName: string
+}
+
+const RETURN_REASONS = [
+  'Unused surplus',
+  'Wrong item issued',
+  'Defective return',
+  'Project cancelled',
+  'Other',
+]
+
 const returnSchema = z.object({
   departmentId: z.string().min(1, 'Please select a department'),
   projectId: z.string().min(1, 'Please select a project'),
   productId: z.string().min(1, 'Please select a product'),
   employeeName: z.string().min(1, 'Please enter employee name').max(100),
   quantity: z.coerce.number().int().positive('Quantity must be at least 1'),
+  reason: z.string().optional(),
+  relatedIssueId: z.string().optional(),
   remarks: z.string().max(500).optional(),
 })
 
@@ -81,6 +102,8 @@ export function ReturnFormDialog({
   const [departments, setDepartments] = useState<Department[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [products, setProducts] = useState<Product[]>([])
+  const [relatedIssues, setRelatedIssues] = useState<RelatedIssue[]>([])
+  const [issuesLoading, setIssuesLoading] = useState(false)
   const [productSearch, setProductSearch] = useState('')
   const [projectSearch, setProjectSearch] = useState('')
 
@@ -92,6 +115,8 @@ export function ReturnFormDialog({
       productId: '',
       employeeName: '',
       quantity: 1,
+      reason: '',
+      relatedIssueId: '',
       remarks: '',
     },
     mode: 'onChange',
@@ -109,10 +134,13 @@ export function ReturnFormDialog({
         productId: '',
         employeeName: '',
         quantity: 1,
+        reason: '',
+        relatedIssueId: '',
         remarks: '',
       })
       setProductSearch('')
       setProjectSearch('')
+      setRelatedIssues([])
 
       fetch('/api/departments?limit=200&status=ACTIVE')
         .then((r) => r.json())
@@ -139,13 +167,37 @@ export function ReturnFormDialog({
     form.setValue('projectId', '')
   }, [watchedDepartmentId, form])
 
+  // Fetch related issues when product changes
+  useEffect(() => {
+    if (!watchedProductId) {
+      setRelatedIssues([])
+      form.setValue('relatedIssueId', '')
+      return
+    }
+    setIssuesLoading(true)
+    fetch(`/api/issues?productId=${watchedProductId}&limit=100`)
+      .then((r) => r.json())
+      .then((d) => {
+        const issues = (d.data || []).map((issue: RelatedIssue) => issue)
+        setRelatedIssues(issues)
+      })
+      .catch(() => setRelatedIssues([]))
+      .finally(() => setIssuesLoading(false))
+  }, [watchedProductId, form])
+
   async function onSubmit(values: ReturnFormValues) {
     setLoading(true)
     try {
+      const body: Record<string, unknown> = { ...values }
+      // Don't send empty strings for optional fields
+      if (!body.reason) delete body.reason
+      if (!body.relatedIssueId) delete body.relatedIssueId
+      if (!body.remarks) delete body.remarks
+
       const res = await fetch('/api/returns', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(values),
+        body: JSON.stringify(body),
       })
       if (res.ok) {
         onSuccess()
@@ -341,6 +393,76 @@ export function ReturnFormDialog({
               />
             </div>
 
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <FormField
+                control={form.control}
+                name="reason"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Reason</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select reason" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {RETURN_REASONS.map((r) => (
+                          <SelectItem key={r} value={r}>
+                            {r}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="relatedIssueId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="flex items-center gap-1.5">
+                      <Link2 className="size-3.5" />
+                      Related Issue
+                    </FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder={watchedProductId ? (issuesLoading ? 'Loading...' : 'Select issue') : 'Select product first'} />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent className="max-h-60">
+                        <SelectItem value="none">None</SelectItem>
+                        {relatedIssues.length === 0 && !issuesLoading ? (
+                          <div className="p-4 text-center text-sm text-muted-foreground">
+                            No issues found for this product
+                          </div>
+                        ) : (
+                          relatedIssues.map((issue) => (
+                            <SelectItem key={issue.id} value={issue.id}>
+                              <span className="flex items-center gap-2">
+                                <span className="text-xs text-muted-foreground">
+                                  {format(new Date(issue.date), 'MMM dd, yyyy')}
+                                </span>
+                                <span className="text-sm">{issue.product.name}</span>
+                                <Badge variant="secondary" className="text-[10px] ml-auto">
+                                  {issue.quantity} {issue.product.unit}
+                                </Badge>
+                              </span>
+                            </SelectItem>
+                          ))
+                        )}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
             <FormField
               control={form.control}
               name="remarks"
@@ -389,6 +511,12 @@ export function ReturnFormDialog({
                       {form.getValues('quantity') || 0} {selectedProduct?.unit || 'units'}
                     </p>
                   </div>
+                  {form.getValues('reason') && (
+                    <div className="col-span-2">
+                      <p className="text-xs text-muted-foreground">Reason</p>
+                      <p className="text-sm">{form.getValues('reason')}</p>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

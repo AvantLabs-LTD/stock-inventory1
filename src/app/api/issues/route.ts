@@ -32,6 +32,7 @@ export async function GET(request: NextRequest) {
         { department: { name: { contains: search } } },
         { project: { name: { contains: search } } },
         { employeeName: { contains: search } },
+        { productionHall: { contains: search } } as Record<string, unknown>,
       ]
     }
 
@@ -69,8 +70,15 @@ export async function GET(request: NextRequest) {
       db.inventoryIssue.count({ where }),
     ])
 
+    // Serialize dates
+    const serializedItems = items.map((item) => ({
+      ...item,
+      date: item.date.toISOString(),
+      createdAt: item.createdAt.toISOString(),
+    }))
+
     return Response.json({
-      data: items,
+      data: serializedItems,
       pagination: {
         page,
         limit,
@@ -95,7 +103,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { productId, departmentId, projectId, employeeName, quantity, remarks } = body
+    const { productId, departmentId, projectId, employeeName, productionHall, quantity, remarks } = body
 
     // Validate required fields
     if (!productId || !departmentId || !projectId || !employeeName || !quantity) {
@@ -149,7 +157,6 @@ export async function POST(request: NextRequest) {
     }
 
     // Calculate available stock
-    // Available = (Opening + Received + Returned + AdjIn) - Issued - AdjOut - Reserved
     const transactions = await db.inventoryTransaction.findMany({
       where: { productId },
     })
@@ -195,7 +202,6 @@ export async function POST(request: NextRequest) {
 
     // Use interactive transaction to create both records atomically
     const issue = await db.$transaction(async (tx) => {
-      // Create the issue record first
       const newIssue = await tx.inventoryIssue.create({
         data: {
           productId,
@@ -203,6 +209,7 @@ export async function POST(request: NextRequest) {
           projectId,
           issuedBy: session.user.id,
           employeeName,
+          productionHall: productionHall || null,
           quantity,
           remarks: remarks || null,
         },
@@ -214,14 +221,13 @@ export async function POST(request: NextRequest) {
         },
       })
 
-      // Create the inventory transaction with reference to the issue
       await tx.inventoryTransaction.create({
         data: {
           productId,
           type: 'ISSUED',
           quantity,
           reference: newIssue.id,
-          remarks: remarks || `Issued to ${department.name} - ${project.name} (${employeeName})`,
+          remarks: remarks || `Issued to ${department.name} - ${project.name} (${employeeName})${productionHall ? ` [${productionHall}]` : ''}`,
         },
       })
 
@@ -236,11 +242,15 @@ export async function POST(request: NextRequest) {
         action: 'ISSUED',
         entityType: 'InventoryIssue',
         entityId: issue.id,
-        details: `Issued ${quantity} ${product.unit} of ${product.name} to ${department.name} - ${project.name} for ${employeeName}`,
+        details: `Issued ${quantity} ${product.unit} of ${product.name} to ${department.name} - ${project.name} for ${employeeName}${productionHall ? ` [${productionHall}]` : ''}`,
       },
     })
 
-    return Response.json(issue, { status: 201 })
+    return Response.json({
+      ...issue,
+      date: issue.date.toISOString(),
+      createdAt: issue.createdAt.toISOString(),
+    }, { status: 201 })
   } catch (error) {
     console.error('POST /api/issues error:', error)
     return Response.json({ error: 'Failed to issue inventory' }, { status: 500 })

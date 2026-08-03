@@ -48,6 +48,8 @@ const goodsReceivedSchema = z.object({
   source: z.string().optional(),
   purchaseReference: z.string().optional(),
   invoiceNumber: z.string().optional(),
+  batchNumber: z.string().optional(),
+  warehouse: z.string().optional(),
   quantity: z.coerce.number().int().positive('Quantity must be at least 1'),
   unitCost: z.coerce.number().min(0, 'Unit cost must be non-negative'),
   date: z.string().min(1, 'Please select a date'),
@@ -85,6 +87,8 @@ export function GoodsReceivedFormDialog({
       source: '',
       purchaseReference: '',
       invoiceNumber: '',
+      batchNumber: '',
+      warehouse: '',
       quantity: 1,
       unitCost: 0,
       date: today,
@@ -109,6 +113,8 @@ export function GoodsReceivedFormDialog({
         source: '',
         purchaseReference: '',
         invoiceNumber: '',
+        batchNumber: '',
+        warehouse: '',
         quantity: 1,
         unitCost: 0,
         date: today,
@@ -301,6 +307,36 @@ export function GoodsReceivedFormDialog({
                     <FormLabel>Invoice Number</FormLabel>
                     <FormControl>
                       <Input placeholder="INV-001" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <FormField
+                control={form.control}
+                name="batchNumber"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Batch Number</FormLabel>
+                    <FormControl>
+                      <Input placeholder="e.g. BN-2025-001" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="warehouse"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Warehouse</FormLabel>
+                    <FormControl>
+                      <Input placeholder="e.g. Main Warehouse" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>

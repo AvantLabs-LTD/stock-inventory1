@@ -60,6 +60,8 @@ interface GoodsReceivedItem {
   source: string | null
   purchaseReference: string | null
   invoiceNumber: string | null
+  batchNumber: string | null
+  warehouse: string | null
   quantity: number
   unitCost: number
   date: string
@@ -195,7 +197,7 @@ export function GoodsReceivedPage() {
           <div className="relative flex-1 sm:max-w-xs">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
             <Input
-              placeholder="Search by product, supplier, invoice..."
+              placeholder="Search by product, supplier, invoice, batch number..."
               className="pl-9"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
@@ -238,11 +240,13 @@ export function GoodsReceivedPage() {
               <TableHead>Product</TableHead>
               <TableHead className="hidden sm:table-cell">Supplier</TableHead>
               <TableHead className="hidden md:table-cell">Invoice #</TableHead>
+              <TableHead className="hidden lg:table-cell">Batch #</TableHead>
+              <TableHead className="hidden lg:table-cell">Warehouse</TableHead>
               <TableHead className="text-center">Qty</TableHead>
               <TableHead className="hidden sm:table-cell text-right">Unit Cost</TableHead>
               <TableHead className="text-right">Total Cost</TableHead>
-              <TableHead className="hidden lg:table-cell">Source</TableHead>
-              <TableHead className="hidden lg:table-cell">Received By</TableHead>
+              <TableHead className="hidden xl:table-cell">Source</TableHead>
+              <TableHead className="hidden xl:table-cell">Received By</TableHead>
               <TableHead className="w-[80px] text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -250,7 +254,7 @@ export function GoodsReceivedPage() {
             {loading ? (
               Array.from({ length: 5 }).map((_, i) => (
                 <TableRow key={i}>
-                  {Array.from({ length: 10 }).map((_, j) => (
+                  {Array.from({ length: 12 }).map((_, j) => (
                     <TableCell key={j}>
                       <Skeleton className="h-4 w-full" />
                     </TableCell>
@@ -259,7 +263,7 @@ export function GoodsReceivedPage() {
               ))
             ) : items.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={10}>
+                <TableCell colSpan={12}>
                   <div className="flex flex-col items-center justify-center py-12">
                     <PackageCheck className="size-12 text-muted-foreground/50 mb-4" />
                     <p className="text-lg font-medium">No goods received yet</p>
@@ -294,6 +298,12 @@ export function GoodsReceivedPage() {
                     <TableCell className="hidden md:table-cell text-sm font-mono">
                       {item.invoiceNumber || <span className="text-muted-foreground">—</span>}
                     </TableCell>
+                    <TableCell className="hidden lg:table-cell text-sm font-mono">
+                      {item.batchNumber || <span className="text-muted-foreground">—</span>}
+                    </TableCell>
+                    <TableCell className="hidden lg:table-cell text-sm">
+                      {item.warehouse || <span className="text-muted-foreground">—</span>}
+                    </TableCell>
                     <TableCell className="text-center font-medium">
                       {item.quantity}
                     </TableCell>
@@ -303,14 +313,14 @@ export function GoodsReceivedPage() {
                     <TableCell className="text-right font-semibold text-sm">
                       {formatCurrency(totalItemCost)}
                     </TableCell>
-                    <TableCell className="hidden lg:table-cell">
+                    <TableCell className="hidden xl:table-cell">
                       {item.source ? (
                         <Badge variant="secondary" className="text-[10px]">{item.source}</Badge>
                       ) : (
                         <span className="text-muted-foreground text-sm">—</span>
                       )}
                     </TableCell>
-                    <TableCell className="hidden lg:table-cell text-sm">
+                    <TableCell className="hidden xl:table-cell text-sm">
                       {item.receivedByUser.name}
                     </TableCell>
                     <TableCell className="text-right">
@@ -452,6 +462,14 @@ export function GoodsReceivedPage() {
                 <div>
                   <p className="text-muted-foreground">Invoice #</p>
                   <p className="font-medium font-mono">{detailItem.invoiceNumber || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Batch #</p>
+                  <p className="font-medium font-mono">{detailItem.batchNumber || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Warehouse</p>
+                  <p className="font-medium">{detailItem.warehouse || '—'}</p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">Purchase Ref</p>

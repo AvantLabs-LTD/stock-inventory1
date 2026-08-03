@@ -44,6 +44,7 @@ interface IssueItem {
   employeeName: string
   quantity: number
   remarks: string | null
+  productionHall: string | null
   date: string
   createdAt: string
   product: { id: string; name: string; code: string; unit: string }
@@ -258,6 +259,7 @@ export function IssueInventoryPage() {
               <TableHead className="hidden lg:table-cell">Employee</TableHead>
               <TableHead className="text-center">Qty</TableHead>
               <TableHead className="hidden lg:table-cell">Issued By</TableHead>
+              <TableHead className="hidden lg:table-cell">Production Hall</TableHead>
               <TableHead className="hidden xl:table-cell">Remarks</TableHead>
               <TableHead className="w-[60px] text-right">Actions</TableHead>
             </TableRow>
@@ -266,7 +268,7 @@ export function IssueInventoryPage() {
             {loading ? (
               Array.from({ length: 5 }).map((_, i) => (
                 <TableRow key={i}>
-                  {Array.from({ length: 9 }).map((_, j) => (
+                  {Array.from({ length: 10 }).map((_, j) => (
                     <TableCell key={j}>
                       <Skeleton className="h-4 w-full" />
                     </TableCell>
@@ -275,7 +277,7 @@ export function IssueInventoryPage() {
               ))
             ) : items.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={9}>
+                <TableCell colSpan={10}>
                   <div className="flex flex-col items-center justify-center py-12">
                     <ArrowUpFromLine className="size-12 text-muted-foreground/50 mb-4" />
                     <p className="text-lg font-medium">No inventory issues yet</p>
@@ -322,6 +324,9 @@ export function IssueInventoryPage() {
                   </TableCell>
                   <TableCell className="hidden lg:table-cell text-sm">
                     {item.issuedByUser.name}
+                  </TableCell>
+                  <TableCell className="hidden lg:table-cell text-sm">
+                    {item.productionHall || <span className="text-muted-foreground">—</span>}
                   </TableCell>
                   <TableCell className="hidden xl:table-cell text-sm max-w-[180px]">
                     <p className="truncate text-muted-foreground">

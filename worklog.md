@@ -647,3 +647,473 @@ Stage Summary:
   - Frontend: Export to Excel button with loading state and toast notifications
   - Excel formatting: bold headers, freeze panes, auto-filter, column widths, borders, negative highlighting
   - File naming: Opening Stock - Electronic Connectors_YYYY-MM-DD.xlsx
+---
+Task ID: explore-codebase
+Agent: exploration-agent
+Task: Comprehensive codebase exploration
+
+Work Log:
+
+## 1. PRISMA SCHEMA (prisma/schema.prisma)
+
+**Database**: SQLite
+**13 Models**:
+
+### Core Models:
+- **User**: id(cuid), email(unique), password, name, role(default VIEWER), status(default ACTIVE), phone?, avatar?, departmentId?, createdAt, updatedAt. Relations: department, issuedItems, requestedItems, receivedItems, adjustedItems, auditLogs, reservationsBy, releasedItems, returnedItems. Indexes on email, role, departmentId.
+- **Department**: id, name(unique), code(unique), description?, headName?, phone?, status(default ACTIVE), createdAt, updatedAt. Relations: users, projects, issues, requests, returns.
+- **Project**: id, name, code(unique), departmentId, description?, startDate?, endDate?, status(default ACTIVE/COMPLETED/ON_HOLD/CANCELLED), createdAt, updatedAt. Relations: department, issues, requests, reservations, returns.
+
+### Inventory Master:
+- **Category**: id, name(unique), code(unique), description?, parentId?(self-referential tree), status, createdAt, updatedAt. Relations: parent, children, products.
+- **Supplier**: id, name(unique), contactPerson?, phone?, email?, address?, notes?, status, createdAt, updatedAt. Relations: products, goodsReceived.
+- **Product**: id, code(auto PRD-XXXX), name, sku(unique), categoryId?, supplierId?, manufacturer?, modelNumber?, unit(default pcs), image?, description?, storageLocation?, minimumStock(0), unitCost(0), status(default ACTIVE), createdAt, updatedAt. Relations: category, supplier, transactions, issues, reservations, requests, goodsReceived, returns, adjustments.
+
+### Transactions:
+- **InventoryTransaction**: id, productId, type(OPENING_STOCK/GOODS_RECEIVED/ISSUED/RETURNED/ADJUSTMENT_IN/ADJUSTMENT_OUT), quantity(Int), unitCost?, reference?, remarks?, date, createdAt. Cascade delete on product.
+- **GoodsReceived**: id, productId, supplierId?, source?, purchaseReference?, invoiceNumber?, quantity, unitCost(Float), date, receivedBy(User FK), remarks?, createdAt.
+
+### Issue/Return:
+- **InventoryIssue**: id, productId, departmentId, projectId, issuedBy(User FK), employeeName, quantity, remarks?, date, createdAt.
+- **InventoryReturn**: id, productId, departmentId, projectId, returnedBy(User FK), employeeName, quantity, remarks?, date, createdAt.
+
+### Reserved:
+- **ReservedInventory**: id, productId, projectId, quantity, reason?, status(default ACTIVE/RELEASED), reservedBy(User FK), releasedBy?(User FK), releasedAt?, remarks?, createdAt, updatedAt.
+
+### Requests:
+- **InventoryRequest**: id, productId, departmentId, projectId, requestedBy(User FK), employeeName, quantity, approvedQty(default 0), priority(LOW/MEDIUM/HIGH/URGENT), reason?, status(PENDING/APPROVED/REJECTED/PARTIAL_APPROVED/COMPLETED/CANCELLED), approvedBy?, approvedAt?, completedBy?, completedAt?, remarks?, createdAt, updatedAt.
+
+### Adjustments:
+- **StockAdjustment**: id, productId, type(ADJUSTMENT_IN/ADJUSTMENT_OUT), quantity, reason?, remarks?, adjustedBy(User FK), date, createdAt.
+
+### Audit:
+- **AuditLog**: id, userId?, userName?, action, entityType?, entityId?, details?, ipAddress?, date.
+
+## 2. API ROUTES (47 total files under src/app/api/)
+
+### Auth (4 routes):
+- `POST /api/auth/login` - Email/password login, sets HTTP-only JWT cookie (7-day expiry)
+- `POST /api/auth/logout` - Clears session cookie
+- `GET /api/auth/me` - Returns current authenticated user
+- `POST /api/auth/change-password` - Verifies old password, sets new (min 8 chars)
+
+### Products (2 route files):
+- `GET /api/products` - List with search, filter(categoryId/status/supplierId), sort, pagination. Includes category & supplier.
+- `POST /api/products` - Create product, auto-generates code PRD-XXXX, validates unique SKU. Permission: products:create
+- `GET /api/products/[id]` - Single product with stock summary (calculated from transactions + reservations)
+- `PUT /api/products/[id]` - Update product fields, validates SKU uniqueness
+- `DELETE /api/products/[id]` - Soft delete (status->DISCONTINUED). Permission: products:delete
+
+### Categories (2 route files):
+- `GET /api/categories` - List all with parent info and child/product counts. Search by name/code.
+- `POST /api/categories` - Create, auto-generates CAT-XXXX code. Permission: categories:create
+- `GET /api/categories/[id]` - Single category
+- `PUT /api/categories/[id]` - Update, prevents self-parenting
+- `DELETE /api/categories/[id]` - Hard delete only if no children and no products. Permission: categories:delete (SUPER_ADMIN only)
+
+### Suppliers (2 route files):
+- `GET /api/suppliers` - List with search, status filter, pagination, product count
+- `POST /api/suppliers` - Create, validates unique name. Permission: suppliers:create
+- `GET /api/suppliers/[id]` - Single supplier
+- `PUT /api/suppliers/[id]` - Update, validates name uniqueness
+- `DELETE /api/suppliers/[id]` - Soft delete (status->INACTIVE). Permission: suppliers:delete
+
+### Departments (2 route files):
+- `GET /api/departments` - List all with user/project counts. Search by name/code/headName.
+- `POST /api/departments` - Create, auto-generates DEPT-XX code, validates unique name. Permission: departments:create
+- `GET /api/departments/[id]` - Single with users, projects, and issue/request/return counts
+- `PUT /api/departments/[id]` - Update, validates name uniqueness
+- `DELETE /api/departments/[id]` - Hard delete only if no users and no projects. Permission: departments:delete
+
+### Projects (2 route files):
+- `GET /api/projects` - List with search, departmentId/status filter, pagination. Includes department and issue/request counts.
+- `POST /api/projects` - Create, auto-generates PRJ-XXXX, requires departmentId. Permission: projects:create
+- `GET /api/projects/[id]` - Single with department, recent issues(5), recent requests(5), counts
+- `PUT /api/projects/[id]` - Update
+- `DELETE /api/projects/[id]` - Hard delete only if no issues and no requests. Permission: projects:delete
+
+### Stock (4 route files):
+- `GET /api/stock/overview` - Dashboard stats: totalProducts, totalStock, totalAvailable, totalReserved, totalIssued, lowStockCount, outOfStockCount, todayReceived, todayIssued. Calculates per-product from transactions + reservations.
+- `GET /api/stock/summary?productId=xxx` - Per-product breakdown: openingStock, totalReceived, totalIssued, totalReturned, totalAdjustmentIn/Out, reservedStock, available, recentTransactions(10).
+- `GET /api/stock/opening` - List OPENING_STOCK transactions with product info. Search, pagination.
+- `POST /api/stock/opening` - Set opening stock. Prevents duplicates. Permission: stock:manage. Creates audit log.
+- `GET /api/stock/opening/export` - Excel export via ExcelJS. Formatted .xlsx with 10 columns (Sr/No, Name, Specs, A/U, Qty in Total Stock, To Be Used, Total Batch, Required, Ordered, Remarks). Bold white-on-dark headers, freeze panes, auto-filter, borders, red negative highlighting.
+- `GET /api/stock/received` - List goods received with product/supplier/receivedByUser. Search, date range, pagination.
+- `POST /api/stock/received` - Record goods received. Transactional (creates GoodsReceived + InventoryTransaction). Permission: stock:receive. Creates audit log.
+- `DELETE /api/stock/received/[id]` - Delete within 24h only. Reverses the transaction. Permission: stock:receive.
+
+### Issues (2 route files):
+- `GET /api/issues` - List issues with product/department/project/issuedByUser. Search, departmentId/projectId/dateFrom/dateTo filters, pagination.
+- `POST /api/issues` - Issue inventory. Validates product/department/project, calculates available stock (including reserved), checks sufficient stock. Transactional. Permission: issue_inventory:issue. Creates audit log.
+- `GET /api/issues/[id]` - Single issue with full relations
+
+### Reserved (3 route files):
+- `GET /api/reserved` - List reservations with product/project/reservedByUser/releasedByUser. Search, projectId/status filters, pagination.
+- `POST /api/reserved` - Create reservation. Validates product/project, calculates available stock, checks sufficient. Permission: reserved_inventory:reserve. Creates audit log.
+- `GET /api/reserved/[id]` - Single reservation
+- `POST /api/reserved/[id]/release` - Release reservation (sets RELEASED). Permission: reserved_inventory:release. Creates audit log.
+
+### Returns (1 route file):
+- `GET /api/returns` - List returns with product/department/project/returnedByUser. Search, departmentId/projectId/dateFrom/dateTo filters, pagination.
+- `POST /api/returns` - Record return. Transactional (creates InventoryReturn + InventoryTransaction type RETURNED). Permission: returns:return. Creates audit log.
+
+### Adjustments (1 route file):
+- `GET /api/adjustments` - List with product/adjustedByUser. Search, type filter, pagination.
+- `POST /api/adjustments` - Create adjustment. For ADJUSTMENT_OUT, validates sufficient stock. Permission: stock:manage. Transactional. Creates audit log.
+
+### Requests (4 route files):
+- `GET /api/requests` - List with product/department/project/requestedByUser. Search, departmentId/projectId/status/priority filters, pagination.
+- `POST /api/requests` - Create request (status PENDING). Validates priority. Permission: inventory_requests:create.
+- `GET /api/requests/[id]` - Single request detail
+- `PUT /api/requests/[id]/approve` - Approve (or PARTIAL_APPROVED if approvedQty < requestedQty). Checks available stock. Permission: inventory_requests:approve. Creates audit log.
+- `PUT /api/requests/[id]/reject` - Reject. Sets status REJECTED. Permission: inventory_requests:reject. Creates audit log.
+- `PUT /api/requests/[id]/complete` - Complete. Creates InventoryTransaction(ISSUED) + InventoryIssue. Permission: inventory_requests:edit. Creates audit log.
+
+### Inventory History (2 route files):
+- `GET /api/inventory/history` - All transactions with product name. Search, productId, type, dateFrom/dateTo filters, pagination.
+- `GET /api/inventory/history/product/[id]` - Product timeline with running balance, currentBalance, availableBalance, totalReserved.
+
+### Reports (7 route files):
+- `GET /api/reports/inventory-ledger` - All transactions grouped by product with running balance per group. Filter: productId, dateFrom, dateTo.
+- `GET /api/reports/low-stock` - Products where available <= minimumStock. Sorted by severity. Summary: totalLowStock, outOfStockCount, totalDeficit, totalValueAtRisk.
+- `GET /api/reports/inventory-summary` - All products with opening/received/issued/returned/reserved/available/value. Filter: categoryId, status, departmentId.
+- `GET /api/reports/goods-received` - All GR records with totals. Filter: supplierId, dateFrom, dateTo.
+- `GET /api/reports/goods-issued` - All issues with totals. Filter: departmentId, projectId, dateFrom, dateTo.
+- `GET /api/reports/department-usage` - Per-department issued vs returned aggregation. Filter: dateFrom, dateTo.
+- `GET /api/reports/project-usage` - Per-project issued/returned/reserved aggregation. Filter: departmentId, dateFrom, dateTo.
+- `GET /api/reports/reserved-inventory` - All active reservations with summary.
+- `GET /api/reports/export/excel` - CSV export supporting 7 report types: inventory-summary, inventory-ledger, goods-received, goods-issued, department-usage, project-usage, reserved-inventory, low-stock. Uses CSV format with proper escaping.
+
+### Dashboard (1 route file):
+- `GET /api/dashboard/chart-data` - Last 6 months data (received/issued/returned quantities). Uses date-fns.
+
+### Notifications (2 route files):
+- `GET /api/notifications` - Dynamic notifications: admins get pending request count + low/out-of-stock alerts; department users get approved/rejected request updates.
+- `POST /api/notifications/[id]/read` - Stub (client-side handling)
+
+### Audit Logs (1 route file):
+- `GET /api/audit-logs` - List with search, action/userId/dateFrom/dateTo filters, pagination. Permission: audit_logs:view (admin only).
+
+### Other:
+- `GET /api/route.ts` - Health check: returns {message: "Hello, world!"}
+
+## 3. COMPONENTS (94 files under src/components/)
+
+### Layout (3 files):
+- `layout/app-shell.tsx` - Main SPA shell. Renders ThemeProvider > AppContent (if authenticated: SidebarProvider > AppSidebar + TopBar + PageContent) or LoginForm. PageContent switch on currentPage from app-store (21 routes).
+- `layout/app-sidebar.tsx` - Sidebar with 7 sections: Overview, Inventory Master, Stock Operations, Organization, Workflow, Reports, System. Role-based filtering via hasPermission(). Shows user avatar/name/role in footer.
+- `layout/top-bar.tsx` - Top bar with theme toggle, notifications dropdown, user menu (logout, change password).
+
+### Dashboard (1 file):
+- `dashboard/dashboard-page.tsx` - StatCards (Issued Stock, Low Stock, Out of Stock, Pending Requests), StockOverviewWidget, recharts BarChart (6-month received/issued/returned), Today Activity, Account Info.
+
+### Products (3 files):
+- `products/product-list.tsx` - Product listing page with search, filters, table
+- `products/product-detail.tsx` - Product detail page with stock summary, history link
+- `products/product-form-dialog.tsx` - Create/edit product dialog with form validation
+
+### Stock (5 files):
+- `stock/opening-stock-page.tsx` - Set opening stock form (product select, quantity, remarks) + entries table + pagination + export to Excel button + Products Status summary card. Uses react-hook-form + zod.
+- `stock/goods-received-page.tsx` - Goods received listing page
+- `stock/goods-received-form-dialog.tsx` - Record goods received dialog
+- `stock/stock-summary-page.tsx` - Stock summary page (per-product view)
+- `stock/stock-summary-card.tsx` - Stock summary card component
+- `stock/stock-overview-widget.tsx` - Dashboard widget: 5 stat cards (Total Products, Available Stock, Reserved, Low Stock Alerts, Out of Stock) + 2 today activity cards (Today Received, Today Issued)
+
+### Issues (3 files):
+- `issues/issue-inventory-page.tsx` - Issue inventory page
+- `issues/issue-form-dialog.tsx` - Issue inventory form dialog
+- `issues/issue-detail.tsx` - Issue detail view
+
+### Reserved (3 files):
+- `reserved/reserved-inventory-page.tsx` - Reserved inventory page
+- `reserved/reserve-form-dialog.tsx` - Create reservation dialog
+- `reserved/release-dialog.tsx` - Release reservation dialog
+
+### Returns (2 files):
+- `returns/returns-page.tsx` - Returns listing page
+- `returns/return-form-dialog.tsx` - Record return dialog
+
+### Adjustments (2 files):
+- `adjustments/adjustments-page.tsx` - Stock adjustments listing page
+- `adjustments/adjustment-form-dialog.tsx` - Create adjustment dialog
+
+### Requests (4 files):
+- `requests/request-page.tsx` - Inventory requests listing page
+- `requests/request-form-dialog.tsx` - Create request dialog
+- `requests/request-detail.tsx` - Request detail view
+- `requests/approve-dialog.tsx` - Approve/reject dialog
+
+### Reports (2 files):
+- `reports/reports-page.tsx` - Reports listing page (7 report types)
+- `reports/report-view.tsx` - Report detail/view page
+
+### History (2 files):
+- `history/history-page.tsx` - Transaction history page
+- `history/product-history-page.tsx` - Per-product history timeline page
+
+### Departments (3 files):
+- `departments/department-page.tsx` - Department listing page
+- `departments/department-detail.tsx` - Department detail page
+- `departments/department-form-dialog.tsx` - Create/edit department dialog
+
+### Projects (3 files):
+- `projects/project-page.tsx` - Project listing page
+- `projects/project-detail.tsx` - Project detail page
+- `projects/project-form-dialog.tsx` - Create/edit project dialog
+
+### Categories (2 files):
+- `categories/category-page.tsx` - Category listing page
+- `categories/category-form-dialog.tsx` - Create/edit category dialog
+
+### Suppliers (2 files):
+- `suppliers/supplier-page.tsx` - Supplier listing page
+- `suppliers/supplier-form-dialog.tsx` - Create/edit supplier dialog
+
+### Audit (1 file):
+- `audit/audit-logs-page.tsx` - Audit logs listing page
+
+### Login (1 file):
+- `login/login-form.tsx` - Login form with email/password, retry logic, demo account info
+
+### Change Password (1 file):
+- `change-password/change-password-dialog.tsx` - Change password dialog
+
+### Shared (1 file):
+- `shared/page-header.tsx` - Reusable page header with title, description, icon
+
+### Theme (1 file):
+- `theme-provider.tsx` - next-themes ThemeProvider wrapper
+
+### UI Components (~60+ shadcn/ui files):
+Standard shadcn/ui components: accordion, alert, alert-dialog, aspect-ratio, avatar, badge, breadcrumb, button, calendar, card, carousel, chart, checkbox, collapsible, command, context-menu, dialog, drawer, dropdown-menu, form, hover-card, input, input-otp, label, menubar, navigation-menu, pagination, popover, progress, radio-group, resizable, scroll-area, select, separator, sheet, sidebar, skeleton, slider, sonner(toaster), switch, table, tabs, textarea, toast, toggle, toggle-group, tooltip.
+
+## 4. LIB FILES
+
+### src/lib/auth.ts:
+- COOKIE_NAME = 'inventorypro-session', TOKEN_EXPIRY_DAYS = 7
+- FALLBACK_SECRET hardcoded (sandbox-resilient)
+- SessionPayload: { userId, email, role }
+- Functions: hashPassword(bcrypt, 12 rounds), verifyPassword, createSessionToken(jose SignJWT, HS256, 7d), verifySessionToken(jose jwtVerify), getSessionCookieOptions
+
+### src/lib/auth-middleware.ts:
+- AuthSession: { user: { id, email, name, role, departmentId, departmentName, status } }
+- getSession(request?): Verifies JWT from cookies, fetches user from DB, checks ACTIVE status. Returns AuthSession | null.
+- unauthorizedResponse(message): Returns 401 JSON
+- forbiddenResponse(message): Returns 403 JSON
+
+### src/lib/permissions.ts:
+- 5 Roles: SUPER_ADMIN(100), INVENTORY_ADMIN(80), STORE_KEEPER(60), DEPARTMENT_USER(40), VIEWER(20)
+- 13 Actions: view, create, edit, delete, approve, reject, issue, receive, return, adjust, reserve, release, manage
+- 14 Modules: dashboard, products, categories, suppliers, stock, departments, projects, issue_inventory, reserved_inventory, inventory_requests, returns, reports, audit_logs, user_management
+- Functions: hasPermission(role, module, action), isReadOnly(role), getPermissionsForRole(role), getRoleLevel(role), hasMinRole(role, minRole), getModules(), getModuleActions(module)
+
+### src/lib/db.ts:
+- Singleton PrismaClient with globalThis caching (dev only). Query logging enabled.
+
+## 5. PAGE STRUCTURE / ROUTING
+
+**SPA Architecture**: src/app/page.tsx renders <AppShell />, which uses Zustand-based client-side routing (no Next.js file-based routing for pages).
+
+**AppStore (app-store.ts)**:
+- 21 page routes: dashboard, products, product-detail, categories, suppliers, opening-stock, goods-received, stock-summary, departments, department-detail, projects, project-detail, issue-inventory, returns, stock-adjustments, reserved-inventory, requests, history, product-history, reports, report-view, audit-logs
+- `navigate(page, productId?)` sets currentPage and selectedProductId
+- `goBack()` provides navigation history based on current page context
+
+**AuthStore (auth-store.ts)**:
+- User: { id, email, name, role, department, departmentName }
+- State: user, isLoading, isAuthenticated
+- Actions: setUser, setLoading, login, logout, fetchUser
+
+## 6. STATE MANAGEMENT
+
+- **Zustand** (2 stores):
+  - `auth-store.ts` - Authentication state, login/logout, fetchUser
+  - `app-store.ts` - Client-side routing, page navigation, selected product ID
+- No React Query usage despite being installed
+- No additional type definition files (*.d.ts) - all types are inline or in component files
+
+## 7. KEY TECHNICAL DETAILS
+
+- **Stack**: Next.js 16, React 19, TypeScript, Tailwind CSS 4, shadcn/ui, Prisma (SQLite), Zustand
+- **Auth**: JWT (jose) with HTTP-only cookies, 7-day expiry, FALLBACK_SECRET for sandbox resilience
+- **Database**: SQLite, 13 models, all enums as String fields, query logging in dev
+- **Forms**: react-hook-form + zod validation
+- **Charts**: recharts (BarChart on dashboard)
+- **Excel**: exceljs for .xlsx export (serverExternalPackages configured)
+- **CSV**: Manual CSV generation for reports export/excel endpoint
+- **Toasts**: sonner
+- **Theme**: next-themes with system preference
+- **No TypeScript .d.ts files**: All types are inline
+- **Default Login**: admin@inventorypro.com / Admin@123
+
+Stage Summary:
+- 13 Prisma models with full relational integrity
+- 47 API route files covering all CRUD + specialized operations
+- 94 React component files (34 feature + 60 shadcn/ui)
+- All major inventory modules implemented: opening stock, goods received, issue inventory, reserved inventory, returns, stock adjustments, inventory requests (with approve/reject/complete workflow), transaction history, 7 report types
+- SPA architecture with Zustand-based client-side routing (21 pages)
+- 5-role RBAC system with 14 modules and 13 action types
+- Excel export for opening stock (ExcelJS) + CSV export for 7 report types
+- Notification system (dynamic, computed from DB state)
+- Audit logging on all write operations
+- No TypeScript type definition files - all types inline
+- No user management UI (sidebar links to dashboard as placeholder)
+---
+Task ID: 2
+Agent: backend-api-agent
+Task: Update all backend API routes for interconnected inventory system
+
+Work Log:
+- Updated src/app/api/stock/opening/route.ts (GET + POST): Enhanced GET with full stock calculations (currentTotalStock, reservedQuantity, issuedQuantity, returnedQuantity, availableQuantity, toBeUsed, totalBatch, required, ordered), category/supplier inclusions, categoryId filter, date serialization. Changed POST to update existing opening stock instead of blocking duplicates.
+- Created src/app/api/stock/opening/[id]/route.ts: GET (single entry), PUT (edit quantity/remarks with audit), DELETE (only if no other transactions exist for product, with audit).
+- Created src/app/api/stock/opening/import/route.ts: Excel import via multipart form data using ExcelJS. Auto-creates categories and products, generates SKU from specification, handles duplicate imports gracefully (skip or update).
+- Updated src/app/api/stock/opening/export/route.ts: New filename format with dash separator, added columns (Category, Opening Qty, Current Total Stock, Reserved, Issued, Returned, Available), red highlighting for negative Required values.
+- Updated src/app/api/stock/received/route.ts: Added batchNumber and warehouse fields to POST. Both fields included in GET response with date serialization.
+- Updated src/app/api/issues/route.ts: Added productionHall field to POST, included in GET response with date serialization.
+- Updated src/app/api/returns/route.ts: Auto-generated returnNumber (RET-YYYYMMDD-XXX format), added relatedIssueId and reason fields. Validation: checks return quantity against issue-specific or total issued quantities. GET includes relatedIssue details and date serialization.
+- Updated src/app/api/stock/overview/route.ts: Added todayReturned stat (count of InventoryReturn where date >= todayStart).
+- Updated src/app/api/reserved/route.ts: Added expectedReleaseDate field to POST, included in GET response with proper date serialization.
+- Updated src/app/api/inventory/history/route.ts: Added RESERVE and RELEASE_RESERVATION transaction types from ReservedInventory, added departmentId and projectId filters, included user name who performed each action.
+- All lint checks pass with zero errors.
+
+Stage Summary:
+- 10 API route files updated/created with interconnected inventory system support
+- Opening stock: enhanced GET with 12 calculated fields, POST updates duplicates, new [id] route (PUT/DELETE), Excel import route
+- Returns: auto-generated return numbers (RET-YYYYMMDD-XXX), issue-linked returns with quantity validation
+- All routes serialize dates as ISO strings for JSON consistency
+- Stock overview now tracks todayReturned alongside todayReceived and todayIssued
+- Reservations support expectedReleaseDate field
+- Inventory history includes reservation/release events and user names
+---
+Task ID: 3a
+Agent: frontend-opening-stock
+Task: Rewrite Opening Stock page with full inventory management
+
+Work Log:
+- Completely rewrote src/components/stock/opening-stock-page.tsx
+- Header section with title, description, Import from Excel button (Upload icon), Export to Excel button (Download icon)
+- Import Excel Dialog: file upload (.xlsx, .xls), template format info, FormData POST to /api/stock/opening/import, import results display (imported/updated/skipped/errors), loading state
+- Set Opening Stock Form: product select with search, quantity input, remarks input, submit button, removed "already set" restriction
+- Search & Filter Bar: search input (product name/code/SKU), category dropdown filter (from /api/categories), clear filters button
+- Main inventory table with 15 columns: Product (name+code+image), Category, Specification (SKU), Unit, Opening Qty (bold), Current Total Stock (color-coded green/red), Reserved, Issued, Returned, Available (color-coded bold), To Be Used, Required (red bold if negative), Ordered, Remarks (truncated), Actions (Edit/Delete for stock:manage users)
+- Edit Opening Stock Dialog: pre-fills quantity and remarks, PUT to /api/stock/opening/[id], toast on success
+- Delete Confirmation: AlertDialog, DELETE to /api/stock/opening/[id], error message for products with other transactions, toast on success
+- Item Detail Sheet: opens on product name click, product image, full info (name, code, SKU, category, supplier, unit), stock breakdown (opening, received, issued, returned, adjustments, reserved, available), recent transactions (last 5)
+- Pagination with 10/25/50/100 options
+- Products Status Summary Card: Total Items, Opening Set, Pending, Total Stock Value
+- Responsive: key columns visible on mobile (Product, Opening Qty, Current Stock, Available), others hidden at breakpoints
+- Color coding: text-red-600 dark:text-red-400 font-bold for negative Required, text-emerald-600 dark:text-emerald-400 for positive values
+- Loading skeletons, empty states, tooltips on action buttons
+- Permission checks: canManage for import/create/edit/delete, canView for page access (shows access denied otherwise)
+- Used react-hook-form + zod for set/edit forms, date-fns format, fetch() for API calls
+- Lint clean: zero errors, zero warnings
+
+Stage Summary:
+- Complete inventory management page with all 15 columns of enhanced data from GET /api/stock/opening
+- Import/Export Excel functionality with dialog UX
+- Full CRUD operations (create, edit, delete) with permission checks
+- Detail sheet with stock breakdown and recent transactions
+- Responsive table design with mobile-friendly column hiding
+- Professional UI with color-coded values, tooltips, and loading states
+---
+Task ID: 3b
+Agent: frontend-grn-issue-return-reserved
+Task: Update GRN, Issue, Return, Reserved pages with new fields
+
+Work Log:
+- Updated `src/components/stock/goods-received-page.tsx`: Added `batchNumber` and `warehouse` fields to GoodsReceivedItem interface, added Batch # and Warehouse columns to table (hidden on smaller screens via lg: breakpoint), updated search placeholder to include batch number, updated skeleton colSpan from 10 to 12, updated empty state colSpan, moved Source and Received By to xl: breakpoint, added Batch # and Warehouse to detail dialog
+- Updated `src/components/stock/goods-received-form-dialog.tsx`: Added `batchNumber` and `warehouse` optional string fields to zod schema, added to default values and form.reset, added 2-column grid with Batch Number and Warehouse input fields between invoice row and quantity row
+- Updated `src/components/issues/issue-inventory-page.tsx`: Added `productionHall` field to IssueItem interface, added Production Hall column (lg: breakpoint) before Remarks, updated skeleton colSpan from 9 to 10, updated empty state colSpan
+- Updated `src/components/issues/issue-form-dialog.tsx`: Added `productionHall` optional string field to zod schema, added to default values and form.reset, added Production Hall input field in Step 6 (Remarks) before the remarks textarea
+- Updated `src/components/returns/returns-page.tsx`: Added `returnNumber`, `relatedIssueId`, `reason`, `relatedIssue` fields to ReturnItem interface, added Return # (first column, font-mono), Reason (md:), Related Issue (lg:, shows issue date + product name) columns, updated search placeholder to include return #, updated skeleton colSpan from 8 to 10, updated empty state colSpan, moved Employee to xl: and Returned By to xl:
+- Updated `src/components/returns/return-form-dialog.tsx`: Complete rewrite - added RETURN_REASONS constant array, added `reason` (select dropdown) and `relatedIssueId` (optional select, fetched from /api/issues?productId={id}) to zod schema, added RelatedIssue interface, added issue fetching on product change, added Reason dropdown with 5 common reasons, added Related Issue select that loads issues for selected product, added reason to summary display, cleans empty optional fields before POST
+- Updated `src/components/reserved/reserved-inventory-page.tsx`: Added `expectedReleaseDate` field to ReservationItem interface, added Expected Release column (lg: breakpoint) between Status and Reserved By, displays formatted date or dash
+- Updated `src/components/reserved/reserve-form-dialog.tsx`: Added `expectedReleaseDate` optional string field to zod schema, added to default values and form.reset, imported Popover/PopoverContent/PopoverTrigger/Calendar/CalendarIcon/format, added dateOpen state, added Popover+Calendar date picker between Reason and Remarks fields, cleans empty optional fields before POST
+- All 8 files pass lint with zero errors
+
+Stage Summary:
+- Goods Received: Batch Number + Warehouse columns and form fields added
+- Issue Inventory: Production Hall column and form field added
+- Returns: Return Number (monospace), Reason, Related Issue columns added; form updated with Reason dropdown (5 options) and Related Issue select (dynamic based on product)
+- Reserved: Expected Release Date column (formatted) and Popover+Calendar date picker added
+- All new fields are optional and backend-compatible (sent in POST body, empty strings cleaned)
+---
+Task ID: 3c
+Agent: frontend-dashboard
+Task: Enhance Dashboard with comprehensive inventory summary cards
+
+Work Log:
+- Read existing dashboard-page.tsx and stock-overview-widget.tsx to understand current structure
+- Read worklog (last 200 lines) for project context
+- Added todayReturned to OverviewStats interface
+- Added new icon imports: Package, Layers, CheckCircle, RotateCcw
+- Removed unused icons from previous version
+- Created DashboardSkeleton matching new 7-section layout with proper grid shapes
+- Added hover:shadow-md to all StatCards (not just clickable ones)
+- Added Key Metrics Row (grid sm:2 lg:4): Total Inventory Items (Package/slate), Current Total Stock (Layers/emerald), Available Stock (CheckCircle/green), Reserved Stock (Lock/amber)
+- Added Today's Activity section (grid sm:3): Issued Today (ArrowUpFromLine/orange), Goods Received Today (ArrowDownToLine/emerald), Returned Today (RotateCcw/sky)
+- Added Alert Cards section (grid sm:2): Low Stock Items (AlertTriangle/red, clickable→products), Out of Stock Items (PackageX/rose, clickable→products), Pending Requests (ClipboardList/cyan, clickable→requests)
+- Created StockDistributionCard component: shows Available/Reserved/Issued with colored progress bars, percentage calculations, and total stock description
+- Charts Section (grid md:2): Monthly Overview bar chart (kept existing, increased height to 280px) + Stock Distribution card
+- Kept Account Info Card as full-width at bottom
+- Added section headings (Today's Activity, Alerts, Analytics)
+- Added loading state with setLoading for stats fetch
+- Lint clean: zero errors
+
+Stage Summary:
+- Dashboard now has 7 distinct sections: Welcome Header, Stock Overview Widget, Key Metrics, Today's Activity, Alerts, Analytics (chart + distribution), Account Info
+- 3 new stat card groups with proper color coding and responsive grids
+- Stock Distribution card with animated progress bars showing available/reserved/issued percentages
+- todayReturned field integrated from /api/stock/overview
+- All clickable alert cards navigate to appropriate pages
+- Fully responsive design (mobile-first with sm/md/lg breakpoints)
+---
+Task ID: 3d
+Agent: frontend-history
+Task: Enhance History page with department/project filters and new transaction types
+
+Work Log:
+- Updated Transaction interface to include `userName: string | null` field
+- Updated TYPE_CONFIG badge colors to match spec: OPENING_STOCK → emerald, GOODS_RECEIVED → green, ISSUED → orange, RETURNED → sky blue, ADJUSTMENT_IN → teal, ADJUSTMENT_OUT → rose
+- Added RESERVE type (amber badge, Lock icon, "Reserved" label) and RELEASE_RESERVATION type (blue badge, Unlock icon, "Released" label) to TYPE_CONFIG
+- Added both new types to TRANSACTION_TYPES dropdown array
+- Added Department and Project select dropdown filters that fetch from /api/departments and /api/projects on mount
+- Both filters pass departmentId/projectId query params to /api/inventory/history
+- Added User column (lg: breakpoint) showing userName with User icon
+- Added "Clear All Filters" button (outline, X icon) that resets search, type, department, project, dateFrom, dateTo and resets to page 1
+- Reorganized filter bar into two responsive rows: Row 1 (search, type, department, project), Row 2 (date range, clear button)
+- Moved Reference column to lg: breakpoint alongside User column; Remarks stays at md: breakpoint
+- Removed unused Filter and useAppStore imports, added X, Lock, Unlock, User icon imports
+- Lint clean: zero errors
+
+Stage Summary:
+- History page now supports 6 filter dimensions: search, type, department, project, dateFrom, dateTo
+- All 8 transaction types displayed with correct color-coded badges and icons
+- User column shows who performed each transaction action
+- Clear All Filters button provides one-click reset of all filters
+- Responsive layout: filters stack vertically on mobile, table columns hide at appropriate breakpoints
+
+---
+Task ID: 3a-5-verification
+Agent: Main (Z.ai Code)
+Task: Final verification of all interconnected inventory system updates
+
+Work Log:
+- Verified all APIs work correctly with curl (server alive during requests)
+- Opening Stock API returns 12 calculated fields per entry (23 total fields)
+- Stock Overview API includes todayReturned stat
+- Excel export generates valid .xlsx with 16 columns, freeze panes, auto-filter
+- History, Goods Received, Reserved, Returns, Issues APIs all return valid responses
+- Lint passes with zero errors
+- Production build succeeds with all new routes (/api/stock/opening/[id], /api/stock/opening/import)
+- Browser E2E testing limited by sandbox memory constraints (Chrome + Node.js together exceed process limits)
+- Login page renders correctly in browser (verified via agent-browser)
+
+Stage Summary:
+- ALL 9 API endpoints verified working
+- Excel export: 16 columns (Sr/No, Name, Specs, Category, A/U, Opening Qty, Current Total Stock, Reserved, Issued, Returned, Available, To Be Used, Total Batch, Required, Ordered, Remarks)
+- Filename: Opening Stock - Electronic Connectors - YYYY-MM-DD.xlsx
+- Zero lint errors, clean production build
+- Frontend components updated for all modules
+- Prisma schema updated with new fields (batchNumber, warehouse, productionHall, returnNumber, relatedIssueId, reason on returns, expectedReleaseDate)

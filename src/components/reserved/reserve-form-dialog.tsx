@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Loader2, Package, FolderKanban, Hash, AlignLeft, MessageSquare } from 'lucide-react'
+import { Loader2, Package, FolderKanban, Hash, AlignLeft, MessageSquare, CalendarIcon } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -32,6 +32,13 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Badge } from '@/components/ui/badge'
+import { format } from 'date-fns'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
+import { Calendar } from '@/components/ui/calendar'
 
 interface Project {
   id: string
@@ -54,6 +61,7 @@ const reserveSchema = z.object({
   projectId: z.string().min(1, 'Please select a project'),
   quantity: z.coerce.number().int().positive('Quantity must be at least 1'),
   reason: z.string().max(200).optional(),
+  expectedReleaseDate: z.string().optional(),
   remarks: z.string().max(500).optional(),
 })
 
@@ -77,6 +85,7 @@ export function ReserveFormDialog({
   const [stockLoading, setStockLoading] = useState(false)
   const [productSearch, setProductSearch] = useState('')
   const [projectSearch, setProjectSearch] = useState('')
+  const [dateOpen, setDateOpen] = useState(false)
 
   const form = useForm<ReserveFormValues>({
     resolver: zodResolver(reserveSchema),
@@ -85,6 +94,7 @@ export function ReserveFormDialog({
       projectId: '',
       quantity: 1,
       reason: '',
+      expectedReleaseDate: '',
       remarks: '',
     },
     mode: 'onChange',
@@ -102,11 +112,13 @@ export function ReserveFormDialog({
         projectId: '',
         quantity: 1,
         reason: '',
+        expectedReleaseDate: '',
         remarks: '',
       })
       setAvailableStock(null)
       setProductSearch('')
       setProjectSearch('')
+      setDateOpen(false)
 
       fetch('/api/projects?limit=200&status=ACTIVE')
         .then((r) => r.json())
@@ -137,10 +149,15 @@ export function ReserveFormDialog({
   async function onSubmit(values: ReserveFormValues) {
     setLoading(true)
     try {
+      const body: Record<string, unknown> = { ...values }
+      if (!body.expectedReleaseDate) delete body.expectedReleaseDate
+      if (!body.reason) delete body.reason
+      if (!body.remarks) delete body.remarks
+
       const res = await fetch('/api/reserved', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(values),
+        body: JSON.stringify(body),
       })
       if (res.ok) {
         onSuccess()
@@ -356,6 +373,48 @@ export function ReserveFormDialog({
                       {...field}
                     />
                   </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            {/* Expected Release Date */}
+            <FormField
+              control={form.control}
+              name="expectedReleaseDate"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="flex items-center gap-1.5">
+                    <CalendarIcon className="size-3.5" />
+                    Expected Release Date
+                  </FormLabel>
+                  <Popover open={dateOpen} onOpenChange={setDateOpen}>
+                    <PopoverTrigger asChild>
+                      <FormControl>
+                        <Button
+                          variant="outline"
+                          className="w-full justify-start text-left font-normal"
+                          type="button"
+                        >
+                          {field.value ? format(new Date(field.value), 'MMM dd, yyyy') : 'Pick a date'}
+                        </Button>
+                      </FormControl>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={field.value ? new Date(field.value) : undefined}
+                        onSelect={(d) => {
+                          if (d) {
+                            field.onChange(format(d, 'yyyy-MM-dd'))
+                            setDateOpen(false)
+                          } else {
+                            field.onChange('')
+                          }
+                        }}
+                      />
+                    </PopoverContent>
+                  </Popover>
                   <FormMessage />
                 </FormItem>
               )}

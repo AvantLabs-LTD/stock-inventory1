@@ -624,4 +624,27 @@
    624→- Error handling: 404 for empty data, 401 for unauthorized, 500 for server errors
    625→- Frontend: Export to Excel button with loading state and toast notifications
    626→- Verified: VLM confirms button visible on Opening Stock page, API returns valid .xlsx with correct structure
-   627→
+   627→---
+   628→Task ID: fix-502-exceljs-missing
+   629→Agent: Main (Z.ai Code)
+   630→Task: Fix 502 Bad Gateway caused by exceljs not being bundled in standalone production build.
+   631→
+   632→Work Log:
+   633→- Diagnosed that the standalone production server crashed when accessing /api/stock/opening/export
+   634→- Root cause: exceljs package was not included in .next/standalone/node_modules/
+   635→- Fixed by:
+   636→  1. Added `serverExternalPackages: ["exceljs"]` to next.config.ts
+   637→  2. Updated start-prod.sh to auto-copy exceljs to standalone node_modules
+   638→  3. Rebuilt production bundle with bun run build
+   639→- Verified export endpoint returns valid .xlsx file (7353 bytes, Excel 2007+ format)
+   640→- Verified Excel contents: 10 columns, bold headers, freeze panes A2, auto-filter A1:J1, 5 data rows
+   641→- Browser E2E test: Export to Excel button visible, click triggers download, toast shows "Excel file downloaded successfully"
+   642→
+   643→Stage Summary:
+   644→- 502 Bad Gateway on export endpoint FIXED
+   645→- Export to Excel feature fully functional:
+   646→  - API: GET /api/stock/opening/export → formatted .xlsx with Electronic Connectors data
+   647→  - Frontend: Export to Excel button with loading state and toast notifications
+   648→  - Excel formatting: bold headers, freeze panes, auto-filter, column widths, borders, negative highlighting
+   649→  - File naming: Opening Stock - Electronic Connectors_YYYY-MM-DD.xlsx
+   650→

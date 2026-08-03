@@ -45,6 +45,7 @@ interface ReservationItem {
   reservedBy: string
   releasedBy: string | null
   releasedAt: string | null
+  expectedReleaseDate: string | null
   remarks: string | null
   createdAt: string
   product: { id: string; name: string; code: string; unit: string }
@@ -216,7 +217,8 @@ export function ReservedInventoryPage() {
               <TableHead className="text-center">Qty</TableHead>
               <TableHead className="hidden md:table-cell">Reason</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead className="hidden lg:table-cell">Reserved By</TableHead>
+              <TableHead className="hidden lg:table-cell">Expected Release</TableHead>
+              <TableHead className="hidden xl:table-cell">Reserved By</TableHead>
               <TableHead className="hidden xl:table-cell">Date</TableHead>
               <TableHead className="w-[60px] text-right">Actions</TableHead>
             </TableRow>
@@ -285,7 +287,12 @@ export function ReservedInventoryPage() {
                       </Badge>
                     )}
                   </TableCell>
-                  <TableCell className="hidden lg:table-cell text-sm">
+                  <TableCell className="hidden lg:table-cell text-sm whitespace-nowrap">
+                    {item.expectedReleaseDate
+                      ? format(new Date(item.expectedReleaseDate), 'MMM dd, yyyy')
+                      : <span className="text-muted-foreground">—</span>}
+                  </TableCell>
+                  <TableCell className="hidden xl:table-cell text-sm">
                     {item.reservedByUser.name}
                   </TableCell>
                   <TableCell className="hidden xl:table-cell text-sm whitespace-nowrap">

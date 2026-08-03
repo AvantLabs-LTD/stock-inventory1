@@ -56,8 +56,17 @@ export async function GET(request: NextRequest) {
       db.reservedInventory.count({ where }),
     ])
 
+    // Serialize dates
+    const serializedItems = items.map((item) => ({
+      ...item,
+      expectedReleaseDate: item.expectedReleaseDate ? item.expectedReleaseDate.toISOString() : null,
+      releasedAt: item.releasedAt ? item.releasedAt.toISOString() : null,
+      createdAt: item.createdAt.toISOString(),
+      updatedAt: item.updatedAt.toISOString(),
+    }))
+
     return Response.json({
-      data: items,
+      data: serializedItems,
       pagination: {
         page,
         limit,
@@ -82,7 +91,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { productId, projectId, quantity, reason, remarks } = body
+    const { productId, projectId, quantity, reason, expectedReleaseDate, remarks } = body
 
     // Validate required fields
     if (!productId || !projectId || !quantity) {
@@ -121,7 +130,6 @@ export async function POST(request: NextRequest) {
     }
 
     // Calculate available stock
-    // Available = (Opening + Received + Returned + AdjIn) - Issued - AdjOut - Reserved
     const transactions = await db.inventoryTransaction.findMany({
       where: { productId },
     })
@@ -172,6 +180,7 @@ export async function POST(request: NextRequest) {
         projectId,
         quantity,
         reason: reason || null,
+        expectedReleaseDate: expectedReleaseDate ? new Date(expectedReleaseDate) : null,
         remarks: remarks || null,
         reservedBy: session.user.id,
         status: 'ACTIVE',
@@ -191,11 +200,16 @@ export async function POST(request: NextRequest) {
         action: 'RESERVED',
         entityType: 'ReservedInventory',
         entityId: reservation.id,
-        details: `Reserved ${quantity} ${product.unit} of ${product.name} for ${project.name}${reason ? ` (Reason: ${reason})` : ''}`,
+        details: `Reserved ${quantity} ${product.unit} of ${product.name} for ${project.name}${reason ? ` (Reason: ${reason})` : ''}${expectedReleaseDate ? ` (Expected release: ${expectedReleaseDate})` : ''}`,
       },
     })
 
-    return Response.json(reservation, { status: 201 })
+    return Response.json({
+      ...reservation,
+      expectedReleaseDate: reservation.expectedReleaseDate ? reservation.expectedReleaseDate.toISOString() : null,
+      createdAt: reservation.createdAt.toISOString(),
+      updatedAt: reservation.updatedAt.toISOString(),
+    }, { status: 201 })
   } catch (error) {
     console.error('POST /api/reserved error:', error)
     return Response.json({ error: 'Failed to create reservation' }, { status: 500 })

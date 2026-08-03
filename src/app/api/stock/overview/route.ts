@@ -128,11 +128,14 @@ export async function GET(request: NextRequest) {
     const todayStart = new Date()
     todayStart.setHours(0, 0, 0, 0)
 
-    const [todayReceived, todayIssued] = await Promise.all([
+    const [todayReceived, todayIssued, todayReturned] = await Promise.all([
       db.goodsReceived.count({
         where: { date: { gte: todayStart } },
       }),
       db.inventoryIssue.count({
+        where: { date: { gte: todayStart } },
+      }),
+      db.inventoryReturn.count({
         where: { date: { gte: todayStart } },
       }),
     ])
@@ -149,6 +152,7 @@ export async function GET(request: NextRequest) {
       outOfStockItems: outOfStockItems.slice(0, 10),
       todayReceived,
       todayIssued,
+      todayReturned,
     })
   } catch (error) {
     console.error('GET /api/stock/overview error:', error)
