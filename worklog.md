@@ -594,3 +594,33 @@ Stage Summary:
 - Production standalone server running (PID 3104, 117MB RAM, fully detached)
 - Login: admin@inventorypro.com / Admin@123
 - All 5 demo accounts work with password Admin@123
+
+---
+Task ID: EXPORT-EXCEL-OPENING-STOCK
+Agent: Main (Z.ai Code)
+Task: Design and implement Export to Excel button for Opening Stock module, matching the format from uploaded BOM Excel file.
+
+Work Log:
+- Analyzed uploaded BOM file (Consolidated BOM_1_1_1_1.xlsx) - studied Aux sheet format with columns: Sr/No, Name, Specs, A/U, To be Used, Total/Batch, In Stock, Req, Ordered, Remarks
+- Explored existing codebase: OpeningStockPage component, /api/stock/opening route, /api/reports/export/excel route, prisma schema
+- Installed exceljs package for proper .xlsx generation with formatting
+- Created backend API: src/app/api/stock/opening/export/route.ts
+  - GET endpoint with session + permission (stock:view) auth check
+  - Returns 404 with user-friendly message for empty datasets
+  - Calculates all 6 columns: Quantity in Total Stock (available), To Be Used (issued+reserved), Total Batch (entry count), Required (stock - used), Ordered (pending requests), Remarks
+  - Uses ExcelJS for proper .xlsx formatting: bold white-on-dark headers, freeze panes A2, auto-filter A1:J1, thin borders, column widths, right-aligned numbers, red bold for negative Required values
+  - File naming: Opening Stock - Electronic Connectors_YYYY-MM-DD.xlsx
+- Modified frontend: src/components/stock/opening-stock-page.tsx
+  - Added Download icon import from lucide-react
+  - Added exporting state and handleExportExcel function (fetches blob, creates download link, shows toast)
+  - Added Export to Excel button next to Opening Stock Entries heading with loading spinner
+ - Rebuilt production standalone server, verified all tests pass
+
+Stage Summary:
+- New API: GET /api/stock/opening/export → returns formatted .xlsx file
+- Excel formatting: bold headers, freeze panes, auto-filters, column widths, negative value highlighting
+- File naming: includes date and report name
+- Permission: requires stock:view (all roles have this)
+- Error handling: 404 for empty data, 401 for unauthorized, 500 for server errors
+- Frontend: Export to Excel button with loading state and toast notifications
+- Verified: VLM confirms button visible on Opening Stock page, API returns valid .xlsx with correct structure

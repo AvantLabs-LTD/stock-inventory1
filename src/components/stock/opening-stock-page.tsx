@@ -8,6 +8,7 @@ import { format } from 'date-fns'
 import {
   ArrowDownToLine,
   CheckCircle2,
+  Download,
   Loader2,
   Search,
   X,
@@ -81,6 +82,7 @@ export function OpeningStockPage() {
   const [totalEntries, setTotalEntries] = useState(0)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const [productSearch, setProductSearch] = useState('')
   const [tableSearch, setTableSearch] = useState('')
   const [tableSearchInput, setTableSearchInput] = useState('')
@@ -160,6 +162,35 @@ export function OpeningStockPage() {
       toast.error('Network error. Please try again.')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  async function handleExportExcel() {
+    setExporting(true)
+    try {
+      const res = await fetch('/api/stock/opening/export')
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        toast.error(data.error || `Export failed (${res.status})`)
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      // Extract filename from Content-Disposition
+      const cd = res.headers.get('Content-Disposition') || ''
+      const match = cd.match(/filename="?(.+?)"?$/)
+      a.download = match ? decodeURIComponent(match[1]) : `Opening Stock - Electronic Connectors_${new Date().toISOString().split('T')[0]}.xlsx`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+      toast.success('Excel file downloaded successfully')
+    } catch {
+      toast.error('Failed to export. Please try again.')
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -295,7 +326,23 @@ export function OpeningStockPage() {
       {/* Opening Stock Entries Table */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">Opening Stock Entries</CardTitle>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <CardTitle className="text-base">Opening Stock Entries</CardTitle>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportExcel}
+              disabled={exporting || loading}
+              className="gap-2"
+            >
+              {exporting ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Download className="size-4" />
+              )}
+              Export to Excel
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Table Search */}
