@@ -374,6 +374,66 @@ export function OpeningStockPage() {
 
   // ─── Import Excel ─────────────────────────────────────────────────────
 
+  const [dragOver, setDragOver] = useState(false)
+  const [uploadError, setUploadError] = useState('')
+
+  function validateFile(file: File): string | null {
+    const validExts = ['.xlsx', '.xls', '.csv']
+    const validMimes = [
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-excel',
+      'text/csv',
+      'application/csv',
+      'application/octet-stream',
+    ]
+    const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase()
+    if (!validExts.includes(ext) && !validMimes.includes(file.type)) {
+      return 'Only .xlsx, .xls, or .csv files are supported'
+    }
+    if (file.size > 50 * 1024 * 1024) {
+      return 'File is too large. Maximum size is 50 MB.'
+    }
+    if (file.size === 0) {
+      return 'File is empty. Please select a valid file.'
+    }
+    return null
+  }
+
+  function handleFileSelect(file: File | undefined) {
+    setUploadError('')
+    if (!file) {
+      setImportFile(null)
+      return
+    }
+    const error = validateFile(file)
+    if (error) {
+      setUploadError(error)
+      setImportFile(null)
+      return
+    }
+    setImportFile(file)
+  }
+
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragOver(true)
+  }
+
+  function handleDragLeave(e: React.DragEvent) {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragOver(false)
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragOver(false)
+    const file = e.dataTransfer.files[0]
+    handleFileSelect(file)
+  }
+
   async function handleImportExcel() {
     if (!importFile) {
       toast.error('Please select a file first')
@@ -381,6 +441,7 @@ export function OpeningStockPage() {
     }
     setImporting(true)
     setImportResult(null)
+    setUploadError('')
     try {
       const formData = new FormData()
       formData.append('file', importFile)
@@ -394,12 +455,17 @@ export function OpeningStockPage() {
         setImportResult(data)
         toast.success(data.message || 'Import completed')
         fetchEntries()
+        fetchProducts()
+        fetchCategories()
       } else {
         toast.error(data.error || 'Import failed')
         setImportResult({ success: false, message: data.error || 'Import failed', imported: 0, updated: 0, skipped: 0, errors: [] })
       }
-    } catch {
-      toast.error('Failed to import. Please try again.')
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to import. Please try again.'
+      toast.error(msg)
+      setUploadError(msg)
+      setImportResult({ success: false, message: msg, imported: 0, updated: 0, skipped: 0, errors: [] })
     } finally {
       setImporting(false)
     }
@@ -408,6 +474,8 @@ export function OpeningStockPage() {
   function resetImportDialog() {
     setImportFile(null)
     setImportResult(null)
+    setUploadError('')
+    setDragOver(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
@@ -1052,43 +1120,89 @@ export function OpeningStockPage() {
 
       {/* ─── Import Excel Dialog ──────────────────────────────────────── */}
       <Dialog open={importDialogOpen} onOpenChange={(open) => { setImportDialogOpen(open); if (!open) resetImportDialog() }}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Upload className="size-5" />
               Import from Excel
             </DialogTitle>
             <DialogDescription>
-              Upload an Excel file with opening stock data. Products will be auto-created if they don&apos;t exist.
+              Upload an Excel/CSV file with opening stock or BOM data. Products and categories will be auto-created.
             </DialogDescription>
           </DialogHeader>
 
           {!importResult ? (
             <div className="space-y-4">
               <div className="rounded-lg border bg-muted/30 p-4 space-y-2">
-                <p className="text-sm font-medium">Template Format</p>
+                <p className="text-sm font-medium">Supported Formats</p>
                 <p className="text-xs text-muted-foreground">
-                  Columns: <span className="font-mono font-medium">Name, Specification, Category, Unit, Quantity, Remarks</span>
+                  <span className="font-mono font-medium">.xlsx</span>, <span className="font-mono font-medium">.xls</span>, <span className="font-mono font-medium">.csv</span> — Max 50 MB
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Only <span className="font-mono">Name</span> and <span className="font-mono">Quantity</span> are required.
+                  Expected columns: <span className="font-mono font-medium">Name, Specification, Category, Unit, Quantity, Remarks</span>
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Only <span className="font-mono">Name</span> and <span className="font-mono">Quantity</span> are required. BOM files with model columns are also supported.
                 </p>
               </div>
 
-              <div className="space-y-2">
-                <Input
+              {/* Drag & Drop Zone */}
+              <div
+                role="button"
+                tabIndex={0}
+                aria-label="Click or drag and drop to upload file"
+                className={`relative flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-8 transition-colors cursor-pointer ${
+                  dragOver
+                    ? 'border-primary bg-primary/5 scale-[1.01]'
+                    : importFile
+                      ? 'border-emerald-300 bg-emerald-50/50 dark:border-emerald-700 dark:bg-emerald-900/10'
+                      : 'border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/50'
+                }`}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                onClick={() => fileInputRef.current?.click()}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInputRef.current?.click() } }}
+              >
+                <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".xlsx,.xls"
-                  onChange={(e) => setImportFile(e.target.files?.[0] || null)}
+                  accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv,application/octet-stream"
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    handleFileSelect(file)
+                  }}
+                  tabIndex={-1}
+                  aria-hidden="true"
                 />
-                {importFile && (
-                  <p className="text-sm text-muted-foreground flex items-center gap-1">
-                    <CheckCircle2 className="size-3.5 text-emerald-500" />
-                    {importFile.name} ({(importFile.size / 1024).toFixed(1)} KB)
-                  </p>
+                {importFile ? (
+                  <>
+                    <CheckCircle2 className="size-10 text-emerald-500 mb-2" />
+                    <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">{importFile.name}</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {(importFile.size / 1024).toFixed(1)} KB · Click or drop to replace
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <Upload className="size-10 text-muted-foreground/50 mb-2" />
+                    <p className="text-sm font-medium text-muted-foreground">
+                      {dragOver ? 'Drop your file here' : 'Click to browse or drag & drop'}
+                    </p>
+                    <p className="text-xs text-muted-foreground/70 mt-1">
+                      Supports .xlsx, .xls, .csv files
+                    </p>
+                  </>
                 )}
               </div>
+
+              {uploadError && (
+                <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 dark:bg-red-900/20 dark:border-red-800">
+                  <AlertCircle className="size-4 text-red-500 mt-0.5 shrink-0" />
+                  <p className="text-sm text-red-600 dark:text-red-400">{uploadError}</p>
+                </div>
+              )}
 
               <DialogFooter>
                 <Button variant="outline" onClick={() => setImportDialogOpen(false)}>
