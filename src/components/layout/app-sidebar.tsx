@@ -3,8 +3,7 @@
 import {
   LayoutDashboard,
   Package,
-  Tags,
-  Truck,
+
   ArrowDownToLine,
   Building2,
   FolderKanban,
@@ -63,20 +62,7 @@ const navItems: NavItem[] = [
     module: "products",
     action: "view",
   },
-  {
-    title: "Categories",
-    icon: Tags,
-    page: "categories",
-    module: "categories",
-    action: "view",
-  },
-  {
-    title: "Suppliers",
-    icon: Truck,
-    page: "suppliers",
-    module: "suppliers",
-    action: "view",
-  },
+
 ]
 
 const inventoryItems: NavItem[] = [
