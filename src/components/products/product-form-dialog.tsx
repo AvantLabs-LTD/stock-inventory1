@@ -15,7 +15,6 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
 import {
   Select,
   SelectContent,
@@ -32,19 +31,14 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 
-const UNITS = ['pcs', 'kg', 'm', 'l', 'box', 'roll', 'set', 'pair']
+const UNITS = ['pcs', 'roll', 'mtr', 'core', 'kg', 'box', 'set']
 
 const productSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters'),
-  sku: z.string().min(2, 'SKU must be at least 2 characters'),
+  sku: z.string().min(1, 'SKU is required'),
+  size: z.string().optional(),
   categoryId: z.string().optional(),
-  supplierId: z.string().optional(),
-  manufacturer: z.string().optional(),
-  modelNumber: z.string().optional(),
   unit: z.string().default('pcs'),
-  image: z.string().url('Must be a valid URL').optional().or(z.literal('')),
-  description: z.string().optional(),
-  storageLocation: z.string().optional(),
   minimumStock: z.coerce.number().int().min(0).default(0),
   unitCost: z.coerce.number().min(0).default(0),
   status: z.string().default('ACTIVE'),
@@ -59,11 +53,6 @@ interface Category {
   parentId: string | null
 }
 
-interface Supplier {
-  id: string
-  name: string
-}
-
 interface ProductFormDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -71,14 +60,9 @@ interface ProductFormDialogProps {
     id: string
     name: string
     sku: string
+    size: string | null
     categoryId: string | null
-    supplierId: string | null
-    manufacturer: string | null
-    modelNumber: string | null
     unit: string
-    image: string | null
-    description: string | null
-    storageLocation: string | null
     minimumStock: number
     unitCost: number
     status: string
@@ -94,21 +78,15 @@ export function ProductFormDialog({
 }: ProductFormDialogProps) {
   const [loading, setLoading] = useState(false)
   const [categories, setCategories] = useState<Category[]>([])
-  const [suppliers, setSuppliers] = useState<Supplier[]>([])
 
   const form = useForm<ProductFormValues>({
     resolver: zodResolver(productSchema),
     defaultValues: {
       name: '',
       sku: '',
+      size: '',
       categoryId: '',
-      supplierId: '',
-      manufacturer: '',
-      modelNumber: '',
       unit: 'pcs',
-      image: '',
-      description: '',
-      storageLocation: '',
       minimumStock: 0,
       unitCost: 0,
       status: 'ACTIVE',
@@ -117,23 +95,18 @@ export function ProductFormDialog({
 
   useEffect(() => {
     if (open) {
-      Promise.all([
-        fetch('/api/categories').then((r) => r.json()).then((d) => setCategories(d.data || [])),
-        fetch('/api/suppliers?limit=100').then((r) => r.json()).then((d) => setSuppliers(d.data || [])),
-      ]).catch(() => {})
+      fetch('/api/categories')
+        .then((r) => r.json())
+        .then((d) => setCategories(d.data || []))
+        .catch(() => {})
 
       if (product) {
         form.reset({
           name: product.name,
           sku: product.sku,
+          size: product.size || '',
           categoryId: product.categoryId || '',
-          supplierId: product.supplierId || '',
-          manufacturer: product.manufacturer || '',
-          modelNumber: product.modelNumber || '',
           unit: product.unit,
-          image: product.image || '',
-          description: product.description || '',
-          storageLocation: product.storageLocation || '',
           minimumStock: product.minimumStock,
           unitCost: product.unitCost,
           status: product.status,
@@ -142,14 +115,9 @@ export function ProductFormDialog({
         form.reset({
           name: '',
           sku: '',
+          size: '',
           categoryId: '',
-          supplierId: '',
-          manufacturer: '',
-          modelNumber: '',
           unit: 'pcs',
-          image: '',
-          description: '',
-          storageLocation: '',
           minimumStock: 0,
           unitCost: 0,
           status: 'ACTIVE',
@@ -184,13 +152,13 @@ export function ProductFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>{product ? 'Edit Product' : 'Add New Product'}</DialogTitle>
           <DialogDescription>
             {product
               ? 'Update the product information below.'
-              : 'Fill in the details to create a new product. Product code is auto-generated.'}
+              : 'Add a new part/item to your inventory catalog.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -210,7 +178,7 @@ export function ProductFormDialog({
                   <FormItem>
                     <FormLabel>Name *</FormLabel>
                     <FormControl>
-                      <Input placeholder="Product name" {...field} />
+                      <Input placeholder="e.g. Braided Sleeve" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -223,7 +191,7 @@ export function ProductFormDialog({
                   <FormItem>
                     <FormLabel>SKU *</FormLabel>
                     <FormControl>
-                      <Input placeholder="e.g. SKU-001" {...field} />
+                      <Input placeholder="e.g. BS-4MM" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -232,6 +200,19 @@ export function ProductFormDialog({
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
+              <FormField
+                control={form.control}
+                name="size"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Specification</FormLabel>
+                    <FormControl>
+                      <Input placeholder="e.g. 4mm, 12 AWG, 0.2mm" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
               <FormField
                 control={form.control}
                 name="categoryId"
@@ -253,60 +234,6 @@ export function ProductFormDialog({
                         ))}
                       </SelectContent>
                     </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="supplierId"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Supplier</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value || ''}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select supplier" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="none">None</SelectItem>
-                        {suppliers.map((sup) => (
-                          <SelectItem key={sup.id} value={sup.id}>
-                            {sup.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <FormField
-                control={form.control}
-                name="manufacturer"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Manufacturer</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Manufacturer name" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="modelNumber"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Model Number</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Model number" {...field} />
-                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -365,53 +292,6 @@ export function ProductFormDialog({
                 )}
               />
             </div>
-
-            <FormField
-              control={form.control}
-              name="storageLocation"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Storage Location</FormLabel>
-                  <FormControl>
-                    <Input placeholder="e.g. Warehouse A, Shelf 3" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="image"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Image URL</FormLabel>
-                  <FormControl>
-                    <Input placeholder="https://example.com/image.jpg" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="description"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Description</FormLabel>
-                  <FormControl>
-                    <Textarea
-                      placeholder="Product description..."
-                      className="resize-none"
-                      rows={3}
-                      {...field}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
 
             <FormField
               control={form.control}

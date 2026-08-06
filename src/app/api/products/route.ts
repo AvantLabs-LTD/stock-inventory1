@@ -19,7 +19,6 @@ export async function GET(request: NextRequest) {
     const search = searchParams.get('search') || ''
     const categoryId = searchParams.get('categoryId') || ''
     const status = searchParams.get('status') || ''
-    const supplierId = searchParams.get('supplierId') || ''
     const sort = searchParams.get('sort') || 'createdAt'
     const order = searchParams.get('order') || 'desc'
 
@@ -30,12 +29,12 @@ export async function GET(request: NextRequest) {
         { name: { contains: search } },
         { code: { contains: search } },
         { sku: { contains: search } },
+        { size: { contains: search } },
       ]
     }
 
     if (categoryId) where.categoryId = categoryId
     if (status) where.status = status
-    if (supplierId) where.supplierId = supplierId
 
     const orderBy: Record<string, string> = { [sort]: order }
 
@@ -47,7 +46,6 @@ export async function GET(request: NextRequest) {
         take: limit,
         include: {
           category: { select: { id: true, name: true, code: true } },
-          supplier: { select: { id: true, name: true } },
         },
       }),
       db.product.count({ where }),
@@ -82,14 +80,9 @@ export async function POST(request: NextRequest) {
     const {
       name,
       sku,
+      size,
       categoryId,
-      supplierId,
-      manufacturer,
-      modelNumber,
       unit,
-      image,
-      description,
-      storageLocation,
       minimumStock,
       unitCost,
       status,
@@ -110,21 +103,15 @@ export async function POST(request: NextRequest) {
         code,
         name,
         sku,
+        size: size || null,
         categoryId: categoryId || null,
-        supplierId: supplierId || null,
-        manufacturer: manufacturer || null,
-        modelNumber: modelNumber || null,
         unit: unit || 'pcs',
-        image: image || null,
-        description: description || null,
-        storageLocation: storageLocation || null,
         minimumStock: minimumStock ?? 0,
         unitCost: unitCost ?? 0,
         status: status || 'ACTIVE',
       },
       include: {
         category: { select: { id: true, name: true, code: true } },
-        supplier: { select: { id: true, name: true } },
       },
     })
 

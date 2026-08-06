@@ -1271,3 +1271,22 @@ Stage Summary:
 - Requisition numbers auto-generated as MR-YYYYMMDD-NNN
 - Approval workflow supports per-item quantity adjustment
 - Completion auto-creates InventoryIssue records for backwards compatibility
+---
+Task ID: 1
+Agent: main
+Task: Simplify Products component for small parts (connectors, braided sleeves, wires, etc.)
+
+Work Log:
+- Analyzed uploaded images: first showed current Products page with big items (laptops, chairs), second showed user's actual products (Braided Sleeves, Heat Shrink Tubes, Wire PTFE, Soldering Wire, Harness Tape, etc.) from their Excel spreadsheet
+- Simplified Product Form Dialog: removed Supplier, Manufacturer, Model Number, Image URL, Description, Storage Location fields. Added Specification field. Updated units to pcs/roll/mtr/core/kg/box/set
+- Simplified Product List: removed Supplier column, added Specs column showing product specification
+- Simplified Product Detail: replaced multi-card layout with single clean card showing Category, Specification, Unit, Unit Cost, Min Stock
+- Updated Products API (GET/POST/PUT): removed supplier-related code, added `size` field handling for specifications, added `size` to search OR conditions
+- Verified: lint passes clean, browser verified correct UI structure (columns, form fields), API returned 200
+
+Stage Summary:
+- Product form now has 8 fields: Name, SKU, Specification, Category, Unit, Min Stock, Unit Cost, Status
+- Product list shows columns: Code, Name, SKU, Specs, Category, Unit, Min Stock, Status, Actions
+- Product detail shows single card with key info + StockSummaryCard
+- All supplier/manufacturer/model/image/description/storage fields removed from UI
+- API routes updated to handle `size` field and removed supplier handling

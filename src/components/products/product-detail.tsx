@@ -1,12 +1,11 @@
 'use client'
 
-import { ArrowLeft, Package, TrendingUp, AlertTriangle, PackageCheck } from 'lucide-react'
+import { ArrowLeft, Package, AlertTriangle } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Separator } from '@/components/ui/separator'
 import { useAppStore } from '@/stores/app-store'
 import { StockSummaryCard } from '@/components/stock/stock-summary-card'
 
@@ -15,17 +14,12 @@ interface ProductDetailData {
   code: string
   name: string
   sku: string
-  manufacturer: string | null
-  modelNumber: string | null
+  size: string | null
   unit: string
-  image: string | null
-  description: string | null
-  storageLocation: string | null
   minimumStock: number
   unitCost: number
   status: string
   category: { id: string; name: string; code: string } | null
-  supplier: { id: string; name: string } | null
 }
 
 const statusColorMap: Record<string, string> = {
@@ -54,7 +48,6 @@ export function ProductDetail() {
     }
   }, [])
 
-  // Reset and fetch when selectedProductId changes
   const prevIdRef = useState(selectedProductId)
   useEffect(() => {
     if (selectedProductId !== prevIdRef[0]) {
@@ -65,13 +58,11 @@ export function ProductDetail() {
     }
   }, [selectedProductId, fetchProduct, prevIdRef])
 
-  // Initial fetch
   useEffect(() => {
     if (selectedProductId && !product && !loading) {
       setLoading(true)
       fetchProduct(selectedProductId)
     }
-    // Only run when selectedProductId first appears
   }, [selectedProductId, fetchProduct])
 
   if (loading) {
@@ -82,7 +73,7 @@ export function ProductDetail() {
           <Skeleton className="h-8 w-48" />
         </div>
         <div className="grid gap-4 md:grid-cols-2">
-          {Array.from({ length: 4 }).map((_, i) => (
+          {Array.from({ length: 2 }).map((_, i) => (
             <Skeleton key={i} className="h-32 rounded-lg" />
           ))}
         </div>
@@ -112,7 +103,7 @@ export function ProductDetail() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* Back Button */}
       <div className="flex items-center gap-4">
         <Button variant="ghost" size="sm" onClick={goBack}>
           <ArrowLeft className="mr-2 size-4" />
@@ -141,54 +132,26 @@ export function ProductDetail() {
         )}
       </div>
 
-      {/* Real-time Stock Summary via StockSummaryCard */}
+      {/* Stock Summary */}
       {selectedProductId && (
         <StockSummaryCard productId={selectedProductId} compact />
       )}
 
-      {/* Details */}
-      <div className="grid gap-4 md:grid-cols-2">
-        {/* Basic Info */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium">Basic Information</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
+      {/* Details Card */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium">Product Information</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-3 sm:grid-cols-2">
             <DetailRow label="Category" value={product.category?.name || '—'} />
-            <DetailRow label="Supplier" value={product.supplier?.name || '—'} />
-            <DetailRow label="Manufacturer" value={product.manufacturer || '—'} />
-            <DetailRow label="Model Number" value={product.modelNumber || '—'} />
-            <Separator className="my-2" />
+            <DetailRow label="Specification" value={product.size || '—'} />
             <DetailRow label="Unit" value={product.unit} />
-            <DetailRow label="Unit Cost" value={`$${product.unitCost.toFixed(2)}`} />
-          </CardContent>
-        </Card>
-
-        {/* Storage Info */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium">Storage & Inventory</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <DetailRow label="Storage Location" value={product.storageLocation || '—'} />
+            <DetailRow label="Unit Cost" value={`Rs. ${product.unitCost.toFixed(2)}`} />
             <DetailRow label="Minimum Stock" value={`${product.minimumStock} ${product.unit}`} />
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Description */}
-      {product.description && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium">Description</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground whitespace-pre-wrap">
-              {product.description}
-            </p>
-          </CardContent>
-        </Card>
-      )}
+          </div>
+        </CardContent>
+      </Card>
     </div>
   )
 }

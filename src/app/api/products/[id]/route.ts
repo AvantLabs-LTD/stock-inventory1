@@ -22,10 +22,6 @@ export async function GET(
       where: { id },
       include: {
         category: { select: { id: true, name: true, code: true } },
-        supplier: { select: { id: true, name: true } },
-        transactions: {
-          select: { type: true, quantity: true },
-        },
       },
     })
 
@@ -33,49 +29,7 @@ export async function GET(
       return Response.json({ error: 'Product not found' }, { status: 404 })
     }
 
-    // Calculate stock summary
-    let totalStock = 0
-    let reservedStock = 0
-    let issuedStock = 0
-    let returnedStock = 0
-
-    for (const tx of product.transactions) {
-      switch (tx.type) {
-        case 'OPENING_STOCK':
-        case 'GOODS_RECEIVED':
-        case 'RETURNED':
-        case 'ADJUSTMENT_IN':
-          totalStock += tx.quantity
-          break
-        case 'ISSUED':
-        case 'ADJUSTMENT_OUT':
-          totalStock -= tx.quantity
-          break
-      }
-      if (tx.type === 'ISSUED') issuedStock += tx.quantity
-      if (tx.type === 'RETURNED') returnedStock += tx.quantity
-    }
-
-    // Count reservations
-    const reservations = await db.reservedInventory.aggregate({
-      _count: { id: true },
-      _sum: { quantity: true },
-      where: { productId: id, status: 'ACTIVE' },
-    })
-    reservedStock = reservations._sum.quantity || 0
-
-    const availableStock = Math.max(0, totalStock - reservedStock)
-
-    return Response.json({
-      ...product,
-      stockSummary: {
-        total: totalStock,
-        available: availableStock,
-        reserved: reservedStock,
-        issued: issuedStock,
-        returned: returnedStock,
-      },
-    })
+    return Response.json(product)
   } catch (error) {
     console.error('GET /api/products/[id] error:', error)
     return Response.json({ error: 'Failed to fetch product' }, { status: 500 })
@@ -100,20 +54,14 @@ export async function PUT(
     const {
       name,
       sku,
+      size,
       categoryId,
-      supplierId,
-      manufacturer,
-      modelNumber,
       unit,
-      image,
-      description,
-      storageLocation,
       minimumStock,
       unitCost,
       status,
     } = body
 
-    // Check if product exists
     const existing = await db.product.findUnique({ where: { id } })
     if (!existing) {
       return Response.json({ error: 'Product not found' }, { status: 404 })
@@ -132,21 +80,15 @@ export async function PUT(
       data: {
         ...(name && { name }),
         ...(sku && { sku }),
+        ...(size !== undefined && { size: size || null }),
         ...(categoryId !== undefined && { categoryId: categoryId || null }),
-        ...(supplierId !== undefined && { supplierId: supplierId || null }),
-        ...(manufacturer !== undefined && { manufacturer: manufacturer || null }),
-        ...(modelNumber !== undefined && { modelNumber: modelNumber || null }),
         ...(unit && { unit }),
-        ...(image !== undefined && { image: image || null }),
-        ...(description !== undefined && { description: description || null }),
-        ...(storageLocation !== undefined && { storageLocation: storageLocation || null }),
         ...(minimumStock !== undefined && { minimumStock }),
         ...(unitCost !== undefined && { unitCost }),
         ...(status && { status }),
       },
       include: {
         category: { select: { id: true, name: true, code: true } },
-        supplier: { select: { id: true, name: true } },
       },
     })
 

@@ -60,11 +60,11 @@ interface Product {
   code: string
   name: string
   sku: string
+  size: string | null
   unit: string
   minimumStock: number
   status: string
   category: { id: string; name: string; code: string } | null
-  supplier: { id: string; name: string } | null
 }
 
 interface Category {
@@ -209,7 +209,7 @@ export function ProductList() {
     <div className="space-y-6">
       <PageHeader
         title="Products"
-        description="Manage your product catalog"
+        description="Manage your parts & items catalog"
         icon={PackageOpen}
       >
         {canCreate && (
@@ -279,10 +279,11 @@ export function ProductList() {
               <TableHead className="hidden md:table-cell cursor-pointer select-none" onClick={() => handleSort('sku')}>
                 <span className="flex items-center">SKU <SortIcon field="sku" /></span>
               </TableHead>
+              <TableHead className="hidden sm:table-cell">Specs</TableHead>
               <TableHead className="hidden sm:table-cell">Category</TableHead>
               <TableHead className="hidden lg:table-cell">Unit</TableHead>
-              <TableHead className="hidden lg:table-cell cursor-pointer select-none" onClick={() => handleSort('minimumStock')}>
-                <span className="flex items-center">Min Stock <SortIcon field="minimumStock" /></span>
+              <TableHead className="hidden lg:table-cell cursor-pointer select-none text-center" onClick={() => handleSort('minimumStock')}>
+                <span className="flex items-center justify-center">Min Stock <SortIcon field="minimumStock" /></span>
               </TableHead>
               <TableHead className="cursor-pointer select-none" onClick={() => handleSort('status')}>
                 <span className="flex items-center">Status <SortIcon field="status" /></span>
@@ -294,7 +295,7 @@ export function ProductList() {
             {loading ? (
               Array.from({ length: 5 }).map((_, i) => (
                 <TableRow key={i}>
-                  {Array.from({ length: 8 }).map((_, j) => (
+                  {Array.from({ length: 9 }).map((_, j) => (
                     <TableCell key={j}>
                       <Skeleton className="h-4 w-full" />
                     </TableCell>
@@ -303,7 +304,7 @@ export function ProductList() {
               ))
             ) : products.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8}>
+                <TableCell colSpan={9}>
                   <div className="flex flex-col items-center justify-center py-12">
                     <PackageOpen className="size-12 text-muted-foreground/50 mb-4" />
                     <p className="text-lg font-medium">No products found</p>
@@ -321,6 +322,15 @@ export function ProductList() {
                   <TableCell className="font-mono text-xs">{product.code}</TableCell>
                   <TableCell className="font-medium max-w-[200px] truncate">{product.name}</TableCell>
                   <TableCell className="hidden md:table-cell font-mono text-xs">{product.sku}</TableCell>
+                  <TableCell className="hidden sm:table-cell text-sm">
+                    {product.size ? (
+                      <Badge variant="outline" className="text-[10px] font-mono">
+                        {product.size}
+                      </Badge>
+                    ) : (
+                      <span className="text-muted-foreground text-sm">—</span>
+                    )}
+                  </TableCell>
                   <TableCell className="hidden sm:table-cell">
                     {product.category ? (
                       <Badge variant="secondary" className="text-[10px]">
@@ -457,7 +467,7 @@ export function ProductList() {
             <AlertDialogTitle>Discontinue Product</AlertDialogTitle>
             <AlertDialogDescription>
               Are you sure you want to discontinue &ldquo;{deletingProduct?.name}&rdquo;? This will set the
-              product status to Discontinued. The product will still be visible but marked as inactive.
+              product status to Discontinued.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
