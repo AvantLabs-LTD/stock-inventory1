@@ -1,0 +1,1551 @@
+     1→'use client'
+     2→
+     3→import { useCallback, useEffect, useRef, useState } from 'react'
+     4→import { useForm } from 'react-hook-form'
+     5→import { z } from 'zod'
+     6→import { zodResolver } from '@hookform/resolvers/zod'
+     7→import { format } from 'date-fns'
+     8→import {
+     9→  AlertCircle,
+    10→  ArrowDownToLine,
+    11→  CheckCircle2,
+    12→  Download,
+    13→  Eye,
+    14→  Loader2,
+    15→  Package,
+    16→  Pencil,
+    17→  Search,
+    18→  Trash2,
+    19→  Upload,
+    20→  X,
+    21→} from 'lucide-react'
+    22→import {
+    23→  Table,
+    24→  TableBody,
+    25→  TableCell,
+    26→  TableHead,
+    27→  TableHeader,
+    28→  TableRow,
+    29→} from '@/components/ui/table'
+    30→import {
+    31→  Select,
+    32→  SelectContent,
+    33→  SelectItem,
+    34→  SelectTrigger,
+    35→  SelectValue,
+    36→} from '@/components/ui/select'
+    37→import {
+    38→  Form,
+    39→  FormControl,
+    40→  FormField,
+    41→  FormItem,
+    42→  FormLabel,
+    43→  FormMessage,
+    44→} from '@/components/ui/form'
+    45→import { Button } from '@/components/ui/button'
+    46→import { Input } from '@/components/ui/input'
+    47→import { Textarea } from '@/components/ui/textarea'
+    48→import { Badge } from '@/components/ui/badge'
+    49→import { Skeleton } from '@/components/ui/skeleton'
+    50→import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+    51→import {
+    52→  Dialog,
+    53→  DialogContent,
+    54→  DialogDescription,
+    55→  DialogFooter,
+    56→  DialogHeader,
+    57→  DialogTitle,
+    58→} from '@/components/ui/dialog'
+    59→import {
+    60→  AlertDialog,
+    61→  AlertDialogAction,
+    62→  AlertDialogCancel,
+    63→  AlertDialogContent,
+    64→  AlertDialogDescription,
+    65→  AlertDialogFooter,
+    66→  AlertDialogHeader,
+    67→  AlertDialogTitle,
+    68→} from '@/components/ui/alert-dialog'
+    69→import {
+    70→  Sheet,
+    71→  SheetContent,
+    72→  SheetDescription,
+    73→  SheetHeader,
+    74→  SheetTitle,
+    75→} from '@/components/ui/sheet'
+    76→import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+    77→import { PageHeader } from '@/components/shared/page-header'
+    78→import { hasPermission } from '@/lib/permissions'
+    79→import { useAuthStore } from '@/stores/auth-store'
+    80→import { toast } from 'sonner'
+    81→
+    82→// ─── Types ──────────────────────────────────────────────────────────────────
+    83→
+    84→interface Product {
+    85→  id: string
+    86→  name: string
+    87→  code: string
+    88→  sku: string
+    89→  unit: string
+    90→  status: string
+    91→  image: string | null
+    92→  category: { id: string; name: string; code: string } | null
+    93→  supplier: { id: string; name: string } | null
+    94→}
+    95→
+    96→interface OpeningEntry {
+    97→  id: string
+    98→  productId: string
+    99→  type: string
+   100→  quantity: number
+   101→  remarks: string
+   102→  date: string
+   103→  createdAt: string
+   104→  product: Product
+   105→  openingQuantity: number
+   106→  currentTotalStock: number
+   107→  reservedQuantity: number
+   108→  issuedQuantity: number
+   109→  returnedQuantity: number
+   110→  availableQuantity: number
+   111→  toBeUsed: number
+   112→  totalBatch: number
+   113→  required: number
+   114→  ordered: number
+   115→  itemImage: string | null
+   116→}
+   117→
+   118→interface Category {
+   119→  id: string
+   120→  name: string
+   121→  code: string
+   122→}
+   123→
+   124→interface StockSummary {
+   125→  product: { id: string; name: string; code: string; unit: string; minimumStock: number }
+   126→  summary: {
+   127→    openingStock: number
+   128→    totalReceived: number
+   129→    totalIssued: number
+   130→    totalReturned: number
+   131→    totalAdjustmentIn: number
+   132→    totalAdjustmentOut: number
+   133→    reservedStock: number
+   134→    available: number
+   135→  }
+   136→  recentTransactions: {
+   137→    id: string
+   138→    type: string
+   139→    quantity: number
+   140→    unitCost: number | null
+   141→    reference: string | null
+   142→    remarks: string | null
+   143→    date: string
+   144→  }[]
+   145→}
+   146→
+   147→interface ImportResult {
+   148→  success: boolean
+   149→  message: string
+   150→  imported: number
+   151→  updated: number
+   152→  skipped: number
+   153→  errors: string[]
+   154→}
+   155→
+   156→// ─── Schemas ───────────────────────────────────────────────────────────────
+   157→
+   158→const openingSchema = z.object({
+   159→  productId: z.string().min(1, 'Please select a product'),
+   160→  quantity: z.coerce.number().int().positive('Quantity must be at least 1'),
+   161→  remarks: z.string().optional(),
+   162→})
+   163→
+   164→type OpeningFormValues = z.infer<typeof openingSchema>
+   165→
+   166→const editSchema = z.object({
+   167→  quantity: z.coerce.number().int().positive('Quantity must be at least 1'),
+   168→  remarks: z.string().optional(),
+   169→})
+   170→
+   171→type EditFormValues = z.infer<typeof editSchema>
+   172→
+   173→// ─── Helpers ────────────────────────────────────────────────────────────────
+   174→
+   175→const TX_TYPE_LABELS: Record<string, string> = {
+   176→  OPENING_STOCK: 'Opening',
+   177→  GOODS_RECEIVED: 'Received',
+   178→  ISSUED: 'Issued',
+   179→  RETURNED: 'Returned',
+   180→  ADJUSTMENT_IN: 'Adj. In',
+   181→  ADJUSTMENT_OUT: 'Adj. Out',
+   182→}
+   183→
+   184→const TX_TYPE_COLORS: Record<string, string> = {
+   185→  OPENING_STOCK: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+   186→  GOODS_RECEIVED: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+   187→  ISSUED: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400',
+   188→  RETURNED: 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400',
+   189→  ADJUSTMENT_IN: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400',
+   190→  ADJUSTMENT_OUT: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
+   191→}
+   192→
+   193→// ─── Component ────────────────────────────────────────────────────────────────
+   194→
+   195→export function OpeningStockPage() {
+   196→  const user = useAuthStore((s) => s.user)
+   197→
+   198→  // ─── Permissions ─────────────────────────────────────────────────────────
+   199→  const canManage = user ? hasPermission(user.role, 'stock', 'manage') : false
+   200→  const canView = user ? hasPermission(user.role, 'stock', 'view') : false
+   201→
+   202→  // ─── Data state ─────────────────────────────────────────────────────────
+   203→  const [entries, setEntries] = useState<OpeningEntry[]>([])
+   204→  const [totalEntries, setTotalEntries] = useState(0)
+   205→  const [products, setProducts] = useState<Product[]>([])
+   206→  const [categories, setCategories] = useState<Category[]>([])
+   207→  const [loading, setLoading] = useState(true)
+   208→  const [submitting, setSubmitting] = useState(false)
+   209→  const [exporting, setExporting] = useState(false)
+   210→
+   211→  // ─── Search & filter state ──────────────────────────────────────────────
+   212→  const [tableSearch, setTableSearch] = useState('')
+   213→  const [tableSearchInput, setTableSearchInput] = useState('')
+   214→  const [productSearch, setProductSearch] = useState('')
+   215→  const [categoryFilter, setCategoryFilter] = useState('')
+   216→  const [page, setPage] = useState(1)
+   217→  const [limit, setLimit] = useState(10)
+   218→
+   219→  // ─── Dialog state ───────────────────────────────────────────────────────
+   220→  const [importDialogOpen, setImportDialogOpen] = useState(false)
+   221→  const [importing, setImporting] = useState(false)
+   222→  const [importResult, setImportResult] = useState<ImportResult | null>(null)
+   223→  const [importFile, setImportFile] = useState<File | null>(null)
+   224→
+   225→  const [editDialogOpen, setEditDialogOpen] = useState(false)
+   226→  const [editEntry, setEditEntry] = useState<OpeningEntry | null>(null)
+   227→  const [editSubmitting, setEditSubmitting] = useState(false)
+   228→
+   229→  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+   230→  const [deleteEntry, setDeleteEntry] = useState<OpeningEntry | null>(null)
+   231→  const [deleting, setDeleting] = useState(false)
+   232→
+   233→  // ─── Detail sheet state ────────────────────────────────────────────────
+   234→  const [detailOpen, setDetailOpen] = useState(false)
+   235→  const [detailProduct, setDetailProduct] = useState<Product | null>(null)
+   236→  const [detailSummary, setDetailSummary] = useState<StockSummary | null>(null)
+   237→  const [detailLoading, setDetailLoading] = useState(false)
+   238→
+   239→  // ─── Refs ───────────────────────────────────────────────────────────────
+   240→  const fileInputRef = useRef<HTMLInputElement>(null)
+   241→
+   242→  // ─── Forms ──────────────────────────────────────────────────────────────
+   243→  const form = useForm<OpeningFormValues>({
+   244→    resolver: zodResolver(openingSchema),
+   245→    defaultValues: {
+   246→      productId: '',
+   247→      quantity: 1,
+   248→      remarks: '',
+   249→    },
+   250→  })
+   251→
+   252→  const editForm = useForm<EditFormValues>({
+   253→    resolver: zodResolver(editSchema),
+   254→    defaultValues: {
+   255→      quantity: 1,
+   256→      remarks: '',
+   257→    },
+   258→  })
+   259→
+   260→  // ─── API calls ─────────────────────────────────────────────────────────
+   261→
+   262→  const fetchProducts = useCallback(async () => {
+   263→    try {
+   264→      const res = await fetch('/api/products?limit=500&status=ACTIVE')
+   265→      if (res.ok) {
+   266→        const data = await res.json()
+   267→        setProducts(data.data || [])
+   268→      }
+   269→    } catch {
+   270→      // ignore
+   271→    }
+   272→  }, [])
+   273→
+   274→  const fetchCategories = useCallback(async () => {
+   275→    try {
+   276→      const res = await fetch('/api/categories?limit=500')
+   277→      if (res.ok) {
+   278→        const data = await res.json()
+   279→        setCategories(data.data || [])
+   280→      }
+   281→    } catch {
+   282→      // ignore
+   283→    }
+   284→  }, [])
+   285→
+   286→  const fetchEntries = useCallback(async () => {
+   287→    setLoading(true)
+   288→    try {
+   289→      const params = new URLSearchParams({
+   290→        page: String(page),
+   291→        limit: String(limit),
+   292→      })
+   293→      if (tableSearch) params.set('search', tableSearch)
+   294→      if (categoryFilter) params.set('categoryId', categoryFilter)
+   295→
+   296→      const res = await fetch(`/api/stock/opening?${params}`)
+   297→      if (res.ok) {
+   298→        const data = await res.json()
+   299→        setEntries(data.data || [])
+   300→        setTotalEntries(data.pagination?.total || 0)
+   301→      }
+   302→    } catch {
+   303→      // ignore
+   304→    } finally {
+   305→      setLoading(false)
+   306→    }
+   307→  }, [page, limit, tableSearch, categoryFilter])
+   308→
+   309→  useEffect(() => {
+   310→    if (!canView) return
+   311→    fetchProducts()
+   312→    fetchCategories()
+   313→  }, [fetchProducts, fetchCategories, canView])
+   314→
+   315→  useEffect(() => {
+   316→    if (!canView) return
+   317→    fetchEntries()
+   318→  }, [fetchEntries, canView])
+   319→
+   320→  // ─── Set Opening Stock submit ────────────────────────────────────────────
+   321→
+   322→  async function onSubmit(values: OpeningFormValues) {
+   323→    setSubmitting(true)
+   324→    try {
+   325→      const res = await fetch('/api/stock/opening', {
+   326→        method: 'POST',
+   327→        headers: { 'Content-Type': 'application/json' },
+   328→        body: JSON.stringify(values),
+   329→      })
+   330→      if (res.ok) {
+   331→        toast.success('Opening stock set successfully')
+   332→        form.reset({ productId: '', quantity: 1, remarks: '' })
+   333→        fetchEntries()
+   334→      } else {
+   335→        const data = await res.json()
+   336→        toast.error(data.error || 'Failed to set opening stock')
+   337→      }
+   338→    } catch {
+   339→      toast.error('Network error. Please try again.')
+   340→    } finally {
+   341→      setSubmitting(false)
+   342→    }
+   343→  }
+   344→
+   345→  // ─── Export Excel ──────────────────────────────────────────────────────
+   346→
+   347→  async function handleExportExcel() {
+   348→    setExporting(true)
+   349→    try {
+   350→      const res = await fetch('/api/stock/opening/export')
+   351→      if (!res.ok) {
+   352→        const data = await res.json().catch(() => ({}))
+   353→        toast.error(data.error || 'Export failed')
+   354→        return
+   355→      }
+   356→      const blob = await res.blob()
+   357→      const url = URL.createObjectURL(blob)
+   358→      const a = document.createElement('a')
+   359→      a.href = url
+   360→      const cd = res.headers.get('Content-Disposition') || ''
+   361→      const match = cd.match(/filename="?(.+?)"?$/)
+   362→      a.download = match ? decodeURIComponent(match[1]) : `Opening Stock - Electronic Connectors_${new Date().toISOString().split('T')[0]}.xlsx`
+   363→      document.body.appendChild(a)
+   364→      a.click()
+   365→      a.remove()
+   366→      URL.revokeObjectURL(url)
+   367→      toast.success('Excel file downloaded successfully')
+   368→    } catch {
+   369→      toast.error('Failed to export. Please try again.')
+   370→    } finally {
+   371→      setExporting(false)
+   372→    }
+   373→  }
+   374→
+   375→  // ─── Import Excel ─────────────────────────────────────────────────────
+   376→
+   377→  const [dragOver, setDragOver] = useState(false)
+   378→  const [uploadError, setUploadError] = useState('')
+   379→
+   380→  function validateFile(file: File): string | null {
+   381→    const validExts = ['.xlsx', '.xls', '.csv']
+   382→    const validMimes = [
+   383→      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+   384→      'application/vnd.ms-excel',
+   385→      'text/csv',
+   386→      'application/csv',
+   387→      'application/octet-stream',
+   388→    ]
+   389→    const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase()
+   390→    if (!validExts.includes(ext) && !validMimes.includes(file.type)) {
+   391→      return 'Only .xlsx, .xls, or .csv files are supported'
+   392→    }
+   393→    if (file.size > 50 * 1024 * 1024) {
+   394→      return 'File is too large. Maximum size is 50 MB.'
+   395→    }
+   396→    if (file.size === 0) {
+   397→      return 'File is empty. Please select a valid file.'
+   398→    }
+   399→    return null
+   400→  }
+   401→
+   402→  function handleFileSelect(file: File | undefined) {
+   403→    setUploadError('')
+   404→    if (!file) {
+   405→      setImportFile(null)
+   406→      return
+   407→    }
+   408→    const error = validateFile(file)
+   409→    if (error) {
+   410→      setUploadError(error)
+   411→      setImportFile(null)
+   412→      return
+   413→    }
+   414→    setImportFile(file)
+   415→  }
+   416→
+   417→  function handleDragOver(e: React.DragEvent) {
+   418→    e.preventDefault()
+   419→    e.stopPropagation()
+   420→    setDragOver(true)
+   421→  }
+   422→
+   423→  function handleDragLeave(e: React.DragEvent) {
+   424→    e.preventDefault()
+   425→    e.stopPropagation()
+   426→    setDragOver(false)
+   427→  }
+   428→
+   429→  function handleDrop(e: React.DragEvent) {
+   430→    e.preventDefault()
+   431→    e.stopPropagation()
+   432→    setDragOver(false)
+   433→    const file = e.dataTransfer.files[0]
+   434→    handleFileSelect(file)
+   435→  }
+   436→
+   437→  async function handleImportExcel() {
+   438→    if (!importFile) {
+   439→      toast.error('Please select a file first')
+   440→      return
+   441→    }
+   442→    setImporting(true)
+   443→    setImportResult(null)
+   444→    setUploadError('')
+   445→    try {
+   446→      const formData = new FormData()
+   447→      formData.append('file', importFile)
+   448→
+   449→      const res = await fetch('/api/stock/opening/import', {
+   450→        method: 'POST',
+   451→        body: formData,
+   452→      })
+   453→      const data = await res.json()
+   454→      if (res.ok) {
+   455→        setImportResult(data)
+   456→        toast.success(data.message || 'Import completed')
+   457→        fetchEntries()
+   458→        fetchProducts()
+   459→        fetchCategories()
+   460→      } else {
+   461→        toast.error(data.error || 'Import failed')
+   462→        setImportResult({ success: false, message: data.error || 'Import failed', imported: 0, updated: 0, skipped: 0, errors: [] })
+   463→      }
+   464→    } catch (err) {
+   465→      const msg = err instanceof Error ? err.message : 'Failed to import. Please try again.'
+   466→      toast.error(msg)
+   467→      setUploadError(msg)
+   468→      setImportResult({ success: false, message: msg, imported: 0, updated: 0, skipped: 0, errors: [] })
+   469→    } finally {
+   470→      setImporting(false)
+   471→    }
+   472→  }
+   473→
+   474→  function resetImportDialog() {
+   475→    setImportFile(null)
+   476→    setImportResult(null)
+   477→    setUploadError('')
+   478→    setDragOver(false)
+   479→    if (fileInputRef.current) fileInputRef.current.value = ''
+   480→  }
+   481→
+   482→  // ─── Edit Opening Stock ─────────────────────────────────────────────────
+   483→
+   484→  function openEditDialog(entry: OpeningEntry) {
+   485→    setEditEntry(entry)
+   486→    editForm.reset({ quantity: entry.quantity, remarks: entry.remarks || '' })
+   487→    setEditDialogOpen(true)
+   488→  }
+   489→
+   490→  async function onEditSubmit(values: EditFormValues) {
+   491→    if (!editEntry) return
+   492→    setEditSubmitting(true)
+   493→    try {
+   494→      const res = await fetch(`/api/stock/opening/${editEntry.id}`, {
+   495→        method: 'PUT',
+   496→        headers: { 'Content-Type': 'application/json' },
+   497→        body: JSON.stringify(values),
+   498→      })
+   499→      if (res.ok) {
+   500→        toast.success('Opening stock updated successfully')
+   501→        setEditDialogOpen(false)
+   502→        fetchEntries()
+   503→      } else {
+   504→        const data = await res.json()
+   505→        toast.error(data.error || 'Failed to update')
+   506→      }
+   507→    } catch {
+   508→      toast.error('Network error. Please try again.')
+   509→    } finally {
+   510→      setEditSubmitting(false)
+   511→    }
+   512→  }
+   513→
+   514→  // ─── Delete Opening Stock ───────────────────────────────────────────────
+   515→
+   516→  function openDeleteDialog(entry: OpeningEntry) {
+   517→    setDeleteEntry(entry)
+   518→    setDeleteDialogOpen(true)
+   519→  }
+   520→
+   521→  async function handleDelete() {
+   522→    if (!deleteEntry) return
+   523→    setDeleting(true)
+   524→    try {
+   525→      const res = await fetch(`/api/stock/opening/${deleteEntry.id}`, {
+   526→        method: 'DELETE',
+   527→      })
+   528→      if (res.ok) {
+   529→        toast.success('Opening stock entry deleted')
+   530→        setDeleteDialogOpen(false)
+   531→        fetchEntries()
+   532→      } else {
+   533→        const data = await res.json()
+   534→        toast.error(data.error || 'Failed to delete')
+   535→      }
+   536→    } catch {
+   537→      toast.error('Network error. Please try again.')
+   538→    } finally {
+   539→      setDeleting(false)
+   540→    }
+   541→  }
+   542→
+   543→  // ─── Detail Sheet ───────────────────────────────────────────────────────
+   544→
+   545→  async function openDetail(entry: OpeningEntry) {
+   546→    setDetailProduct(entry.product)
+   547→    setDetailSummary(null)
+   548→    setDetailOpen(true)
+   549→    setDetailLoading(true)
+   550→    try {
+   551→      const res = await fetch(`/api/stock/summary?productId=${entry.productId}`)
+   552→      if (res.ok) {
+   553→        const data = await res.json()
+   554→        setDetailSummary(data)
+   555→      }
+   556→    } catch {
+   557→      // ignore
+   558→    } finally {
+   559→      setDetailLoading(false)
+   560→    }
+   561→  }
+   562→
+   563→  // ─── Search & Filter ────────────────────────────────────────────────────
+   564→
+   565→  function handleTableSearch() {
+   566→    setTableSearch(tableSearchInput)
+   567→    setPage(1)
+   568→  }
+   569→
+   570→  function clearFilters() {
+   571→    setTableSearchInput('')
+   572→    setTableSearch('')
+   573→    setCategoryFilter('')
+   574→    setPage(1)
+   575→  }
+   576→
+   577→  // ─── Computed ───────────────────────────────────────────────────────────
+   578→
+   579→  const filteredProducts = products.filter(
+   580→    (p) =>
+   581→      p.name.toLowerCase().includes(productSearch.toLowerCase()) ||
+   582→      p.code.toLowerCase().includes(productSearch.toLowerCase()) ||
+   583→      p.sku.toLowerCase().includes(productSearch.toLowerCase())
+   584→  )
+   585→
+   586→  const totalPages = Math.ceil(totalEntries / limit)
+   587→  const hasFilters = tableSearch || categoryFilter
+   588→
+   589→  // ─── No permission view ────────────────────────────────────────────────
+   590→
+   591→  if (!canView) {
+   592→    return (
+   593→      <div className="space-y-6">
+   594→        <PageHeader
+   595→          title="Opening Stock"
+   596→          description="Manage initial stock quantities and track all inventory movements"
+   597→          icon={ArrowDownToLine}
+   598→        />
+   599→        <Card>
+   600→          <CardContent className="flex flex-col items-center justify-center py-16">
+   601→            <AlertCircle className="size-12 text-muted-foreground/50 mb-4" />
+   602→            <p className="text-lg font-medium">Access Denied</p>
+   603→            <p className="text-sm text-muted-foreground mt-1">
+   604→              You do not have permission to view opening stock data.
+   605→            </p>
+   606→          </CardContent>
+   607→        </Card>
+   608→      </div>
+   609→    )
+   610→  }
+   611→
+   612→  // ─── Render ─────────────────────────────────────────────────────────────
+   613→
+   614→  return (
+   615→    <div className="space-y-6">
+   616→      {/* Header Section */}
+   617→      <PageHeader
+   618→        title="Opening Stock"
+   619→        description="Manage initial stock quantities and track all inventory movements"
+   620→        icon={ArrowDownToLine}
+   621→      >
+   622→        {canManage && (
+   623→          <TooltipProvider>
+   624→            <Tooltip>
+   625→              <TooltipTrigger asChild>
+   626→                <Button variant="outline" size="sm" className="gap-2" onClick={() => { resetImportDialog(); setImportDialogOpen(true) }}>
+   627→                  <Upload className="size-4" />
+   628→                  Import from Excel
+   629→                </Button>
+   630→              </TooltipTrigger>
+   631→              <TooltipContent>Upload an Excel file to import opening stock data</TooltipContent>
+   632→            </Tooltip>
+   633→          </TooltipProvider>
+   634→        )}
+   635→        <TooltipProvider>
+   636→          <Tooltip>
+   637→            <TooltipTrigger asChild>
+   638→              <Button
+   639→                variant="outline"
+   640→                size="sm"
+   641→                className="gap-2"
+   642→                onClick={handleExportExcel}
+   643→                disabled={exporting || loading}
+   644→              >
+   645→                {exporting ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
+   646→                Export to Excel
+   647→              </Button>
+   648→            </TooltipTrigger>
+   649→            <TooltipContent>Download all opening stock data as Excel</TooltipContent>
+   650→          </Tooltip>
+   651→        </TooltipProvider>
+   652→      </PageHeader>
+   653→
+   654→      {/* Set Opening Stock Form */}
+   655→      {canManage && (
+   656→        <Card>
+   657→          <CardHeader className="pb-3">
+   658→            <CardTitle className="text-base">Set Opening Stock</CardTitle>
+   659→          </CardHeader>
+   660→          <CardContent>
+   661→            <Form {...form}>
+   662→              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+   663→                {form.formState.errors.root && (
+   664→                  <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+   665→                    {form.formState.errors.root.message}
+   666→                  </div>
+   667→                )}
+   668→
+   669→                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+   670→                  <FormField
+   671→                    control={form.control}
+   672→                    name="productId"
+   673→                    render={({ field }) => (
+   674→                      <FormItem>
+   675→                        <FormLabel>Product *</FormLabel>
+   676→                        <div className="relative">
+   677→                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+   678→                          <Select onValueChange={field.onChange} value={field.value}>
+   679→                            <FormControl>
+   680→                              <SelectTrigger className="pl-9">
+   681→                                <SelectValue placeholder="Search & select product" />
+   682→                              </SelectTrigger>
+   683→                            </FormControl>
+   684→                            <SelectContent>
+   685→                              <div className="p-2 border-b">
+   686→                                <Input
+   687→                                  placeholder="Search products..."
+   688→                                  value={productSearch}
+   689→                                  onChange={(e) => setProductSearch(e.target.value)}
+   690→                                  className="h-8"
+   691→                                />
+   692→                              </div>
+   693→                              {filteredProducts.map((p) => (
+   694→                                <SelectItem key={p.id} value={p.id}>
+   695→                                  <span className="flex items-center gap-2">
+   696→                                    {p.name} ({p.code})
+   697→                                  </span>
+   698→                                </SelectItem>
+   699→                              ))}
+   700→                            </SelectContent>
+   701→                          </Select>
+   702→                        </div>
+   703→                        <FormMessage />
+   704→                      </FormItem>
+   705→                    )}
+   706→                  />
+   707→
+   708→                  <FormField
+   709→                    control={form.control}
+   710→                    name="quantity"
+   711→                    render={({ field }) => (
+   712→                      <FormItem>
+   713→                        <FormLabel>Quantity *</FormLabel>
+   714→                        <FormControl>
+   715→                          <Input type="number" min="1" {...field} />
+   716→                        </FormControl>
+   717→                        <FormMessage />
+   718→                      </FormItem>
+   719→                    )}
+   720→                  />
+   721→
+   722→                  <FormField
+   723→                    control={form.control}
+   724→                    name="remarks"
+   725→                    render={({ field }) => (
+   726→                      <FormItem className="sm:col-span-2">
+   727→                        <FormLabel>Remarks</FormLabel>
+   728→                        <FormControl>
+   729→                          <Input placeholder="Optional remarks" {...field} />
+   730→                        </FormControl>
+   731→                        <FormMessage />
+   732→                      </FormItem>
+   733→                    )}
+   734→                  />
+   735→                </div>
+   736→
+   737→                <Button type="submit" disabled={submitting}>
+   738→                  {submitting && <Loader2 className="mr-2 size-4 animate-spin" />}
+   739→                  Set Opening Stock
+   740→                </Button>
+   741→              </form>
+   742→            </Form>
+   743→          </CardContent>
+   744→        </Card>
+   745→      )}
+   746→
+   747→      {/* Opening Stock Table Card */}
+   748→      <Card>
+   749→        <CardHeader className="pb-3">
+   750→          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+   751→            <CardTitle className="text-base">Inventory Overview</CardTitle>
+   752→          </div>
+   753→        </CardHeader>
+   754→        <CardContent className="space-y-4">
+   755→          {/* Search & Filter Bar */}
+   756→          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+   757→            <div className="relative flex-1 sm:max-w-xs">
+   758→              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+   759→              <Input
+   760→                placeholder="Search by product name, code, SKU..."
+   761→                className="pl-9"
+   762→                value={tableSearchInput}
+   763→                onChange={(e) => setTableSearchInput(e.target.value)}
+   764→                onKeyDown={(e) => e.key === 'Enter' && handleTableSearch()}
+   765→              />
+   766→            </div>
+   767→            <Select
+   768→              value={categoryFilter}
+   769→              onValueChange={(v) => {
+   770→                setCategoryFilter(v === '__all__' ? '' : v)
+   771→                setPage(1)
+   772→              }}
+   773→            >
+   774→              <SelectTrigger className="w-[180px]">
+   775→                <SelectValue placeholder="All Categories" />
+   776→              </SelectTrigger>
+   777→              <SelectContent>
+   778→                <SelectItem value="__all__">All Categories</SelectItem>
+   779→                {categories.map((c) => (
+   780→                  <SelectItem key={c.id} value={c.id}>
+   781→                    {c.name}
+   782→                  </SelectItem>
+   783→                ))}
+   784→              </SelectContent>
+   785→            </Select>
+   786→            <Button variant="outline" size="sm" onClick={handleTableSearch}>
+   787→              Search
+   788→            </Button>
+   789→            {hasFilters && (
+   790→              <Button variant="ghost" size="sm" className="gap-1.5" onClick={clearFilters}>
+   791→                <X className="size-3.5" />
+   792→                Clear Filters
+   793→              </Button>
+   794→            )}
+   795→          </div>
+   796→
+   797→          {/* Main Table */}
+   798→          <div className="overflow-x-auto rounded-md border">
+   799→            <Table>
+   800→              <TableHeader>
+   801→                <TableRow>
+   802→                  <TableHead className="min-w-[180px]">Product</TableHead>
+   803→                  <TableHead className="min-w-[100px] hidden lg:table-cell">Category</TableHead>
+   804→                  <TableHead className="min-w-[100px] hidden lg:table-cell">Specification</TableHead>
+   805→                  <TableHead className="min-w-[60px] hidden md:table-cell">Unit</TableHead>
+   806→                  <TableHead className="text-center min-w-[80px]">Opening Qty</TableHead>
+   807→                  <TableHead className="text-center min-w-[80px]">Current Stock</TableHead>
+   808→                  <TableHead className="text-center min-w-[70px] hidden xl:table-cell">Reserved</TableHead>
+   809→                  <TableHead className="text-center min-w-[70px] hidden xl:table-cell">Issued</TableHead>
+   810→                  <TableHead className="text-center min-w-[70px] hidden xl:table-cell">Returned</TableHead>
+   811→                  <TableHead className="text-center min-w-[80px]">Available</TableHead>
+   812→                  <TableHead className="text-center min-w-[80px] hidden lg:table-cell">To Be Used</TableHead>
+   813→                  <TableHead className="text-center min-w-[80px] hidden lg:table-cell">Required</TableHead>
+   814→                  <TableHead className="text-center min-w-[80px] hidden lg:table-cell">Ordered</TableHead>
+   815→                  <TableHead className="min-w-[120px] hidden xl:table-cell">Remarks</TableHead>
+   816→                  {canManage && (
+   817→                    <TableHead className="text-center min-w-[100px]">Actions</TableHead>
+   818→                  )}
+   819→                </TableRow>
+   820→              </TableHeader>
+   821→              <TableBody>
+   822→                {loading ? (
+   823→                  Array.from({ length: 5 }).map((_, i) => (
+   824→                    <TableRow key={i}>
+   825→                      {Array.from({ length: canManage ? 11 : 10 }).map((_, j) => (
+   826→                        <TableCell key={j}>
+   827→                          <Skeleton className="h-4 w-full" />
+   828→                        </TableCell>
+   829→                      ))}
+   830→                    </TableRow>
+   831→                  ))
+   832→                ) : entries.length === 0 ? (
+   833→                  <TableRow>
+   834→                    <TableCell colSpan={canManage ? 15 : 14}>
+   835→                      <div className="flex flex-col items-center justify-center py-12">
+   836→                        <ArrowDownToLine className="size-12 text-muted-foreground/50 mb-4" />
+   837→                        <p className="text-lg font-medium">No opening stock entries yet</p>
+   838→                        <p className="text-sm text-muted-foreground mt-1">
+   839→                          {canManage
+   840→                            ? 'Set opening stock for products using the form above, or import from Excel.'
+   841→                            : 'Opening stock entries will appear here once set by an admin.'}
+   842→                        </p>
+   843→                      </div>
+   844→                    </TableCell>
+   845→                  </TableRow>
+   846→                ) : (
+   847→                  entries.map((entry) => (
+   848→                    <TableRow key={entry.id}>
+   849→                      {/* Product */}
+   850→                      <TableCell>
+   851→                        <div className="flex items-center gap-2">
+   852→                          {entry.product.image ? (
+   853→                            <img
+   854→                              src={entry.product.image}
+   855→                              alt={entry.product.name}
+   856→                              className="size-8 rounded border object-cover flex-shrink-0"
+   857→                            />
+   858→                          ) : (
+   859→                            <div className="size-8 rounded border bg-muted flex items-center justify-center flex-shrink-0">
+   860→                              <Package className="size-3.5 text-muted-foreground" />
+   861→                            </div>
+   862→                          )}
+   863→                          <button
+   864→                            className="text-left hover:underline font-medium text-sm cursor-pointer"
+   865→                            onClick={() => openDetail(entry)}
+   866→                          >
+   867→                            {entry.product.name}
+   868→                            <p className="text-xs text-muted-foreground font-mono">
+   869→                              {entry.product.code}
+   870→                            </p>
+   871→                          </button>
+   872→                        </div>
+   873→                      </TableCell>
+   874→
+   875→                      {/* Category */}
+   876→                      <TableCell className="hidden lg:table-cell text-sm text-muted-foreground">
+   877→                        {entry.product.category?.name || '—'}
+   878→                      </TableCell>
+   879→
+   880→                      {/* Specification */}
+   881→                      <TableCell className="hidden lg:table-cell text-sm font-mono text-muted-foreground">
+   882→                        {entry.product.sku}
+   883→                      </TableCell>
+   884→
+   885→                      {/* Unit */}
+   886→                      <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
+   887→                        {entry.product.unit}
+   888→                      </TableCell>
+   889→
+   890→                      {/* Opening Qty */}
+   891→                      <TableCell className="text-center font-bold text-sm">
+   892→                        {entry.openingQuantity}
+   893→                      </TableCell>
+   894→
+   895→                      {/* Current Total Stock */}
+   896→                      <TableCell className="text-center">
+   897→                        <span
+   898→                          className={`font-bold text-sm ${
+   899→                            entry.currentTotalStock > 0
+   900→                              ? 'text-emerald-600 dark:text-emerald-400'
+   901→                              : 'text-red-600 dark:text-red-400'
+   902→                          }`}
+   903→                        >
+   904→                          {entry.currentTotalStock}
+   905→                        </span>
+   906→                      </TableCell>
+   907→
+   908→                      {/* Reserved */}
+   909→                      <TableCell className="text-center text-sm text-muted-foreground hidden xl:table-cell">
+   910→                        {entry.reservedQuantity}
+   911→                      </TableCell>
+   912→
+   913→                      {/* Issued */}
+   914→                      <TableCell className="text-center text-sm text-muted-foreground hidden xl:table-cell">
+   915→                        {entry.issuedQuantity}
+   916→                      </TableCell>
+   917→
+   918→                      {/* Returned */}
+   919→                      <TableCell className="text-center text-sm text-muted-foreground hidden xl:table-cell">
+   920→                        {entry.returnedQuantity}
+   921→                      </TableCell>
+   922→
+   923→                      {/* Available */}
+   924→                      <TableCell className="text-center">
+   925→                        <span
+   926→                          className={`font-bold text-sm ${
+   927→                            entry.availableQuantity > 0
+   928→                              ? 'text-emerald-600 dark:text-emerald-400'
+   929→                              : entry.availableQuantity === 0
+   930→                                ? 'text-amber-600 dark:text-amber-400'
+   931→                                : 'text-red-600 dark:text-red-400'
+   932→                          }`}
+   933→                        >
+   934→                          {entry.availableQuantity}
+   935→                        </span>
+   936→                      </TableCell>
+   937→
+   938→                      {/* To Be Used */}
+   939→                      <TableCell className="text-center text-sm font-medium hidden lg:table-cell">
+   940→                        {entry.toBeUsed}
+   941→                      </TableCell>
+   942→
+   943→                      {/* Required */}
+   944→                      <TableCell className="text-center hidden lg:table-cell">
+   945→                        <span
+   946→                          className={`font-bold text-sm ${
+   947→                            entry.required < 0
+   948→                              ? 'text-red-600 dark:text-red-400'
+   949→                              : ''
+   950→                          }`}
+   951→                        >
+   952→                          {entry.required}
+   953→                        </span>
+   954→                      </TableCell>
+   955→
+   956→                      {/* Ordered */}
+   957→                      <TableCell className="text-center text-sm text-muted-foreground hidden lg:table-cell">
+   958→                        {entry.ordered}
+   959→                      </TableCell>
+   960→
+   961→                      {/* Remarks */}
+   962→                      <TableCell className="hidden xl:table-cell text-sm text-muted-foreground max-w-[150px] truncate">
+   963→                        {entry.remarks || '—'}
+   964→                      </TableCell>
+   965→
+   966→                      {/* Actions */}
+   967→                      {canManage && (
+   968→                        <TableCell className="text-center">
+   969→                          <div className="flex items-center justify-center gap-1">
+   970→                            <TooltipProvider>
+   971→                              <Tooltip>
+   972→                                <TooltipTrigger asChild>
+   973→                                  <Button
+   974→                                    variant="ghost"
+   975→                                    size="icon"
+   976→                                    className="size-7"
+   977→                                    onClick={() => openEditDialog(entry)}
+   978→                                  >
+   979→                                    <Pencil className="size-3.5" />
+   980→                                  </Button>
+   981→                                </TooltipTrigger>
+   982→                                <TooltipContent>Edit</TooltipContent>
+   983→                              </Tooltip>
+   984→                            </TooltipProvider>
+   985→                            <TooltipProvider>
+   986→                              <Tooltip>
+   987→                                <TooltipTrigger asChild>
+   988→                                  <Button
+   989→                                    variant="ghost"
+   990→                                    size="icon"
+   991→                                    className="size-7 text-destructive hover:text-destructive"
+   992→                                    onClick={() => openDeleteDialog(entry)}
+   993→                                  >
+   994→                                    <Trash2 className="size-3.5" />
+   995→                                  </Button>
+   996→                                </TooltipTrigger>
+   997→                                <TooltipContent>Delete</TooltipContent>
+   998→                              </Tooltip>
+   999→                            </TooltipProvider>
+  1000→                          </div>
+  1001→                        </TableCell>
+  1002→                      )}
+  1003→                    </TableRow>
+  1004→                  ))
+  1005→                )}
+  1006→              </TableBody>
+  1007→            </Table>
+  1008→          </div>
+  1009→
+  1010→          {/* Pagination */}
+  1011→          {!loading && entries.length > 0 && (
+  1012→            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+  1013→              <p className="text-sm text-muted-foreground">
+  1014→                Showing {Math.min((page - 1) * limit + 1, totalEntries)} to{' '}
+  1015→                {Math.min(page * limit, totalEntries)} of {totalEntries} results
+  1016→              </p>
+  1017→              <div className="flex items-center gap-2">
+  1018→                <Select
+  1019→                  value={String(limit)}
+  1020→                  onValueChange={(v) => {
+  1021→                    setLimit(Number(v))
+  1022→                    setPage(1)
+  1023→                  }}
+  1024→                >
+  1025→                  <SelectTrigger className="w-[70px]">
+  1026→                    <SelectValue />
+  1027→                  </SelectTrigger>
+  1028→                  <SelectContent>
+  1029→                    <SelectItem value="10">10</SelectItem>
+  1030→                    <SelectItem value="25">25</SelectItem>
+  1031→                    <SelectItem value="50">50</SelectItem>
+  1032→                    <SelectItem value="100">100</SelectItem>
+  1033→                  </SelectContent>
+  1034→                </Select>
+  1035→                <div className="flex items-center gap-1">
+  1036→                  <Button
+  1037→                    variant="outline"
+  1038→                    size="icon"
+  1039→                    className="size-8"
+  1040→                    disabled={page <= 1}
+  1041→                    onClick={() => setPage((p) => p - 1)}
+  1042→                  >
+  1043→                    ‹
+  1044→                  </Button>
+  1045→                  {Array.from({ length: Math.min(5, totalPages) }).map((_, i) => {
+  1046→                    let pageNum: number
+  1047→                    if (totalPages <= 5) {
+  1048→                      pageNum = i + 1
+  1049→                    } else if (page <= 3) {
+  1050→                      pageNum = i + 1
+  1051→                    } else if (page >= totalPages - 2) {
+  1052→                      pageNum = totalPages - 4 + i
+  1053→                    } else {
+  1054→                      pageNum = page - 2 + i
+  1055→                    }
+  1056→                    return (
+  1057→                      <Button
+  1058→                        key={pageNum}
+  1059→                        variant={page === pageNum ? 'default' : 'outline'}
+  1060→                        size="icon"
+  1061→                        className="size-8"
+  1062→                        onClick={() => setPage(pageNum)}
+  1063→                      >
+  1064→                        {pageNum}
+  1065→                      </Button>
+  1066→                    )
+  1067→                  })}
+  1068→                  <Button
+  1069→                    variant="outline"
+  1070→                    size="icon"
+  1071→                    className="size-8"
+  1072→                    disabled={page >= totalPages}
+  1073→                    onClick={() => setPage((p) => p + 1)}
+  1074→                  >
+  1075→                    ›
+  1076→                  </Button>
+  1077→                </div>
+  1078→              </div>
+  1079→            </div>
+  1080→          )}
+  1081→        </CardContent>
+  1082→      </Card>
+  1083→
+  1084→      {/* Products Status Summary Card */}
+  1085→      <Card>
+  1086→        <CardHeader className="pb-3">
+  1087→          <CardTitle className="text-base">Products Status</CardTitle>
+  1088→        </CardHeader>
+  1089→        <CardContent>
+  1090→          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+  1091→            <div className="flex flex-col gap-1 rounded-lg border p-3">
+  1092→              <span className="text-xs text-muted-foreground">Total Items</span>
+  1093→              <span className="text-xl font-bold">{products.length}</span>
+  1094→            </div>
+  1095→            <div className="flex flex-col gap-1 rounded-lg border p-3">
+  1096→              <span className="text-xs text-muted-foreground flex items-center gap-1">
+  1097→                <CheckCircle2 className="size-3 text-emerald-500" />
+  1098→                Opening Set
+  1099→              </span>
+  1100→              <span className="text-xl font-bold text-emerald-600 dark:text-emerald-400">{totalEntries}</span>
+  1101→            </div>
+  1102→            <div className="flex flex-col gap-1 rounded-lg border p-3">
+  1103→              <span className="text-xs text-muted-foreground flex items-center gap-1">
+  1104→                <span className="size-3 rounded-full border-2 border-dashed border-muted-foreground/40" />
+  1105→                Pending
+  1106→              </span>
+  1107→              <span className="text-xl font-bold">{Math.max(0, products.length - totalEntries)}</span>
+  1108→            </div>
+  1109→            <div className="flex flex-col gap-1 rounded-lg border p-3">
+  1110→              <span className="text-xs text-muted-foreground">Total Stock Value</span>
+  1111→              <span className="text-xl font-bold">
+  1112→                {entries.length > 0
+  1113→                  ? entries.reduce((sum, e) => sum + e.currentTotalStock, 0).toLocaleString()
+  1114→                  : '0'}
+  1115→              </span>
+  1116→            </div>
+  1117→          </div>
+  1118→        </CardContent>
+  1119→      </Card>
+  1120→
+  1121→      {/* ─── Import Excel Dialog ──────────────────────────────────────── */}
+  1122→      <Dialog open={importDialogOpen} onOpenChange={(open) => { setImportDialogOpen(open); if (!open) resetImportDialog() }}>
+  1123→        <DialogContent className="sm:max-w-lg">
+  1124→          <DialogHeader>
+  1125→            <DialogTitle className="flex items-center gap-2">
+  1126→              <Upload className="size-5" />
+  1127→              Import from Excel
+  1128→            </DialogTitle>
+  1129→            <DialogDescription>
+  1130→              Upload an Excel/CSV file with opening stock or BOM data. Products and categories will be auto-created.
+  1131→            </DialogDescription>
+  1132→          </DialogHeader>
+  1133→
+  1134→          {!importResult ? (
+  1135→            <div className="space-y-4">
+  1136→              <div className="rounded-lg border bg-muted/30 p-4 space-y-2">
+  1137→                <p className="text-sm font-medium">Supported Formats</p>
+  1138→                <p className="text-xs text-muted-foreground">
+  1139→                  <span className="font-mono font-medium">.xlsx</span>, <span className="font-mono font-medium">.xls</span>, <span className="font-mono font-medium">.csv</span> — Max 50 MB
+  1140→                </p>
+  1141→                <p className="text-xs text-muted-foreground">
+  1142→                  Expected columns: <span className="font-mono font-medium">Name, Specification, Category, Unit, Quantity, Remarks</span>
+  1143→                </p>
+  1144→                <p className="text-xs text-muted-foreground">
+  1145→                  Only <span className="font-mono">Name</span> and <span className="font-mono">Quantity</span> are required. BOM files with model columns are also supported.
+  1146→                </p>
+  1147→              </div>
+  1148→
+  1149→              {/* Drag & Drop Zone */}
+  1150→              <div
+  1151→                role="button"
+  1152→                tabIndex={0}
+  1153→                aria-label="Click or drag and drop to upload file"
+  1154→                className={`relative flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-8 transition-colors cursor-pointer ${
+  1155→                  dragOver
+  1156→                    ? 'border-primary bg-primary/5 scale-[1.01]'
+  1157→                    : importFile
+  1158→                      ? 'border-emerald-300 bg-emerald-50/50 dark:border-emerald-700 dark:bg-emerald-900/10'
+  1159→                      : 'border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/50'
+  1160→                }`}
+  1161→                onDragOver={handleDragOver}
+  1162→                onDragLeave={handleDragLeave}
+  1163→                onDrop={handleDrop}
+  1164→                onClick={() => fileInputRef.current?.click()}
+  1165→                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInputRef.current?.click() } }}
+  1166→              >
+  1167→                <input
+  1168→                  ref={fileInputRef}
+  1169→                  type="file"
+  1170→                  accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv,application/octet-stream"
+  1171→                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+  1172→                  onChange={(e) => {
+  1173→                    const file = e.target.files?.[0]
+  1174→                    handleFileSelect(file)
+  1175→                  }}
+  1176→                  tabIndex={-1}
+  1177→                  aria-hidden="true"
+  1178→                />
+  1179→                {importFile ? (
+  1180→                  <>
+  1181→                    <CheckCircle2 className="size-10 text-emerald-500 mb-2" />
+  1182→                    <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">{importFile.name}</p>
+  1183→                    <p className="text-xs text-muted-foreground mt-1">
+  1184→                      {(importFile.size / 1024).toFixed(1)} KB · Click or drop to replace
+  1185→                    </p>
+  1186→                  </>
+  1187→                ) : (
+  1188→                  <>
+  1189→                    <Upload className="size-10 text-muted-foreground/50 mb-2" />
+  1190→                    <p className="text-sm font-medium text-muted-foreground">
+  1191→                      {dragOver ? 'Drop your file here' : 'Click to browse or drag & drop'}
+  1192→                    </p>
+  1193→                    <p className="text-xs text-muted-foreground/70 mt-1">
+  1194→                      Supports .xlsx, .xls, .csv files
+  1195→                    </p>
+  1196→                  </>
+  1197→                )}
+  1198→              </div>
+  1199→
+  1200→              {uploadError && (
+  1201→                <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 dark:bg-red-900/20 dark:border-red-800">
+  1202→                  <AlertCircle className="size-4 text-red-500 mt-0.5 shrink-0" />
+  1203→                  <p className="text-sm text-red-600 dark:text-red-400">{uploadError}</p>
+  1204→                </div>
+  1205→              )}
+  1206→
+  1207→              <DialogFooter>
+  1208→                <Button variant="outline" onClick={() => setImportDialogOpen(false)}>
+  1209→                  Cancel
+  1210→                </Button>
+  1211→                <Button onClick={handleImportExcel} disabled={importing || !importFile}>
+  1212→                  {importing ? (
+  1213→                    <>
+  1214→                      <Loader2 className="mr-2 size-4 animate-spin" />
+  1215→                      Importing...
+  1216→                    </>
+  1217→                  ) : (
+  1218→                    <>
+  1219→                      <Upload className="mr-2 size-4" />
+  1220→                      Import
+  1221→                    </>
+  1222→                  )}
+  1223→                </Button>
+  1224→              </DialogFooter>
+  1225→            </div>
+  1226→          ) : (
+  1227→            <div className="space-y-4">
+  1228→              <div className={`rounded-lg border p-4 ${importResult.success ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-900/20 dark:border-emerald-800' : 'bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800'}`}>
+  1229→                <div className="flex items-center gap-2 mb-2">
+  1230→                  {importResult.success ? (
+  1231→                    <CheckCircle2 className="size-5 text-emerald-600 dark:text-emerald-400" />
+  1232→                  ) : (
+  1233→                    <AlertCircle className="size-5 text-red-600 dark:text-red-400" />
+  1234→                  )}
+  1235→                  <p className="text-sm font-medium">{importResult.message}</p>
+  1236→                </div>
+  1237→                <div className="grid grid-cols-3 gap-3 text-center">
+  1238→                  <div>
+  1239→                    <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">{importResult.imported}</p>
+  1240→                    <p className="text-xs text-muted-foreground">Imported</p>
+  1241→                  </div>
+  1242→                  <div>
+  1243→                    <p className="text-lg font-bold text-blue-600 dark:text-blue-400">{importResult.updated}</p>
+  1244→                    <p className="text-xs text-muted-foreground">Updated</p>
+  1245→                  </div>
+  1246→                  <div>
+  1247→                    <p className="text-lg font-bold text-amber-600 dark:text-amber-400">{importResult.skipped}</p>
+  1248→                    <p className="text-xs text-muted-foreground">Skipped</p>
+  1249→                  </div>
+  1250→                </div>
+  1251→              </div>
+  1252→
+  1253→              {importResult.errors.length > 0 && (
+  1254→                <div className="rounded-lg border border-red-200 bg-red-50 p-3 dark:bg-red-900/20 dark:border-red-800">
+  1255→                  <p className="text-sm font-medium text-red-600 dark:text-red-400 mb-1">Errors ({importResult.errors.length})</p>
+  1256→                  <div className="max-h-32 overflow-y-auto space-y-1">
+  1257→                    {importResult.errors.map((err, i) => (
+  1258→                      <p key={i} className="text-xs text-red-500 dark:text-red-400">{err}</p>
+  1259→                    ))}
+  1260→                  </div>
+  1261→                </div>
+  1262→              )}
+  1263→
+  1264→              <DialogFooter>
+  1265→                <Button variant="outline" onClick={() => setImportDialogOpen(false)}>
+  1266→                  Close
+  1267→                </Button>
+  1268→              </DialogFooter>
+  1269→            </div>
+  1270→          )}
+  1271→        </DialogContent>
+  1272→      </Dialog>
+  1273→
+  1274→      {/* ─── Edit Opening Stock Dialog ──────────────────────────────── */}
+  1275→      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+  1276→        <DialogContent className="sm:max-w-md">
+  1277→          <DialogHeader>
+  1278→            <DialogTitle className="flex items-center gap-2">
+  1279→              <Pencil className="size-5" />
+  1280→              Edit Opening Stock
+  1281→            </DialogTitle>
+  1282→            <DialogDescription>
+  1283→              {editEntry && `Update opening stock for ${editEntry.product.name} (${editEntry.product.code})`}
+  1284→            </DialogDescription>
+  1285→          </DialogHeader>
+  1286→
+  1287→          <Form {...editForm}>
+  1288→            <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4">
+  1289→              <FormField
+  1290→                control={editForm.control}
+  1291→                name="quantity"
+  1292→                render={({ field }) => (
+  1293→                  <FormItem>
+  1294→                    <FormLabel>Quantity *</FormLabel>
+  1295→                    <FormControl>
+  1296→                      <Input type="number" min="1" {...field} />
+  1297→                    </FormControl>
+  1298→                    <FormMessage />
+  1299→                  </FormItem>
+  1300→                )}
+  1301→              />
+  1302→
+  1303→              <FormField
+  1304→                control={editForm.control}
+  1305→                name="remarks"
+  1306→                render={({ field }) => (
+  1307→                  <FormItem>
+  1308→                    <FormLabel>Remarks</FormLabel>
+  1309→                    <FormControl>
+  1310→                      <Textarea placeholder="Optional remarks" {...field} rows={3} />
+  1311→                    </FormControl>
+  1312→                    <FormMessage />
+  1313→                  </FormItem>
+  1314→                )}
+  1315→              />
+  1316→
+  1317→              <DialogFooter>
+  1318→                <Button type="button" variant="outline" onClick={() => setEditDialogOpen(false)}>
+  1319→                  Cancel
+  1320→                </Button>
+  1321→                <Button type="submit" disabled={editSubmitting}>
+  1322→                  {editSubmitting && <Loader2 className="mr-2 size-4 animate-spin" />}
+  1323→                  Save Changes
+  1324→                </Button>
+  1325→              </DialogFooter>
+  1326→            </form>
+  1327→          </Form>
+  1328→        </DialogContent>
+  1329→      </Dialog>
+  1330→
+  1331→      {/* ─── Delete Confirmation Dialog ──────────────────────────────── */}
+  1332→      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+  1333→        <AlertDialogContent>
+  1334→          <AlertDialogHeader>
+  1335→            <AlertDialogTitle className="flex items-center gap-2">
+  1336→              <Trash2 className="size-5 text-destructive" />
+  1337→              Delete Opening Stock
+  1338→            </AlertDialogTitle>
+  1339→            <AlertDialogDescription>
+  1340→              {deleteEntry && (
+  1341→                <>
+  1342→                  Are you sure you want to delete the opening stock entry for{' '}
+  1343→                  <span className="font-semibold">{deleteEntry.product.name}</span>? This action cannot be undone.
+  1344→                  {deleteEntry.currentTotalStock !== deleteEntry.openingQuantity && (
+  1345→                    <span className="block mt-2 text-amber-600 dark:text-amber-400 font-medium">
+  1346→                      Warning: This product has other stock transactions. Deletion may fail.
+  1347→                    </span>
+  1348→                  )}
+  1349→                </>
+  1350→              )}
+  1351→            </AlertDialogDescription>
+  1352→          </AlertDialogHeader>
+  1353→          <AlertDialogFooter>
+  1354→            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+  1355→            <AlertDialogAction
+  1356→              onClick={(e) => { e.preventDefault(); handleDelete() }}
+  1357→              disabled={deleting}
+  1358→              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+  1359→            >
+  1360→              {deleting ? (
+  1361→                <>
+  1362→                  <Loader2 className="mr-2 size-4 animate-spin" />
+  1363→                  Deleting...
+  1364→                </>
+  1365→              ) : (
+  1366→                'Delete'
+  1367→              )}
+  1368→            </AlertDialogAction>
+  1369→          </AlertDialogFooter>
+  1370→        </AlertDialogContent>
+  1371→      </AlertDialog>
+  1372→
+  1373→      {/* ─── Item Detail Sheet ──────────────────────────────────────── */}
+  1374→      <Sheet open={detailOpen} onOpenChange={setDetailOpen}>
+  1375→        <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
+  1376→          <SheetHeader>
+  1377→            <SheetTitle className="flex items-center gap-2">
+  1378→              <Eye className="size-5" />
+  1379→              Product Detail
+  1380→            </SheetTitle>
+  1381→            <SheetDescription>Stock information and recent transactions</SheetDescription>
+  1382→          </SheetHeader>
+  1383→
+  1384→          {detailProduct && (
+  1385→            <div className="mt-6 space-y-6">
+  1386→              {/* Product Info */}
+  1387→              <div className="space-y-3">
+  1388→                <div className="flex items-start gap-4">
+  1389→                  {detailProduct.image ? (
+  1390→                    <img
+  1391→                      src={detailProduct.image}
+  1392→                      alt={detailProduct.name}
+  1393→                      className="size-20 rounded-lg border object-cover"
+  1394→                    />
+  1395→                  ) : (
+  1396→                    <div className="size-20 rounded-lg border bg-muted flex items-center justify-center">
+  1397→                      <Package className="size-8 text-muted-foreground" />
+  1398→                    </div>
+  1399→                  )}
+  1400→                  <div className="flex-1 min-w-0">
+  1401→                    <h3 className="text-lg font-semibold">{detailProduct.name}</h3>
+  1402→                    <p className="text-sm font-mono text-muted-foreground">{detailProduct.code}</p>
+  1403→                    <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+  1404→                      {detailProduct.category && (
+  1405→                        <Badge variant="secondary" className="text-[10px]">
+  1406→                          {detailProduct.category.name}
+  1407→                        </Badge>
+  1408→                      )}
+  1409→                      {detailProduct.supplier && (
+  1410→                        <Badge variant="outline" className="text-[10px]">
+  1411→                          {detailProduct.supplier.name}
+  1412→                        </Badge>
+  1413→                      )}
+  1414→                      <Badge variant="outline" className="text-[10px]">
+  1415→                        {detailProduct.unit}
+  1416→                      </Badge>
+  1417→                    </div>
+  1418→                  </div>
+  1419→                </div>
+  1420→
+  1421→                {/* Product Details Grid */}
+  1422→                <div className="grid grid-cols-2 gap-2 text-sm">
+  1423→                  <div className="flex justify-between rounded border p-2">
+  1424→                    <span className="text-muted-foreground">SKU</span>
+  1425→                    <span className="font-mono">{detailProduct.sku}</span>
+  1426→                  </div>
+  1427→                  <div className="flex justify-between rounded border p-2">
+  1428→                    <span className="text-muted-foreground">Status</span>
+  1429→                    <Badge
+  1430→                      variant="secondary"
+  1431→                      className={
+  1432→                        detailProduct.status === 'ACTIVE'
+  1433→                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 text-[10px]'
+  1434→                          : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 text-[10px]'
+  1435→                      }
+  1436→                    >
+  1437→                      {detailProduct.status}
+  1438→                    </Badge>
+  1439→                  </div>
+  1440→                </div>
+  1441→              </div>
+  1442→
+  1443→              {/* Stock Breakdown */}
+  1444→              {detailLoading ? (
+  1445→                <div className="space-y-2">
+  1446→                  <p className="text-sm font-medium">Stock Breakdown</p>
+  1447→                  <div className="grid grid-cols-2 gap-2">
+  1448→                    {Array.from({ length: 6 }).map((_, i) => (
+  1449→                      <Skeleton key={i} className="h-16 rounded-lg" />
+  1450→                    ))}
+  1451→                  </div>
+  1452→                </div>
+  1453→              ) : detailSummary ? (
+  1454→                <div className="space-y-3">
+  1455→                  <p className="text-sm font-medium">Stock Breakdown</p>
+  1456→                  <div className="grid grid-cols-2 gap-2">
+  1457→                    <div className="rounded-lg border p-3 space-y-1">
+  1458→                      <span className="text-xs text-muted-foreground">Opening Stock</span>
+  1459→                      <p className="text-lg font-bold">{detailSummary.summary.openingStock}</p>
+  1460→                    </div>
+  1461→                    <div className="rounded-lg border p-3 space-y-1">
+  1462→                      <span className="text-xs text-muted-foreground">Total Received</span>
+  1463→                      <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">+{detailSummary.summary.totalReceived}</p>
+  1464→                    </div>
+  1465→                    <div className="rounded-lg border p-3 space-y-1">
+  1466→                      <span className="text-xs text-muted-foreground">Total Issued</span>
+  1467→                      <p className="text-lg font-bold text-orange-600 dark:text-orange-400">-{detailSummary.summary.totalIssued}</p>
+  1468→                    </div>
+  1469→                    <div className="rounded-lg border p-3 space-y-1">
+  1470→                      <span className="text-xs text-muted-foreground">Total Returned</span>
+  1471→                      <p className="text-lg font-bold text-violet-600 dark:text-violet-400">+{detailSummary.summary.totalReturned}</p>
+  1472→                    </div>
+  1473→                    <div className="rounded-lg border p-3 space-y-1">
+  1474→                      <span className="text-xs text-muted-foreground">Adjustments</span>
+  1475→                      <p className="text-lg font-bold">
+  1476→                        <span className="text-sky-600 dark:text-sky-400">+{detailSummary.summary.totalAdjustmentIn}</span>
+  1477→                        {' / '}
+  1478→                        <span className="text-red-600 dark:text-red-400">-{detailSummary.summary.totalAdjustmentOut}</span>
+  1479→                      </p>
+  1480→                    </div>
+  1481→                    <div className="rounded-lg border p-3 space-y-1">
+  1482→                      <span className="text-xs text-muted-foreground">Reserved</span>
+  1483→                      <p className="text-lg font-bold text-amber-600 dark:text-amber-400">{detailSummary.summary.reservedStock}</p>
+  1484→                    </div>
+  1485→                  </div>
+  1486→                  <div className="rounded-lg border-2 border-primary/20 bg-primary/5 p-4 space-y-1 text-center">
+  1487→                    <span className="text-xs text-muted-foreground">Available Stock</span>
+  1488→                    <p className={`text-2xl font-bold ${
+  1489→                      detailSummary.summary.available > 0
+  1490→                        ? 'text-emerald-600 dark:text-emerald-400'
+  1491→                        : detailSummary.summary.available === 0
+  1492→                          ? 'text-amber-600 dark:text-amber-400'
+  1493→                          : 'text-red-600 dark:text-red-400'
+  1494→                    }`}>
+  1495→                      {detailSummary.summary.available} {detailProduct.unit}
+  1496→                    </p>
+  1497→                  </div>
+  1498→                </div>
+  1499→              ) : null}
+  1500→
+  1501→              {/* Recent Transactions */}
+  1502→              {detailSummary && detailSummary.recentTransactions.length > 0 && (
+  1503→                <div className="space-y-3">
+  1504→                  <p className="text-sm font-medium">Recent Transactions (Last 5)</p>
+  1505→                  <div className="space-y-2">
+  1506→                    {detailSummary.recentTransactions.slice(0, 5).map((tx) => (
+  1507→                      <div
+  1508→                        key={tx.id}
+  1509→                        className="flex items-center justify-between rounded border p-2.5 text-sm"
+  1510→                      >
+  1511→                        <div className="flex items-center gap-2 min-w-0">
+  1512→                          <Badge
+  1513→                            variant="secondary"
+  1514→                            className={`text-[10px] ${TX_TYPE_COLORS[tx.type] || ''}`}
+  1515→                          >
+  1516→                            {TX_TYPE_LABELS[tx.type] || tx.type}
+  1517→                          </Badge>
+  1518→                          {tx.remarks && (
+  1519→                            <span className="text-xs text-muted-foreground truncate max-w-[120px]">
+  1520→                              {tx.remarks}
+  1521→                            </span>
+  1522→                          )}
+  1523→                        </div>
+  1524→                        <div className="flex items-center gap-3 flex-shrink-0">
+  1525→                          <span className="font-medium">
+  1526→                            {tx.type === 'ISSUED' || tx.type === 'ADJUSTMENT_OUT' ? '-' : '+'}{tx.quantity}
+  1527→                          </span>
+  1528→                          <span className="text-xs text-muted-foreground">
+  1529→                            {format(new Date(tx.date), 'MMM dd')}
+  1530→                          </span>
+  1531→                        </div>
+  1532→                      </div>
+  1533→                    ))}
+  1534→                  </div>
+  1535→                </div>
+  1536→              )}
+  1537→
+  1538→              {detailSummary && detailSummary.recentTransactions.length === 0 && (
+  1539→                <div className="flex flex-col items-center justify-center py-8 text-center">
+  1540→                  <Package className="size-8 text-muted-foreground/40 mb-2" />
+  1541→                  <p className="text-sm text-muted-foreground">No transactions yet</p>
+  1542→                </div>
+  1543→              )}
+  1544→            </div>
+  1545→          )}
+  1546→        </SheetContent>
+  1547→      </Sheet>
+  1548→    </div>
+  1549→  )
+  1550→}
+  1551→

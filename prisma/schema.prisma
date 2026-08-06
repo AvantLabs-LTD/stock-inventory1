@@ -14,8 +14,8 @@ model User {
   email         String   @unique
   password      String
   name          String
-  role          String   @default("VIEWER") // SUPER_ADMIN, INVENTORY_ADMIN, STORE_KEEPER, DEPARTMENT_USER, VIEWER
-  status        String   @default("ACTIVE") // ACTIVE, INACTIVE
+  role          String   @default("VIEWER")
+  status        String   @default("ACTIVE")
   phone         String?
   avatar        String?
   departmentId  String?
@@ -31,6 +31,10 @@ model User {
   reservationsBy    ReservedInventory[]
   releasedItems     ReservedInventory[] @relation("ReleasedBy")
   returnedItems     InventoryReturn[]
+  createdStocks      OpeningStock[]
+  deletedStocks      OpeningStock[] @relation("DeletedBy")
+  ledgerEntries      StockLedger[]
+  importBatches     ImportBatch[]
 
   @@index([email])
   @@index([role])
@@ -65,7 +69,7 @@ model Project {
   description   String?
   startDate     DateTime?
   endDate       DateTime?
-  status        String   @default("ACTIVE") // ACTIVE, COMPLETED, ON_HOLD, CANCELLED
+  status        String   @default("ACTIVE")
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -112,6 +116,7 @@ model Supplier {
 
   products      Product[]
   goodsReceived GoodsReceived[]
+  openingStocks OpeningStock[]
 
   @@index([name])
 }
@@ -121,22 +126,36 @@ model Product {
   code            String   @unique
   name            String
   sku             String   @unique
+  parentProductId String?
+  variantName     String?
   categoryId      String?
   supplierId      String?
   manufacturer    String?
   modelNumber     String?
+  brand           String?
+  barcode         String?
+  qrCode          String?
+  size            String?
+  length          String?
+  color           String?
   unit            String   @default("pcs")
   image           String?
+  picture         String?
+  datasheet       String?
   description     String?
   storageLocation String?
   minimumStock    Int      @default(0)
+  maximumStock    Int      @default(0)
+  reorderLevel    Int      @default(0)
   unitCost        Float    @default(0)
-  status          String   @default("ACTIVE") // ACTIVE, INACTIVE, DISCONTINUED
+  status          String   @default("ACTIVE")
   createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  updatedAt       DateTime  @updatedAt
 
-  category       Category?              @relation(fields: [categoryId], references: [id])
-  supplier       Supplier?              @relation(fields: [supplierId], references: [id])
+  parent          Product?              @relation("ProductVariant", fields: [parentProductId], references: [id])
+  variants        Product[]              @relation("ProductVariant")
+  category        Category?              @relation(fields: [categoryId], references: [id])
+  supplier        Supplier?              @relation(fields: [supplierId], references: [id])
   transactions   InventoryTransaction[]
   issues         InventoryIssue[]
   reservations   ReservedInventory[]
@@ -144,19 +163,189 @@ model Product {
   goodsReceived  GoodsReceived[]
   returns        InventoryReturn[]
   adjustments    StockAdjustment[]
+  openingStocks  OpeningStock[]
+  projectQtys   ProductProjectQty[]
 
   @@index([categoryId])
   @@index([supplierId])
   @@index([status])
   @@index([sku])
+  @@index([parentProductId])
+  @@index([barcode])
 }
 
-// ─── INVENTORY TRANSACTIONS ───────────────────────────────────────────────
+// ─── STOCK LEDGER (Live Transaction History) ───────────────────────────────
+
+model StockLedger {
+  id              String   @id @default(cuid())
+  openingStockId  String
+  transactionType String   // OPENING, GOODS_RECEIVED, ISSUED, RETURNED, TRANSFER_IN, TRANSFER_OUT, ADJUSTMENT_IN, ADJUSTMENT_OUT, DAMAGED, SCRAPPED, RESERVED, RELEASED
+  quantity        Int
+  oldStock        Int
+  newStock        Int
+  userId          String
+  projectId       String?
+  warehouse       String?
+  remarks         String?
+  referenceId     String?
+  createdAt       DateTime @default(now())
+
+  openingStock  OpeningStock @relation(fields: [openingStockId], references: [id], onDelete: Cascade)
+  user          User         @relation(fields: [userId], references: [id])
+
+  @@index([openingStockId])
+  @@index([transactionType])
+  @@index([createdAt])
+  @@index([userId])
+}
+
+// ─── OPENING STOCK (Live Inventory Register) ────────────────────────────────
+
+model OpeningStock {
+  id                String    @id @default(cuid())
+  productId         String
+  warehouse         String?
+  storageLocation   String?
+  quantity          Int
+  unitCost          Float     @default(0)
+  inventoryValue    Float     @default(0)
+  batchNumber       String?
+  serialNumber      String?
+  expiryDate        DateTime?
+  supplierId        String?
+  purchaseReference String?
+  invoiceNumber     String?
+  receivedDate      DateTime?
+  openingDate       DateTime  @default(now())
+  remarks           String?
+  internalNotes     String?
+  importBatchId     String?
+  status            String    @default("ACTIVE")
+  deletedAt         DateTime?
+  deletedBy         String?
+  createdById       String
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  // Live stock totals
+  receivedQty       Int       @default(0)
+  issuedQty         Int       @default(0)
+  returnedQty       Int       @default(0)
+  reservedQty       Int       @default(0)
+  damagedQty        Int       @default(0)
+  transferredInQty  Int       @default(0)
+  transferredOutQty Int       @default(0)
+  currentStock      Int       @default(0)
+  availableStock    Int       @default(0)
+  lastTransactionAt DateTime?
+
+  product       Product               @relation(fields: [productId], references: [id])
+  supplier      Supplier?             @relation(fields: [supplierId], references: [id])
+  createdBy     User                  @relation(fields: [createdById], references: [id])
+  deletedByUser User?                 @relation("DeletedBy", fields: [deletedBy], references: [id])
+  importBatch   ImportBatch?          @relation(fields: [importBatchId], references: [id])
+  ledger        StockLedger[]
+  customValues  OpeningStockCustomValue[]
+
+  @@index([productId])
+  @@index([warehouse])
+  @@index([supplierId])
+  @@index([status])
+  @@index([openingDate])
+  @@index([importBatchId])
+}
+
+// ─── IMPORT BATCH ──────────────────────────────────────────────────────────
+
+model ImportBatch {
+  id             String   @id @default(cuid())
+  fileName       String
+  sheetName      String?
+  totalRows      Int      @default(0)
+  imported       Int      @default(0)
+  updated        Int      @default(0)
+  skipped        Int      @default(0)
+  errorCount     Int      @default(0)
+  warningCount   Int      @default(0)
+  durationMs     Int      @default(0)
+  status         String   @default("COMPLETED")
+  columnMapping  String?
+  errorReport    String?
+  importedById   String
+  createdAt      DateTime @default(now())
+
+  importedBy    User           @relation(fields: [importedById], references: [id])
+  openingStocks OpeningStock[]
+
+  @@index([importedById])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ─── DYNAMIC CUSTOM FIELDS ────────────────────────────────────────────────
+
+model CustomField {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  fieldType String   @default("TEXT")
+  source    String   @default("IMPORT")
+  createdAt DateTime @default(now())
+
+  values OpeningStockCustomValue[]
+
+  @@index([source])
+}
+
+model OpeningStockCustomValue {
+  id              String @id @default(cuid())
+  openingStockId  String
+  customFieldId   String
+  value           String
+
+  openingStock OpeningStock @relation(fields: [openingStockId], references: [id], onDelete: Cascade)
+  customField  CustomField  @relation(fields: [customFieldId], references: [id], onDelete: Cascade)
+
+  @@unique([openingStockId, customFieldId])
+  @@index([openingStockId])
+  @@index([customFieldId])
+}
+
+// ─── PROJECT QUANTITY FIELDS (Dynamic per-product project tracking) ───────
+
+model ProjectField {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  code      String   @unique
+  createdAt DateTime @default(now())
+
+  productQtys ProductProjectQty[]
+}
+
+model ProductProjectQty {
+  id              String @id @default(cuid())
+  productId       String
+  projectFieldId  String
+  requiredQty     Int    @default(0)
+  batchQty        Int    @default(0)
+  reservedQty     Int    @default(0)
+  consumedQty     Int    @default(0)
+  orderedQty      Int    @default(0)
+  toBeUsed        Int    @default(0)
+  remarks         String?
+
+  product     Product      @relation(fields: [productId], references: [id])
+  projectField ProjectField @relation(fields: [projectFieldId], references: [id])
+
+  @@unique([productId, projectFieldId])
+  @@index([productId])
+  @@index([projectFieldId])
+}
+
+// ─── INVENTORY TRANSACTIONS (Legacy - kept for backward compat) ───────────
 
 model InventoryTransaction {
   id        String   @id @default(cuid())
   productId String
-  type      String   // OPENING_STOCK, GOODS_RECEIVED, ISSUED, RETURNED, ADJUSTMENT_IN, ADJUSTMENT_OUT
+  type      String
   quantity  Int
   unitCost  Float?
   reference String?
@@ -196,8 +385,6 @@ model GoodsReceived {
   @@index([date])
 }
 
-// ─── INVENTORY ISSUE ───────────────────────────────────────────────────────
-
 model InventoryIssue {
   id            String   @id @default(cuid())
   productId     String
@@ -222,8 +409,6 @@ model InventoryIssue {
   @@index([projectId])
   @@index([date])
 }
-
-// ─── INVENTORY RETURN ─────────────────────────────────────────────────────
 
 model InventoryReturn {
   id            String   @id @default(cuid())
@@ -252,15 +437,13 @@ model InventoryReturn {
   @@index([date])
 }
 
-// ─── RESERVED INVENTORY ────────────────────────────────────────────────────
-
 model ReservedInventory {
   id                  String    @id @default(cuid())
   productId           String
   projectId           String
   quantity            Int
   reason              String?
-  status              String    @default("ACTIVE") // ACTIVE, RELEASED
+  status              String    @default("ACTIVE")
   reservedBy          String
   releasedBy          String?
   releasedAt          DateTime?
@@ -279,8 +462,6 @@ model ReservedInventory {
   @@index([status])
 }
 
-// ─── INVENTORY REQUESTS ─────────────────────────────────────────────────────
-
 model InventoryRequest {
   id            String   @id @default(cuid())
   productId     String
@@ -290,9 +471,9 @@ model InventoryRequest {
   employeeName  String
   quantity      Int
   approvedQty   Int      @default(0)
-  priority      String   @default("MEDIUM") // LOW, MEDIUM, HIGH, URGENT
+  priority      String   @default("MEDIUM")
   reason        String?
-  status        String   @default("PENDING") // PENDING, APPROVED, REJECTED, PARTIAL_APPROVED, COMPLETED, CANCELLED
+  status        String   @default("PENDING")
   approvedBy    String?
   approvedAt    DateTime?
   completedBy   String?
@@ -313,12 +494,10 @@ model InventoryRequest {
   @@index([priority])
 }
 
-// ─── STOCK ADJUSTMENTS ─────────────────────────────────────────────────────
-
 model StockAdjustment {
   id          String   @id @default(cuid())
   productId   String
-  type        String   // ADJUSTMENT_IN, ADJUSTMENT_OUT
+  type        String
   quantity    Int
   reason      String?
   remarks     String?

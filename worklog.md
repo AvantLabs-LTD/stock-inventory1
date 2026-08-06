@@ -1150,3 +1150,103 @@ Stage Summary:
 - BOM files with model columns (AUJ-CHS, BL-CHS, etc.) are auto-detected and processed
 - File validation shows clear error messages in the dialog
 - All changes lint-clean
+---
+Task ID: 2-api
+Agent: fullstack-dev
+Task: Build all Opening Stock API routes (redesigned module)
+
+Work Log:
+- Built 13 API route files under /api/opening-stock/ using new OpeningStock, StockLedger, ProjectField, ProductProjectQty, ImportBatch, CustomField, OpeningStockCustomValue models
+- /api/opening-stock/route.ts: GET (paginated list with live stock data, product variants, category, supplier, projectQtys, customValues, filters: search/categoryId/warehouse/status/stockStatus/sortBy/sortOrder, computed stock status HEALTHY/LOW/CRITICAL/OUT_OF_STOCK) + POST (create with currentStock=quantity, ledger entry OPENING, duplicate check, inline product creation via productId='CREATE_NEW')
+- /api/opening-stock/summary/route.ts: GET (totalProducts, totalQuantity, totalValue, lowStockCount, outOfStockCount, criticalStockCount, categoriesCount, warehousesCount, lastImportDate from ACTIVE stocks)
+- /api/opening-stock/[id]/route.ts: GET (full detail with ledger entries, project quantities, custom values) + PUT (only remarks/internalNotes/batchNumber/serialNumber/expiryDate/storageLocation editable, rejects quantity/cost edits, creates ledger for stock metadata changes) + DELETE (soft delete status=DELETED, deletedAt, deletedBy, ledger SCRAPPED entry)
+- /api/opening-stock/[id]/restore/route.ts: PATCH (restore soft-deleted record, status=ACTIVE, clear deletedAt/deletedBy, ledger ADJUSTMENT_IN entry)
+- /api/opening-stock/[id]/ledger/route.ts: GET (paginated StockLedger entries ordered by createdAt desc with user name)
+- /api/opening-stock/projects/route.ts: GET (all ProjectFields with product count) + POST (create ProjectField with auto-generated code from name)
+- /api/opening-stock/projects/[id]/route.ts: PUT (update name/code with unique checks) + DELETE (only if no linked ProductProjectQty entries)
+- /api/opening-stock/import/analyze/route.ts: POST (smart column matching for name/spec/category/unit/quantity/batch/serial/remarks/warehouse/supplier/cost/expiry, auto-detects project field columns, preview rows, duplicate detection, sheet listing, CSV support)
+- /api/opening-stock/import/execute/route.ts: POST (execute import with base64 file data, auto-create products/categories/suppliers/project fields, create OpeningStock with currentStock=quantity, StockLedger OPENING entries, ProductProjectQty for extra columns, ImportBatch record with duration/status/error report)
+- /api/opening-stock/export/route.ts: GET (export to Excel with dynamic project field columns, color-coded stock status, all live stock fields, filters for warehouse/category/status)
+- /api/opening-stock/template/route.ts: GET (download template with Item Name, Specification, Category, Unit, Opening Quantity, Batch Number, Serial Number, Remarks + Instructions sheet)
+- /api/opening-stock/variants/route.ts: GET (list variants of parent product with stock info)
+- /api/opening-stock/products/quick-create/route.ts: POST (quick create parent or variant product with auto-generated code/SKU, one-level variant depth validation, barcode uniqueness check)
+- All routes use auth session verification + RBAC permission checks (stock.view for read, stock.manage for write)
+- All routes use import { db } from '@/lib/db' and ExcelJS from 'exceljs'
+- Fixed bug in analyze route: extra column preview used wrong cell reference
+- Lint clean with zero errors
+
+Stage Summary:
+- 13 new API route files created under /api/opening-stock/
+- Complete CRUD for OpeningStock with live stock fields (currentStock, availableStock, receivedQty, issuedQty, etc.)
+- StockLedger integration for all mutations (create, update metadata, soft delete, restore)
+- ProjectField CRUD with product count tracking
+- Two-phase import: analyze (smart column detection) then execute (base64 data, auto-create entities)
+- Excel export with dynamic project field columns and color-coded status
+- Downloadable import template with instructions sheet
+- Product variant listing with stock info
+- Quick product creation (parent + variant) for inline creation from opening stock modal
+- All auth/RBAC/audit log patterns followed
+- Files created:
+  - src/app/api/opening-stock/route.ts
+  - src/app/api/opening-stock/summary/route.ts
+  - src/app/api/opening-stock/[id]/route.ts
+  - src/app/api/opening-stock/[id]/restore/route.ts
+  - src/app/api/opening-stock/[id]/ledger/route.ts
+  - src/app/api/opening-stock/projects/route.ts
+  - src/app/api/opening-stock/projects/[id]/route.ts
+  - src/app/api/opening-stock/import/analyze/route.ts
+  - src/app/api/opening-stock/import/execute/route.ts
+  - src/app/api/opening-stock/export/route.ts
+  - src/app/api/opening-stock/template/route.ts
+  - src/app/api/opening-stock/variants/route.ts
+  - src/app/api/opening-stock/products/quick-create/route.ts
+---
+Task ID: 3-frontend
+Agent: fullstack-dev
+Task: Build Opening Stock Frontend (Live Inventory Register)
+
+Work Log:
+- Created complete Opening Stock V2 page as professional ERP dashboard with live inventory register
+- Built 6 summary cards (Total Products, Total Quantity, Low Stock, Out of Stock, Categories, Last Import) with loading skeletons
+- Built comprehensive filter bar with search (8 fields), category dropdown, warehouse dropdown, status dropdown, stock status dropdown, project dropdown, reset button, and active filter count badge
+- Built column toggle popover supporting 28 standard columns + dynamic project columns, with checkbox toggles
+- Built live inventory table with sticky first column (product name + avatar), 14 default visible columns, 14+ toggleable columns
+- Implemented stock status badges (HEALTHY green, LOW amber, CRITICAL red, OUT_OF_STOCK gray) auto-computed from API
+- Built sortable table columns with click handlers and visual sort indicators (asc/desc/neutral)
+- Built row selection with select-all checkbox
+- Built actions dropdown per row (View Stock Ledger, View Details, Archive, Restore)
+- Built detail dialog showing complete entry info with project quantities table
+- Built archive/restore with AlertDialog confirmation
+- Built pagination (first/prev/pages/next/last) with server-side 25 per page
+- Built empty state with Package icon, message, and Add/Reset buttons
+- Created Add Opening Stock modal with 5 collapsible sections: Product Info, Inventory Info, Supplier Info, Project Quantities, Additional
+- Built product search with debounced API calls, dropdown results, and not-found detection
+- Built inline quick-create product flow (name, category, unit, variant) with auto-select after creation
+- Built edit mode with restricted fields (only metadata, project qtys editable; quantity/cost locked)
+- Built calculated inventory value display
+- Built dynamic project quantity rows per ProjectField with 7 fields each
+- Created Smart Import Dialog with 3-step wizard: Upload (drag-drop, validation, auto-analyze), Review (stats, column mapping, warnings, preview table), Result (imported/updated/skipped counts, errors, duration)
+- Created Stock Ledger Drawer (Sheet) with timeline view, color-coded transaction badges, stock change arrows, user/date/remarks
+- Created Project Config Dialog for managing dynamic project columns with CRUD (add, list with product count, delete with confirmation)
+- Updated AppShell to route opening-stock page to OpeningStockPageV2
+- All components use shadcn/ui, lucide-react icons, sonner toasts, date-fns formatting
+- Permission-aware UI using hasPermission from permissions module
+- Responsive design with horizontal scroll, mobile-friendly layout
+- Dark mode compatible throughout
+- TypeScript with proper interfaces and types
+- Zero lint errors, zero TypeScript errors in new files
+
+Stage Summary:
+- 5 complete frontend components at src/components/opening-stock/
+- Professional ERP-grade inventory register dashboard
+- Full CRUD integration with existing API routes
+- Smart import wizard with file analysis and preview
+- Stock ledger timeline view
+- Dynamic project column management
+- Files created:
+  - src/components/opening-stock/opening-stock-page.tsx (OpeningStockPageV2 - main dashboard)
+  - src/components/opening-stock/add-opening-stock-modal.tsx (AddOpeningStockModal - create/edit modal)
+  - src/components/opening-stock/smart-import-dialog.tsx (SmartImportDialog - 3-step import wizard)
+  - src/components/opening-stock/stock-ledger-drawer.tsx (StockLedgerDrawer - timeline sheet)
+  - src/components/opening-stock/project-config-dialog.tsx (ProjectConfigDialog - project fields CRUD)
+  - Updated: src/components/layout/app-shell.tsx (route opening-stock to V2)
