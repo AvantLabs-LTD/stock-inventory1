@@ -35,6 +35,8 @@ model User {
   deletedStocks      OpeningStock[] @relation("DeletedBy")
   ledgerEntries      StockLedger[]
   importBatches     ImportBatch[]
+  createdRequisitions MaterialRequisition[]
+  approvedRequisitions MaterialRequisition[] @relation("ApprovedByUser")
 
   @@index([email])
   @@index([role])
@@ -57,6 +59,7 @@ model Department {
   issues    InventoryIssue[]
   requests  InventoryRequest[]
   returns   InventoryReturn[]
+  requisitions MaterialRequisition[]
 
   @@index([name])
 }
@@ -78,6 +81,7 @@ model Project {
   requests     InventoryRequest[]
   reservations ReservedInventory[]
   returns      InventoryReturn[]
+  requisitions MaterialRequisition[]
 
   @@index([departmentId])
   @@index([status])
@@ -161,6 +165,7 @@ model Product {
   reservations   ReservedInventory[]
   requests       InventoryRequest[]
   goodsReceived  GoodsReceived[]
+  requisitionItems RequisitionItem[]
   returns        InventoryReturn[]
   adjustments    StockAdjustment[]
   openingStocks  OpeningStock[]
@@ -492,6 +497,57 @@ model InventoryRequest {
   @@index([projectId])
   @@index([status])
   @@index([priority])
+}
+
+// ─── MATERIAL REQUISITION (Multi-item request form) ──────────────────────
+
+model MaterialRequisition {
+  id              String    @id @default(cuid())
+  requisitionNo   String    @unique
+  date            DateTime  @default(now())
+  departmentId    String
+  projectId       String
+  requestedBy     String
+  employeeName    String
+  issuedByName    String?
+  receivedByName  String?
+  approvedBy      String?
+  approvedAt      DateTime?
+  completedBy     String?
+  completedAt     DateTime?
+  status          String    @default("PENDING")
+  remarks         String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  department       Department        @relation(fields: [departmentId], references: [id])
+  project          Project           @relation(fields: [projectId], references: [id])
+  requestedByUser  User              @relation(fields: [requestedBy], references: [id])
+  approvedByUser   User?             @relation("ApprovedByUser", fields: [approvedBy], references: [id])
+  items            RequisitionItem[]
+
+  @@index([departmentId])
+  @@index([projectId])
+  @@index([status])
+  @@index([date])
+}
+
+model RequisitionItem {
+  id              String   @id @default(cuid())
+  requisitionId   String
+  productId       String
+  specDescription String?
+  requiredQty     Int
+  issuedQty       Int      @default(0)
+  remarks         String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  requisition MaterialRequisition @relation(fields: [requisitionId], references: [id], onDelete: Cascade)
+  product     Product             @relation(fields: [productId], references: [id])
+
+  @@index([requisitionId])
+  @@index([productId])
 }
 
 model StockAdjustment {

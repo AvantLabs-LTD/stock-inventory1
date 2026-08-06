@@ -1250,3 +1250,24 @@ Stage Summary:
   - src/components/opening-stock/stock-ledger-drawer.tsx (StockLedgerDrawer - timeline sheet)
   - src/components/opening-stock/project-config-dialog.tsx (ProjectConfigDialog - project fields CRUD)
   - Updated: src/components/layout/app-shell.tsx (route opening-stock to V2)
+---
+Task ID: 1
+Agent: Main
+Task: Add Material Requisition Form to Inventory Requests (matching paper form format)
+
+Work Log:
+- Analyzed uploaded image of Material Requisition Form paper document
+- Added MaterialRequisition + RequisitionItem models to Prisma schema with proper relations
+- Pushed schema to database (db:push)
+- Created 5 API routes: GET/POST /api/requisitions, GET/PUT /api/requisitions/[id], PUT approve, PUT reject, PUT complete
+- Built MaterialRequisitionForm component matching paper form: Date/Dept/Project/Employee header + multi-item table (S/No, Item Name, Spec/Desc, Req Qty, Remarks) + Add Row + Submit
+- Built RequisitionDetailDialog with: status badges, items table matching paper form, Issued By / Received By signature sections (editable), approve/reject/complete workflows
+- Replaced request-page.tsx to list requisitions instead of single-item requests
+- All components pass lint, browser verified
+
+Stage Summary:
+- Material Requisition feature fully implemented
+- Form matches paper document format exactly: header fields + items table + signature sections
+- Requisition numbers auto-generated as MR-YYYYMMDD-NNN
+- Approval workflow supports per-item quantity adjustment
+- Completion auto-creates InventoryIssue records for backwards compatibility
