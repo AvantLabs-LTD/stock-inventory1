@@ -114,7 +114,6 @@ interface ProductInfo {
   parentProductId: string | null
   variantName: string | null
   category: { id: string; name: string; code: string } | null
-  supplier: { id: string; name: string } | null
   parent: { id: string; name: string; code: string } | null
 }
 
@@ -149,7 +148,6 @@ interface OpeningStockEntry {
   batchNumber: string | null
   serialNumber: string | null
   expiryDate: string | null
-  supplierId: string | null
   purchaseReference: string | null
   invoiceNumber: string | null
   receivedDate: string | null
@@ -175,7 +173,6 @@ interface OpeningStockEntry {
   availableStock: number
   stockStatus: string
   product: ProductInfo
-  supplier: { id: string; name: string } | null
   createdBy: { id: string; name: string; email: string }
   projectQtys: ProjectQtyInfo[]
   customValues: CustomValueInfo[]
@@ -228,7 +225,6 @@ type ColumnKey =
   | 'transferredIn'
   | 'transferredOut'
   | 'inventoryValue'
-  | 'supplier'
   | 'batch'
   | 'serial'
   | 'openingDate'
@@ -267,7 +263,6 @@ const DEFAULT_COLUMNS: ColumnDef[] = [
   { key: 'transferredIn', label: 'Transferred In', defaultVisible: false },
   { key: 'transferredOut', label: 'Transferred Out', defaultVisible: false },
   { key: 'inventoryValue', label: 'Inventory Value', defaultVisible: false },
-  { key: 'supplier', label: 'Supplier', defaultVisible: false },
   { key: 'batch', label: 'Batch', defaultVisible: false },
   { key: 'serial', label: 'Serial', defaultVisible: false },
   { key: 'openingDate', label: 'Opening Date', defaultVisible: false },
@@ -1038,9 +1033,6 @@ export function OpeningStockPageV2() {
                           </div>
                         </TableHead>
                       )}
-                      {visibleColumns.has('supplier') && (
-                        <TableHead className="min-w-[120px]">Supplier</TableHead>
-                      )}
                       {visibleColumns.has('batch') && (
                         <TableHead className="min-w-[120px]">Batch</TableHead>
                       )}
@@ -1257,11 +1249,6 @@ export function OpeningStockPageV2() {
                             {visibleColumns.has('inventoryValue') && (
                               <TableCell className="text-right text-sm">
                                 {formatCurrency(entry.inventoryValue)}
-                              </TableCell>
-                            )}
-                            {visibleColumns.has('supplier') && (
-                              <TableCell>
-                                <span className="text-sm">{entry.supplier?.name || '—'}</span>
                               </TableCell>
                             )}
                             {visibleColumns.has('batch') && (
@@ -1532,10 +1519,6 @@ export function OpeningStockPageV2() {
                   <div>
                     <p className="text-xs text-muted-foreground">Batch / Serial</p>
                     <p>{detailEntry.batchNumber || '—'} / {detailEntry.serialNumber || '—'}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Supplier</p>
-                    <p>{detailEntry.supplier?.name || '—'}</p>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Opening Date</p>

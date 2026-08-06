@@ -126,7 +126,6 @@ const COLUMN_LABELS: Record<string, string> = {
   serialNumber: 'Serial Number',
   remarks: 'Remarks',
   warehouse: 'Warehouse',
-  supplier: 'Supplier',
   unitCost: 'Unit Cost',
   expiryDate: 'Expiry Date',
   storageLocation: 'Storage Location',

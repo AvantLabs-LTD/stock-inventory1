@@ -1,0 +1,882 @@
+     1→'use client'
+     2→
+     3→import { useCallback, useEffect, useState } from 'react'
+     4→import { format } from 'date-fns'
+     5→import {
+     6→  ChevronDown,
+     7→  ChevronUp,
+     8→  Loader2,
+     9→  Plus,
+    10→  Search,
+    11→  X,
+    12→  PackageSearch,
+    13→  AlertCircle,
+    14→} from 'lucide-react'
+    15→import {
+    16→  Dialog,
+    17→  DialogContent,
+    18→  DialogHeader,
+    19→  DialogTitle,
+    20→  DialogDescription,
+    21→  DialogFooter,
+    22→} from '@/components/ui/dialog'
+    23→import { Button } from '@/components/ui/button'
+    24→import { Input } from '@/components/ui/input'
+    25→import { Label } from '@/components/ui/label'
+    26→import { Textarea } from '@/components/ui/textarea'
+    27→import { Separator } from '@/components/ui/separator'
+    28→import {
+    29→  Select,
+    30→  SelectContent,
+    31→  SelectItem,
+    32→  SelectTrigger,
+    33→  SelectValue,
+    34→} from '@/components/ui/select'
+    35→import { Badge } from '@/components/ui/badge'
+    36→import { Skeleton } from '@/components/ui/skeleton'
+    37→import {
+    38→  Collapsible,
+    39→  CollapsibleContent,
+    40→  CollapsibleTrigger,
+    41→} from '@/components/ui/collapsible'
+    42→import { toast } from 'sonner'
+    43→
+    44→// ─── Types ───────────────────────────────────────────────────────────────────
+    45→
+    46→interface ProductItem {
+    47→  id: string
+    48→  name: string
+    49→  code: string
+    50→  sku: string
+    51→  unit: string
+    52→  status: string
+    53→  categoryId: string | null
+    54→  brand: string | null
+    55→  parentProductId: string | null
+    56→  variantName: string | null
+    57→  category: { id: string; name: string } | null
+    58→  parent: { id: string; name: string } | null
+    59→}
+    60→
+    61→interface CategoryItem {
+    62→  id: string
+    63→  name: string
+    64→}
+    65→
+    66→interface ProjectField {
+    67→  id: string
+    68→  name: string
+    69→  code: string
+    70→}
+    71→
+    72→interface ProjectQtyRow {
+    73→  projectFieldId: string
+    74→  requiredQty: number
+    75→  batchQty: number
+    76→  reservedQty: number
+    77→  consumedQty: number
+    78→  orderedQty: number
+    79→  toBeUsed: number
+    80→  remarks: string
+    81→}
+    82→
+    83→interface EditEntry {
+    84→  id: string
+    85→  productId: string
+    86→  warehouse: string | null
+    87→  storageLocation: string | null
+    88→  quantity: number
+    89→  unitCost: number
+    90→  batchNumber: string | null
+    91→  serialNumber: string | null
+    92→  expiryDate: string | null
+    93→  remarks: string | null
+    94→  internalNotes: string | null
+    95→  openingDate: string
+    96→  projectQtys: Array<{
+    97→    id: string
+    98→    projectFieldId: string
+    99→    requiredQty: number
+   100→    batchQty: number
+   101→    reservedQty: number
+   102→    consumedQty: number
+   103→    orderedQty: number
+   104→    toBeUsed: number
+   105→    remarks: string | null
+   106→  }>
+   107→}
+   108→
+   109→interface AddOpeningStockModalProps {
+   110→  open: boolean
+   111→  onOpenChange: (open: boolean) => void
+   112→  onSaved: () => void
+   113→  projectFields: ProjectField[]
+   114→  editEntry?: EditEntry | null
+   115→}
+   116→
+   117→const WAREHOUSES = [
+   118→  { value: 'Main Warehouse', label: 'Main Warehouse' },
+   119→  { value: 'Raw Material', label: 'Raw Material' },
+   120→  { value: 'SMD Line', label: 'SMD Line' },
+   121→  { value: 'Stores', label: 'Stores' },
+   122→]
+   123→
+   124→// ─── Main Component ──────────────────────────────────────────────────────────
+   125→
+   126→export function AddOpeningStockModal({
+   127→  open,
+   128→  onOpenChange,
+   129→  onSaved,
+   130→  projectFields,
+   131→  editEntry,
+   132→}: AddOpeningStockModalProps) {
+   133→  const isEdit = !!editEntry
+   134→
+   135→  // ─── Product Search ────────────────────────────────────────────────────
+   136→  const [productSearch, setProductSearch] = useState('')
+   137→  const [productResults, setProductResults] = useState<ProductItem[]>([])
+   138→  const [productSearchLoading, setProductSearchLoading] = useState(false)
+   139→  const [selectedProduct, setSelectedProduct] = useState<ProductItem | null>(null)
+   140→  const [showProductCreate, setShowProductCreate] = useState(false)
+   141→
+   142→  // ─── Form Fields ───────────────────────────────────────────────────────
+   143→  const [warehouse, setWarehouse] = useState('')
+   144→  const [storageLocation, setStorageLocation] = useState('')
+   145→  const [openingQty, setOpeningQty] = useState<number>(0)
+   146→  const [unitCost, setUnitCost] = useState<number>(0)
+   147→  const [batchNumber, setBatchNumber] = useState('')
+   148→  const [serialNumber, setSerialNumber] = useState('')
+   149→  const [expiryDate, setExpiryDate] = useState('')
+   150→  const [purchaseRef, setPurchaseRef] = useState('')
+   151→  const [invoiceNumber, setInvoiceNumber] = useState('')
+   152→  const [receivedDate, setReceivedDate] = useState(format(new Date(), 'yyyy-MM-dd'))
+   153→  const [openingDate, setOpeningDate] = useState(format(new Date(), 'yyyy-MM-dd'))
+   154→  const [remarks, setRemarks] = useState('')
+   155→  const [internalNotes, setInternalNotes] = useState('')
+   156→  const [projectQtys, setProjectQtys] = useState<ProjectQtyRow[]>([])
+   157→
+   158→  // ─── Quick Create Product ─────────────────────────────────────────────
+   159→  const [newProductName, setNewProductName] = useState('')
+   160→  const [newProductCategory, setNewProductCategory] = useState('')
+   161→  const [newProductUnit, setNewProductUnit] = useState('pcs')
+   162→  const [newProductVariantName, setNewProductVariantName] = useState('')
+   163→  const [newProductParentId, setNewProductParentId] = useState('')
+   164→  const [creatingProduct, setCreatingProduct] = useState(false)
+   165→
+   166→  // ─── Categories ──────────────────────────────────────────────────────────
+   167→  const [categories, setCategories] = useState<CategoryItem[]>([])
+   168→
+   169→  // ─── Section Collapse ──────────────────────────────────────────────────
+   170→  const [sectionsOpen, setSectionsOpen] = useState({
+   171→    product: true,
+   172→    inventory: true,
+   173→    projects: false,
+   174→    additional: false,
+   175→  })
+   176→
+   177→  // ─── Submit ─────────────────────────────────────────────────────────────
+   178→  const [submitting, setSubmitting] = useState(false)
+   179→
+   180→  // ─── Computed values ──────────────────────────────────────────────────
+   181→  const inventoryValue = openingQty * unitCost
+   182→
+   183→  // ─── Initialize from edit entry ────────────────────────────────────────
+   184→  useEffect(() => {
+   185→    if (editEntry && open) {
+   186→      // Set edit-only fields
+   187→      setBatchNumber(editEntry.batchNumber || '')
+   188→      setSerialNumber(editEntry.serialNumber || '')
+   189→      setExpiryDate(editEntry.expiryDate ? format(new Date(editEntry.expiryDate), 'yyyy-MM-dd') : '')
+   190→      setStorageLocation(editEntry.storageLocation || '')
+   191→      setRemarks(editEntry.remarks || '')
+   192→      setInternalNotes(editEntry.internalNotes || '')
+   193→      setOpeningDate(editEntry.openingDate ? format(new Date(editEntry.openingDate), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'))
+   194→      setWarehouse(editEntry.warehouse || '')
+   195→      setOpeningQty(editEntry.quantity)
+   196→      setUnitCost(editEntry.unitCost)
+   197→
+   198→      // Set project quantities
+   199→      const pqRows = projectFields.map((pf) => {
+   200→        const existing = editEntry.projectQtys?.find((pq) => pq.projectFieldId === pf.id)
+   201→        return {
+   202→          projectFieldId: pf.id,
+   203→          requiredQty: existing?.requiredQty || 0,
+   204→          batchQty: existing?.batchQty || 0,
+   205→          reservedQty: existing?.reservedQty || 0,
+   206→          consumedQty: existing?.consumedQty || 0,
+   207→          orderedQty: existing?.orderedQty || 0,
+   208→          toBeUsed: existing?.toBeUsed || 0,
+   209→          remarks: existing?.remarks || '',
+   210→        }
+   211→      })
+   212→      setProjectQtys(pqRows)
+   213→
+   214→      // Search and select the product (best effort)
+   215→      setProductSearch('')
+   216→      setSelectedProduct(null)
+   217→      // We need to fetch the product info
+   218→      fetch(`/api/products/${editEntry.productId}`)
+   219→        .then((r) => {
+   220→          if (r.ok) return r.json()
+   221→          return null
+   222→        })
+   223→        .then((data) => {
+   224→          if (data) {
+   225→            setSelectedProduct({
+   226→              id: data.id,
+   227→              name: data.name,
+   228→              code: data.code,
+   229→              sku: data.sku,
+   230→              unit: data.unit,
+   231→              status: data.status,
+   232→              categoryId: data.categoryId,
+   233→              brand: data.brand,
+   234→              parentProductId: data.parentProductId,
+   235→              variantName: data.variantName,
+   236→              category: data.category,
+   237→              parent: data.parent,
+   238→            })
+   239→          }
+   240→        })
+   241→        .catch(() => {})
+   242→    }
+   243→  }, [editEntry, open, projectFields])
+   244→
+   245→  // ─── Reset on open for create mode ────────────────────────────────────
+   246→  useEffect(() => {
+   247→    if (open && !editEntry) {
+   248→      setProductSearch('')
+   249→      setProductResults([])
+   250→      setSelectedProduct(null)
+   251→      setShowProductCreate(false)
+   252→      setWarehouse('')
+   253→      setStorageLocation('')
+   254→      setOpeningQty(0)
+   255→      setUnitCost(0)
+   256→      setBatchNumber('')
+   257→      setSerialNumber('')
+   258→      setExpiryDate('')
+   259→      setPurchaseRef('')
+   260→      setInvoiceNumber('')
+   261→      setReceivedDate(format(new Date(), 'yyyy-MM-dd'))
+   262→      setOpeningDate(format(new Date(), 'yyyy-MM-dd'))
+   263→      setRemarks('')
+   264→      setInternalNotes('')
+   265→      setNewProductName('')
+   266→      setNewProductCategory('')
+   267→      setNewProductUnit('pcs')
+   268→      setNewProductVariantName('')
+   269→      setNewProductParentId('')
+   270→      setProjectQtys(
+   271→        projectFields.map((pf) => ({
+   272→          projectFieldId: pf.id,
+   273→          requiredQty: 0,
+   274→          batchQty: 0,
+   275→          reservedQty: 0,
+   276→          consumedQty: 0,
+   277→          orderedQty: 0,
+   278→          toBeUsed: 0,
+   279→          remarks: '',
+   280→        }))
+   281→      )
+   282→      setSectionsOpen({ product: true, inventory: true, projects: false, additional: false })
+   283→    }
+   284→  }, [open, editEntry, projectFields])
+   285→
+   286→  // ─── Fetch categories ──────────────────────────────────────────────────
+   287→  useEffect(() => {
+   288→    if (!open) return
+   289→    const fetchRefs = async () => {
+   290→      try {
+   291→        const cRes = await fetch('/api/categories?limit=500')
+   292→        if (cRes.ok) {
+   293→          const cJson = await cRes.json()
+   294→          setCategories(cJson.data || [])
+   295→        }
+   296→      } catch {
+   297→        // ignore
+   298→      }
+   299→    }
+   300→    fetchRefs()
+   301→  }, [open])
+   302→
+   303→  // ─── Product Search ────────────────────────────────────────────────────
+   304→  const handleProductSearch = useCallback(async (query: string) => {
+   305→    setProductSearch(query)
+   306→    setSelectedProduct(null)
+   307→    if (!query || query.length < 2) {
+   308→      setProductResults([])
+   309→      return
+   310→    }
+   311→    setProductSearchLoading(true)
+   312→    try {
+   313→      const res = await fetch(`/api/products?search=${encodeURIComponent(query)}&limit=20&status=ACTIVE`)
+   314→      if (!res.ok) throw new Error('Failed')
+   315→      const json = await res.json()
+   316→      setProductResults(json.data || [])
+   317→    } catch {
+   318→      setProductResults([])
+   319→    } finally {
+   320→      setProductSearchLoading(false)
+   321→    }
+   322→  }, [])
+   323→
+   324→  const handleSelectProduct = useCallback((product: ProductItem) => {
+   325→    setSelectedProduct(product)
+   326→    setProductSearch(product.name)
+   327→    setProductResults([])
+   328→    setShowProductCreate(false)
+   329→  }, [editEntry])
+   330→
+   331→  // ─── Quick Create Product ──────────────────────────────────────────────
+   332→  const handleQuickCreate = useCallback(async () => {
+   333→    if (!newProductName.trim()) return
+   334→    setCreatingProduct(true)
+   335→    try {
+   336→      const body: Record<string, unknown> = {
+   337→        name: newProductName.trim(),
+   338→        unit: newProductUnit,
+   339→        categoryId: newProductCategory || undefined,
+   340→        variantName: newProductVariantName || undefined,
+   341→        parentProductId: newProductParentId || undefined,
+   342→      }
+   343→      const res = await fetch('/api/opening-stock/products/quick-create', {
+   344→        method: 'POST',
+   345→        headers: { 'Content-Type': 'application/json' },
+   346→        body: JSON.stringify(body),
+   347→      })
+   348→      if (!res.ok) {
+   349→        const err = await res.json()
+   350→        throw new Error(err.error || 'Failed to create product')
+   351→      }
+   352→      const product = await res.json()
+   353→      toast.success(`Product "${product.name}" created`)
+   354→      handleSelectProduct({
+   355→        id: product.id,
+   356→        name: product.name,
+   357→        code: product.code,
+   358→        sku: product.sku,
+   359→        unit: product.unit,
+   360→        status: 'ACTIVE',
+   361→        categoryId: product.categoryId,
+   362→        brand: null,
+   363→        parentProductId: product.parentProductId,
+   364→        variantName: product.variantName,
+   365→        category: null,
+   366→        parent: null,
+   367→      })
+   368→      setShowProductCreate(false)
+   369→      setNewProductName('')
+   370→    } catch (err) {
+   371→      toast.error(err instanceof Error ? err.message : 'Failed to create product')
+   372→    } finally {
+   373→      setCreatingProduct(false)
+   374→    }
+   375→  }, [newProductName, newProductUnit, newProductCategory, newProductVariantName, newProductParentId, handleSelectProduct])
+   376→
+   377→  // ─── Project Qty Update ────────────────────────────────────────────────
+   378→  const updateProjectQty = useCallback((idx: number, field: keyof ProjectQtyRow, value: number | string) => {
+   379→    setProjectQtys((prev) => {
+   380→      const next = [...prev]
+   381→      next[idx] = { ...next[idx], [field]: value }
+   382→      return next
+   383→    })
+   384→  }, [])
+   385→
+   386→  // ─── Toggle Section ───────────────────────────────────────────────────
+   387→  const toggleSection = useCallback((key: keyof typeof sectionsOpen) => {
+   388→    setSectionsOpen((prev) => ({ ...prev, [key]: !prev[key] }))
+   389→  }, [sectionsOpen])
+   390→
+   391→  // ─── Submit ────────────────────────────────────────────────────────────
+   392→  const handleSubmit = useCallback(async () => {
+   393→    if (!selectedProduct && !editEntry) {
+   394→      toast.error('Please select a product')
+   395→      return
+   396→    }
+   397→    if (!isEdit && openingQty <= 0) {
+   398→      toast.error('Opening quantity must be greater than 0')
+   399→      return
+   400→    }
+   401→
+   402→    setSubmitting(true)
+   403→    try {
+   404→      if (isEdit && editEntry) {
+   405→        // Edit mode - only limited fields
+   406→        const updateData: Record<string, unknown> = {
+   407→          remarks,
+   408→          internalNotes,
+   409→          batchNumber: batchNumber || null,
+   410→          serialNumber: serialNumber || null,
+   411→          expiryDate: expiryDate || null,
+   412→          storageLocation: storageLocation || null,
+   413→        }
+   414→
+   415→        const res = await fetch(`/api/opening-stock/${editEntry.id}`, {
+   416→          method: 'PUT',
+   417→          headers: { 'Content-Type': 'application/json' },
+   418→          body: JSON.stringify(updateData),
+   419→        })
+   420→        if (!res.ok) {
+   421→          const err = await res.json()
+   422→          throw new Error(err.error || 'Failed to update')
+   423→        }
+   424→        toast.success('Opening stock updated')
+   425→      } else {
+   426→        // Create mode
+   427→        const body: Record<string, unknown> = {
+   428→          productId: selectedProduct!.id,
+   429→          quantity: openingQty,
+   430→          unitCost,
+   431→          warehouse: warehouse || null,
+   432→          storageLocation: storageLocation || null,
+   433→          batchNumber: batchNumber || null,
+   434→          serialNumber: serialNumber || null,
+   435→          expiryDate: expiryDate || null,
+   436→          purchaseReference: purchaseRef || null,
+   437→          invoiceNumber: invoiceNumber || null,
+   438→          receivedDate: receivedDate || null,
+   439→          openingDate: openingDate || null,
+   440→          remarks: remarks || null,
+   441→          internalNotes: internalNotes || null,
+   442→          projectQtys: projectQtys
+   443→            .filter((pq) => pq.requiredQty > 0)
+   444→            .map((pq) => ({
+   445→              projectFieldId: pq.projectFieldId,
+   446→              requiredQty: pq.requiredQty,
+   447→              batchQty: pq.batchQty,
+   448→              reservedQty: pq.reservedQty,
+   449→              consumedQty: pq.consumedQty,
+   450→              orderedQty: pq.orderedQty,
+   451→              toBeUsed: pq.toBeUsed,
+   452→              remarks: pq.remarks || null,
+   453→            })),
+   454→        }
+   455→
+   456→        const res = await fetch('/api/opening-stock', {
+   457→          method: 'POST',
+   458→          headers: { 'Content-Type': 'application/json' },
+   459→          body: JSON.stringify(body),
+   460→        })
+   461→        if (!res.ok) {
+   462→          const err = await res.json()
+   463→          throw new Error(err.error || 'Failed to create')
+   464→        }
+   465→        toast.success('Opening stock created successfully')
+   466→      }
+   467→
+   468→      onOpenChange(false)
+   469→      onSaved()
+   470→    } catch (err) {
+   471→      toast.error(err instanceof Error ? err.message : 'Operation failed')
+   472→    } finally {
+   473→      setSubmitting(false)
+   474→    }
+   475→  }, [
+   476→    selectedProduct,
+   477→    editEntry,
+   478→    isEdit,
+   479→    openingQty,
+   480→    unitCost,
+   481→    warehouse,
+   482→    storageLocation,
+   483→    batchNumber,
+   484→    serialNumber,
+   485→    expiryDate,
+   486→    purchaseRef,
+   487→    invoiceNumber,
+   488→    receivedDate,
+   489→    openingDate,
+   490→    remarks,
+   491→    internalNotes,
+   492→    projectQtys,
+   493→    onOpenChange,
+   494→    onSaved,
+   495→  ])
+   496→
+   497→  // ─── Section Component ──────────────────────────────────────────────────
+   498→  const SectionHeader = ({
+   499→    sectionKey,
+   500→    title,
+   501→    subtitle,
+   502→    badge,
+   503→  }: {
+   504→    sectionKey: keyof typeof sectionsOpen
+   505→    title: string
+   506→    subtitle?: string
+   507→    badge?: string
+   508→  }) => (
+   509→    <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg border bg-muted/30 px-4 py-3 hover:bg-muted/50 transition-colors">
+   510→      <div className="flex items-center gap-3">
+   511→        <h3 className="text-sm font-semibold">{title}</h3>
+   512→        {subtitle && <span className="text-xs text-muted-foreground">{subtitle}</span>}
+   513→        {badge && (
+   514→          <Badge variant="secondary" className="text-xs">
+   515→            {badge}
+   516→          </Badge>
+   517→        )}
+   518→      </div>
+   519→      {sectionsOpen[sectionKey] ? (
+   520→        <ChevronUp className="h-4 w-4 text-muted-foreground" />
+   521→      ) : (
+   522→        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+   523→      )}
+   524→    </CollapsibleTrigger>
+   525→  )
+   526→
+   527→  return (
+   528→    <Dialog open={open} onOpenChange={onOpenChange}>
+   529→      <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+   530→        <DialogHeader>
+   531→          <DialogTitle>{isEdit ? 'Edit Opening Stock' : 'Add Opening Stock'}</DialogTitle>
+   532→          <DialogDescription>
+   533→            {isEdit ? 'Update inventory metadata and project quantities.' : 'Create a new opening stock entry for inventory.'}
+   534→          </DialogDescription>
+   535→        </DialogHeader>
+   536→
+   537→        <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+   538→          {/* ─── 1. Product Information ─────────────────────────────────── */}
+   539→          <Collapsible open={sectionsOpen.product} onOpenChange={() => toggleSection('product')}>
+   540→            <SectionHeader
+   541→              sectionKey="product"
+   542→              title="Product Information"
+   543→              subtitle="Search and select the product"
+   544→              badge={selectedProduct ? 'Selected' : undefined}
+   545→            />
+   546→            <CollapsibleContent className="space-y-4 pt-3 px-1">
+   547→              {!showProductCreate ? (
+   548→                <>
+   549→                  <div className="relative">
+   550→                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+   551→                    <Input
+   552→                      placeholder="Search by product name, SKU, or code..."
+   553→                      value={isEdit && selectedProduct ? selectedProduct.name : productSearch}
+   554→                      onChange={(e) => {
+   555→                        if (isEdit) return // no change in edit mode
+   556→                        handleProductSearch(e.target.value)
+   557→                      }}
+   558→                      className="pl-9"
+   559→                      disabled={isEdit}
+   560→                    />
+   561→                    {productSearchLoading && (
+   562→                      <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
+   563→                    )}
+   564→                  </div>
+   565→
+   566→                  {/* Search Results Dropdown */}
+   567→                  {productResults.length > 0 && !selectedProduct && (
+   568→                    <div className="rounded-md border bg-background shadow-lg max-h-48 overflow-y-auto">
+   569→                      {productResults.map((p) => (
+   570→                        <button
+   571→                          key={p.id}
+   572→                          className="flex w-full items-center justify-between px-3 py-2 text-sm hover:bg-muted/50 transition-colors"
+   573→                          onClick={() => handleSelectProduct(p)}
+   574→                        >
+   575→                          <div>
+   576→                            <p className="font-medium">{p.name}</p>
+   577→                            <p className="text-xs text-muted-foreground">
+   578→                              {p.code} | {p.sku} | {p.category?.name || 'No Category'}
+   579→                              {p.parentProductId && ` (Variant: ${p.variantName || 'N/A'})`}
+   580→                            </p>
+   581→                          </div>
+   582→                          <Badge variant="outline" className="text-xs">
+   583→                            {p.unit}
+   584→                          </Badge>
+   585→                        </button>
+   586→                      ))}
+   587→                    </div>
+   588→                  )}
+   589→
+   590→                  {/* Product not found + create prompt */}
+   591→                  {productSearch.length >= 2 && !productSearchLoading && productResults.length === 0 && !selectedProduct && (
+   592→                    <div className="flex items-center gap-2 rounded-md border border-dashed p-3">
+   593→                      <AlertCircle className="h-4 w-4 text-amber-500" />
+   594→                      <span className="text-sm text-muted-foreground">
+   595→                        Product not found.{' '}
+   596→                        <button
+   597→                          className="text-primary font-medium hover:underline"
+   598→                          onClick={() => setShowProductCreate(true)}
+   599→                        >
+   600→                          Create Product?
+   601→                        </button>
+   602→                      </span>
+   603→                    </div>
+   604→                  )}
+   605→
+   606→                  {/* Selected Product Info */}
+   607→                  {selectedProduct && (
+   608→                    <div className="rounded-md border bg-muted/30 p-3 space-y-2">
+   609→                      <div className="flex items-center gap-2">
+   610→                        <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10 text-xs font-semibold text-primary">
+   611→                          {selectedProduct.name.charAt(0).toUpperCase()}
+   612→                        </div>
+   613→                        <div>
+   614→                          <p className="font-medium text-sm">{selectedProduct.name}</p>
+   615→                          <p className="text-xs text-muted-foreground">{selectedProduct.code} | {selectedProduct.sku}</p>
+   616→                        </div>
+   617→                        {!isEdit && (
+   618→                          <Button variant="ghost" size="icon" className="ml-auto h-7 w-7" onClick={() => { setSelectedProduct(null); setProductSearch('') }}>
+   619→                            <X className="h-3.5 w-3.5" />
+   620→                          </Button>
+   621→                        )}
+   622→                      </div>
+   623→                      <div className="grid grid-cols-3 gap-2 text-xs">
+   624→                        <div>
+   625→                          <span className="text-muted-foreground">Category: </span>
+   626→                          <span className="font-medium">{selectedProduct.category?.name || '—'}</span>
+   627→                        </div>
+   628→                        <div>
+   629→                          <span className="text-muted-foreground">Brand: </span>
+   630→                          <span className="font-medium">{selectedProduct.brand || '—'}</span>
+   631→                        </div>
+   632→                        <div>
+   633→                          <span className="text-muted-foreground">Unit: </span>
+   634→                          <span className="font-medium">{selectedProduct.unit}</span>
+   635→                        </div>
+   636→                      </div>
+   637→                      {selectedProduct.parentProductId && (
+   638→                        <p className="text-xs text-muted-foreground">
+   639→                          Variant of: <span className="font-medium">{selectedProduct.parent?.name || 'Unknown'}</span>
+   640→                          {selectedProduct.variantName && ` (${selectedProduct.variantName})`}
+   641→                        </p>
+   642→                      )}
+   643→                    </div>
+   644→                  )}
+   645→                </>
+   646→              ) : (
+   647→                /* Quick Create Product */
+   648→                <div className="space-y-3 rounded-md border p-4">
+   649→                  <div className="flex items-center justify-between">
+   650→                    <h4 className="text-sm font-semibold">Create New Product</h4>
+   651→                    <Button variant="ghost" size="sm" onClick={() => setShowProductCreate(false)}>
+   652→                      <X className="mr-1 h-3.5 w-3.5" />
+   653→                      Cancel
+   654→                    </Button>
+   655→                  </div>
+   656→                  <div className="grid grid-cols-2 gap-3">
+   657→                    <div className="col-span-2">
+   658→                      <Label className="text-xs">Product Name *</Label>
+   659→                      <Input
+   660→                        value={newProductName}
+   661→                        onChange={(e) => setNewProductName(e.target.value)}
+   662→                        placeholder="Enter product name"
+   663→                      />
+   664→                    </div>
+   665→                    <div>
+   666→                      <Label className="text-xs">Category</Label>
+   667→                      <Select value={newProductCategory} onValueChange={setNewProductCategory}>
+   668→                        <SelectTrigger>
+   669→                          <SelectValue placeholder="Select category" />
+   670→                        </SelectTrigger>
+   671→                        <SelectContent>
+   672→                          <SelectItem value="none">No Category</SelectItem>
+   673→                          {categories.map((c) => (
+   674→                            <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+   675→                          ))}
+   676→                        </SelectContent>
+   677→                      </Select>
+   678→                    </div>
+   679→                    <div>
+   680→                      <Label className="text-xs">Unit</Label>
+   681→                      <Select value={newProductUnit} onValueChange={setNewProductUnit}>
+   682→                        <SelectTrigger>
+   683→                          <SelectValue />
+   684→                        </SelectTrigger>
+   685→                        <SelectContent>
+   686→                          {['pcs', 'kg', 'm', 'mtr', 'pcs', 'set', 'lot', 'box', 'roll', 'pack'].map((u) => (
+   687→                            <SelectItem key={u} value={u}>{u}</SelectItem>
+   688→                          ))}
+   689→                        </SelectContent>
+   690→                      </Select>
+   691→                    </div>
+   692→                    <div>
+   693→                      <Label className="text-xs">Variant Name (optional)</Label>
+   694→                      <Input
+   695→                        value={newProductVariantName}
+   696→                        onChange={(e) => setNewProductVariantName(e.target.value)}
+   697→                        placeholder="e.g., 10K, 100nF"
+   698→                      />
+   699→                    </div>
+   700→                  </div>
+   701→                  <Button onClick={handleQuickCreate} disabled={!newProductName.trim() || creatingProduct}>
+   702→                    {creatingProduct && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+   703→                    <Plus className="mr-2 h-4 w-4" />
+   704→                    Create Product
+   705→                  </Button>
+   706→                </div>
+   707→              )}
+   708→            </CollapsibleContent>
+   709→          </Collapsible>
+   710→
+   711→          {/* ─── 2. Inventory Information ───────────────────────────────── */}
+   712→          <Collapsible open={sectionsOpen.inventory} onOpenChange={() => toggleSection('inventory')}>
+   713→            <SectionHeader sectionKey="inventory" title="Inventory Information" subtitle="Warehouse, quantities, and costs" />
+   714→            <CollapsibleContent className="space-y-4 pt-3 px-1">
+   715→              <div className="grid grid-cols-2 gap-4">
+   716→                <div>
+   717→                  <Label className="text-xs">Warehouse</Label>
+   718→                  <Select value={warehouse} onValueChange={setWarehouse}>
+   719→                    <SelectTrigger>
+   720→                      <SelectValue placeholder="Select warehouse" />
+   721→                    </SelectTrigger>
+   722→                    <SelectContent>
+   723→                      {WAREHOUSES.map((w) => (
+   724→                        <SelectItem key={w.value} value={w.value}>{w.label}</SelectItem>
+   725→                      ))}
+   726→                    </SelectContent>
+   727→                  </Select>
+   728→                </div>
+   729→                <div>
+   730→                  <Label className="text-xs">Storage Location</Label>
+   731→                  <Input value={storageLocation} onChange={(e) => setStorageLocation(e.target.value)} placeholder="e.g., Shelf A-1, Bin 12" />
+   732→                </div>
+   733→                <div>
+   734→                  <Label className="text-xs">
+   735→                    Opening Quantity {isEdit ? '' : '*'}
+   736→                  </Label>
+   737→                  <Input
+   738→                    type="number"
+   739→                    value={openingQty || ''}
+   740→                    onChange={(e) => setOpeningQty(Number(e.target.value) || 0)}
+   741→                    placeholder="0"
+   742→                    disabled={isEdit}
+   743→                    min={0}
+   744→                  />
+   745→                  {isEdit && (
+   746→                    <p className="text-xs text-muted-foreground mt-1">Cannot be edited. Use stock adjustments.</p>
+   747→                  )}
+   748→                </div>
+   749→                <div>
+   750→                  <Label className="text-xs">Unit Cost</Label>
+   751→                  <Input
+   752→                    type="number"
+   753→                    value={unitCost || ''}
+   754→                    onChange={(e) => setUnitCost(Number(e.target.value) || 0)}
+   755→                    placeholder="0.00"
+   756→                    disabled={isEdit}
+   757→                    min={0}
+   758→                    step={0.01}
+   759→                  />
+   760→                  {isEdit && (
+   761→                    <p className="text-xs text-muted-foreground mt-1">Cannot be edited after creation.</p>
+   762→                  )}
+   763→                </div>
+   764→              </div>
+   765→
+   766→              {/* Inventory Value */}
+   767→              <div className="rounded-md bg-muted/50 border p-3">
+   768→                <div className="flex items-center justify-between">
+   769→                  <span className="text-sm text-muted-foreground">Calculated Inventory Value</span>
+   770→                  <span className="text-lg font-bold text-primary">
+   771→                    ${inventoryValue.toFixed(2)}
+   772→                  </span>
+   773→                </div>
+   774→              </div>
+   775→
+   776→              <div className="grid grid-cols-2 gap-4">
+   777→                <div>
+   778→                  <Label className="text-xs">Batch Number</Label>
+   779→                  <Input value={batchNumber} onChange={(e) => setBatchNumber(e.target.value)} placeholder="e.g., BATCH-001" />
+   780→                </div>
+   781→                <div>
+   782→                  <Label className="text-xs">Serial Number</Label>
+   783→                  <Input value={serialNumber} onChange={(e) => setSerialNumber(e.target.value)} placeholder="e.g., SN-001" />
+   784→                </div>
+   785→                <div>
+   786→                  <Label className="text-xs">Expiry Date</Label>
+   787→                  <Input type="date" value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)} />
+   788→                </div>
+   789→              </div>
+   790→            </CollapsibleContent>
+   791→          </Collapsible>
+   792→
+   793→          {/* ─── 3. Project Quantities ─────────────────────────────────── */}
+   794→          {projectFields.length > 0 && (
+   795→            <Collapsible open={sectionsOpen.projects} onOpenChange={() => toggleSection('projects')}>
+   796→              <SectionHeader
+   797→                sectionKey="projects"
+   798→                title="Project Quantities"
+   799→                subtitle="Assign quantities to projects"
+   800→                badge={`${projectFields.length} projects`}
+   801→              />
+   802→              <CollapsibleContent className="space-y-3 pt-3 px-1">
+   803→                {projectFields.map((pf, idx) => {
+   804→                  const pq = projectQtys[idx]
+   805→                  if (!pq) return null
+   806→                  return (
+   807→                    <div key={pf.id} className="rounded-md border p-3">
+   808→                      <p className="text-sm font-medium mb-2">{pf.name} <span className="text-xs text-muted-foreground">({pf.code})</span></p>
+   809→                      <div className="grid grid-cols-4 gap-2">
+   810→                        <div>
+   811→                          <Label className="text-xs">Required</Label>
+   812→                          <Input type="number" value={pq.requiredQty || ''} onChange={(e) => updateProjectQty(idx, 'requiredQty', Number(e.target.value) || 0)} min={0} />
+   813→                        </div>
+   814→                        <div>
+   815→                          <Label className="text-xs">Batch</Label>
+   816→                          <Input type="number" value={pq.batchQty || ''} onChange={(e) => updateProjectQty(idx, 'batchQty', Number(e.target.value) || 0)} min={0} />
+   817→                        </div>
+   818→                        <div>
+   819→                          <Label className="text-xs">Reserved</Label>
+   820→                          <Input type="number" value={pq.reservedQty || ''} onChange={(e) => updateProjectQty(idx, 'reservedQty', Number(e.target.value) || 0)} min={0} />
+   821→                        </div>
+   822→                        <div>
+   823→                          <Label className="text-xs">Consumed</Label>
+   824→                          <Input type="number" value={pq.consumedQty || ''} onChange={(e) => updateProjectQty(idx, 'consumedQty', Number(e.target.value) || 0)} min={0} />
+   825→                        </div>
+   826→                        <div>
+   827→                          <Label className="text-xs">Ordered</Label>
+   828→                          <Input type="number" value={pq.orderedQty || ''} onChange={(e) => updateProjectQty(idx, 'orderedQty', Number(e.target.value) || 0)} min={0} />
+   829→                        </div>
+   830→                        <div>
+   831→                          <Label className="text-xs">To Be Used</Label>
+   832→                          <Input type="number" value={pq.toBeUsed || ''} onChange={(e) => updateProjectQty(idx, 'toBeUsed', Number(e.target.value) || 0)} min={0} />
+   833→                        </div>
+   834→                        <div className="col-span-2">
+   835→                          <Label className="text-xs">Remarks</Label>
+   836→                          <Input value={pq.remarks} onChange={(e) => updateProjectQty(idx, 'remarks', e.target.value)} placeholder="Project-specific notes" />
+   837→                        </div>
+   838→                      </div>
+   839→                    </div>
+   840→                  )
+   841→                })}
+   842→              </CollapsibleContent>
+   843→            </Collapsible>
+   844→          )}
+   845→
+   846→          {/* ─── 5. Additional ──────────────────────────────────────────── */}
+   847→          <Collapsible open={sectionsOpen.additional} onOpenChange={() => toggleSection('additional')}>
+   848→            <SectionHeader sectionKey="additional" title="Additional" subtitle="Opening date, remarks, notes" />
+   849→            <CollapsibleContent className="space-y-4 pt-3 px-1">
+   850→              <div className="grid grid-cols-2 gap-4">
+   851→                <div>
+   852→                  <Label className="text-xs">Opening Date</Label>
+   853→                  <Input type="date" value={openingDate} onChange={(e) => setOpeningDate(e.target.value)} />
+   854→                </div>
+   855→              </div>
+   856→              <div>
+   857→                <Label className="text-xs">Remarks</Label>
+   858→                <Textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder="Any remarks about this entry..." rows={2} />
+   859→              </div>
+   860→              <div>
+   861→                <Label className="text-xs">Internal Notes</Label>
+   862→                <Textarea value={internalNotes} onChange={(e) => setInternalNotes(e.target.value)} placeholder="Internal notes (not shown to everyone)..." rows={2} />
+   863→              </div>
+   864→            </CollapsibleContent>
+   865→          </Collapsible>
+   866→        </div>
+   867→
+   868→        {/* ─── Footer ───────────────────────────────────────────────────── */}
+   869→        <DialogFooter className="border-t pt-4">
+   870→          <Button variant="outline" onClick={() => onOpenChange(false)}>
+   871→            Cancel
+   872→          </Button>
+   873→          <Button onClick={handleSubmit} disabled={submitting || (isEdit ? false : (!selectedProduct || openingQty <= 0))}>
+   874→            {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+   875→            {isEdit ? 'Update' : 'Create Opening Stock'}
+   876→          </Button>
+   877→        </DialogFooter>
+   878→      </DialogContent>
+   879→    </Dialog>
+   880→  )
+   881→}
+   882→

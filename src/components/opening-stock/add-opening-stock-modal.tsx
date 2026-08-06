@@ -52,17 +52,10 @@ interface ProductItem {
   status: string
   categoryId: string | null
   brand: string | null
-  supplierId: string | null
   parentProductId: string | null
   variantName: string | null
   category: { id: string; name: string } | null
-  supplier: { id: string; name: string } | null
   parent: { id: string; name: string } | null
-}
-
-interface SupplierItem {
-  id: string
-  name: string
 }
 
 interface CategoryItem {
@@ -97,7 +90,6 @@ interface EditEntry {
   batchNumber: string | null
   serialNumber: string | null
   expiryDate: string | null
-  supplierId: string | null
   remarks: string | null
   internalNotes: string | null
   openingDate: string
@@ -155,7 +147,6 @@ export function AddOpeningStockModal({
   const [batchNumber, setBatchNumber] = useState('')
   const [serialNumber, setSerialNumber] = useState('')
   const [expiryDate, setExpiryDate] = useState('')
-  const [supplierId, setSupplierId] = useState('')
   const [purchaseRef, setPurchaseRef] = useState('')
   const [invoiceNumber, setInvoiceNumber] = useState('')
   const [receivedDate, setReceivedDate] = useState(format(new Date(), 'yyyy-MM-dd'))
@@ -172,15 +163,13 @@ export function AddOpeningStockModal({
   const [newProductParentId, setNewProductParentId] = useState('')
   const [creatingProduct, setCreatingProduct] = useState(false)
 
-  // ─── Suppliers & Categories ────────────────────────────────────────────
-  const [suppliers, setSuppliers] = useState<SupplierItem[]>([])
+  // ─── Categories ──────────────────────────────────────────────────────────
   const [categories, setCategories] = useState<CategoryItem[]>([])
 
   // ─── Section Collapse ──────────────────────────────────────────────────
   const [sectionsOpen, setSectionsOpen] = useState({
     product: true,
     inventory: true,
-    supplier: false,
     projects: false,
     additional: false,
   })
@@ -203,7 +192,6 @@ export function AddOpeningStockModal({
       setInternalNotes(editEntry.internalNotes || '')
       setOpeningDate(editEntry.openingDate ? format(new Date(editEntry.openingDate), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'))
       setWarehouse(editEntry.warehouse || '')
-      setSupplierId(editEntry.supplierId || '')
       setOpeningQty(editEntry.quantity)
       setUnitCost(editEntry.unitCost)
 
@@ -243,11 +231,9 @@ export function AddOpeningStockModal({
               status: data.status,
               categoryId: data.categoryId,
               brand: data.brand,
-              supplierId: data.supplierId,
               parentProductId: data.parentProductId,
               variantName: data.variantName,
               category: data.category,
-              supplier: data.supplier,
               parent: data.parent,
             })
           }
@@ -270,7 +256,6 @@ export function AddOpeningStockModal({
       setBatchNumber('')
       setSerialNumber('')
       setExpiryDate('')
-      setSupplierId('')
       setPurchaseRef('')
       setInvoiceNumber('')
       setReceivedDate(format(new Date(), 'yyyy-MM-dd'))
@@ -294,23 +279,16 @@ export function AddOpeningStockModal({
           remarks: '',
         }))
       )
-      setSectionsOpen({ product: true, inventory: true, supplier: false, projects: false, additional: false })
+      setSectionsOpen({ product: true, inventory: true, projects: false, additional: false })
     }
   }, [open, editEntry, projectFields])
 
-  // ─── Fetch suppliers & categories ─────────────────────────────────────
+  // ─── Fetch categories ──────────────────────────────────────────────────
   useEffect(() => {
     if (!open) return
     const fetchRefs = async () => {
       try {
-        const [sRes, cRes] = await Promise.all([
-          fetch('/api/suppliers?limit=500'),
-          fetch('/api/categories?limit=500'),
-        ])
-        if (sRes.ok) {
-          const sJson = await sRes.json()
-          setSuppliers(sJson.data || [])
-        }
+        const cRes = await fetch('/api/categories?limit=500')
         if (cRes.ok) {
           const cJson = await cRes.json()
           setCategories(cJson.data || [])
@@ -348,14 +326,6 @@ export function AddOpeningStockModal({
     setProductSearch(product.name)
     setProductResults([])
     setShowProductCreate(false)
-    // Auto-set supplier if product has one
-    if (product.supplierId) {
-      setSupplierId(product.supplierId)
-    }
-    // Auto-set unit
-    if (!editEntry) {
-      setUnitCost(product.supplierId ? 0 : 0) // keep existing cost
-    }
   }, [editEntry])
 
   // ─── Quick Create Product ──────────────────────────────────────────────
@@ -390,11 +360,9 @@ export function AddOpeningStockModal({
         status: 'ACTIVE',
         categoryId: product.categoryId,
         brand: null,
-        supplierId: null,
         parentProductId: product.parentProductId,
         variantName: product.variantName,
         category: null,
-        supplier: null,
         parent: null,
       })
       setShowProductCreate(false)
@@ -465,7 +433,6 @@ export function AddOpeningStockModal({
           batchNumber: batchNumber || null,
           serialNumber: serialNumber || null,
           expiryDate: expiryDate || null,
-          supplierId: supplierId || null,
           purchaseReference: purchaseRef || null,
           invoiceNumber: invoiceNumber || null,
           receivedDate: receivedDate || null,
@@ -516,7 +483,6 @@ export function AddOpeningStockModal({
     batchNumber,
     serialNumber,
     expiryDate,
-    supplierId,
     purchaseRef,
     invoiceNumber,
     receivedDate,
@@ -824,42 +790,7 @@ export function AddOpeningStockModal({
             </CollapsibleContent>
           </Collapsible>
 
-          {/* ─── 3. Supplier Information ────────────────────────────────── */}
-          <Collapsible open={sectionsOpen.supplier} onOpenChange={() => toggleSection('supplier')}>
-            <SectionHeader sectionKey="supplier" title="Supplier Information" subtitle="Supplier, purchase reference, invoice" />
-            <CollapsibleContent className="space-y-4 pt-3 px-1">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-xs">Supplier</Label>
-                  <Select value={supplierId} onValueChange={(v) => setSupplierId(v === 'none' ? '' : v)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select supplier" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">No Supplier</SelectItem>
-                      {suppliers.map((s) => (
-                        <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label className="text-xs">Purchase Reference</Label>
-                  <Input value={purchaseRef} onChange={(e) => setPurchaseRef(e.target.value)} placeholder="e.g., PO-2024-001" />
-                </div>
-                <div>
-                  <Label className="text-xs">Invoice Number</Label>
-                  <Input value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} placeholder="e.g., INV-001" />
-                </div>
-                <div>
-                  <Label className="text-xs">Received Date</Label>
-                  <Input type="date" value={receivedDate} onChange={(e) => setReceivedDate(e.target.value)} />
-                </div>
-              </div>
-            </CollapsibleContent>
-          </Collapsible>
-
-          {/* ─── 4. Project Quantities ─────────────────────────────────── */}
+          {/* ─── 3. Project Quantities ─────────────────────────────────── */}
           {projectFields.length > 0 && (
             <Collapsible open={sectionsOpen.projects} onOpenChange={() => toggleSection('projects')}>
               <SectionHeader
@@ -912,14 +843,26 @@ export function AddOpeningStockModal({
             </Collapsible>
           )}
 
-          {/* ─── 5. Additional ──────────────────────────────────────────── */}
+          {/* ─── 4. Additional ──────────────────────────────────────────── */}
           <Collapsible open={sectionsOpen.additional} onOpenChange={() => toggleSection('additional')}>
-            <SectionHeader sectionKey="additional" title="Additional" subtitle="Opening date, remarks, notes" />
+            <SectionHeader sectionKey="additional" title="Additional" subtitle="Purchase reference, dates, remarks" />
             <CollapsibleContent className="space-y-4 pt-3 px-1">
               <div className="grid grid-cols-2 gap-4">
                 <div>
+                  <Label className="text-xs">Purchase Reference</Label>
+                  <Input value={purchaseRef} onChange={(e) => setPurchaseRef(e.target.value)} placeholder="e.g., PO-2024-001" />
+                </div>
+                <div>
+                  <Label className="text-xs">Invoice Number</Label>
+                  <Input value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} placeholder="e.g., INV-001" />
+                </div>
+                <div>
                   <Label className="text-xs">Opening Date</Label>
                   <Input type="date" value={openingDate} onChange={(e) => setOpeningDate(e.target.value)} />
+                </div>
+                <div>
+                  <Label className="text-xs">Received Date</Label>
+                  <Input type="date" value={receivedDate} onChange={(e) => setReceivedDate(e.target.value)} />
                 </div>
               </div>
               <div>
