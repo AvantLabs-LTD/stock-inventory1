@@ -589,3 +589,27 @@ model AuditLog {
   @@index([date])
   @@index([entityType])
 }
+
+// ─── INVENTORY ITEMS (Live Stock Register) ───────────────────────────────
+
+model InventoryItem {
+  id            String   @id @default(cuid())
+  itemName      String
+  specification String
+  unit          String   @default("pcs")
+  quantity      Int      @default(0)
+  issuedQty     Int      @default(0)
+  reservedQty   Int      @default(0)
+  minimumStock  Int      @default(0)
+  unitCost      Float    @default(0)
+  warehouse     String   @default("Main Warehouse")
+  status        String   @default("ACTIVE")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([itemName, specification, warehouse])
+  @@index([itemName])
+  @@index([specification])
+  @@index([warehouse])
+  @@index([status])
+}
