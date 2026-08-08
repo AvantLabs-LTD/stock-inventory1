@@ -22,6 +22,8 @@ import {
   ArchiveX,
   Lock,
   TrendingUp,
+  Pencil,
+  History,
 } from 'lucide-react'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
@@ -57,6 +59,8 @@ import { hasPermission } from '@/lib/permissions'
 import { useAuthStore } from '@/stores/auth-store'
 import { toast } from 'sonner'
 import { AddItemModal } from './add-item-modal'
+import { EditStockModal } from './edit-stock-modal'
+import { StockMovementPanel } from './stock-movement-panel'
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -75,6 +79,7 @@ interface SpecData {
   warehouse: string
   status: string
   remarks: string | null
+  lastTransactionAt: string | null
 }
 
 interface ItemGroup {
@@ -139,6 +144,13 @@ function statusForSpec(spec: SpecData): {
 
 function fmt(n: number): string {
   return n.toLocaleString()
+}
+
+function formatDateTime(iso: string | null): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  return d.toLocaleDateString('en-PK', { day: '2-digit', month: 'short' }) +
+    ' ' + d.toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' })
 }
 
 // ─── Summary Cards ───────────────────────────────────────────────────────
@@ -211,10 +223,18 @@ export function OpeningStockPageV2() {
 
   // Modal state
   const [addItemOpen, setAddItemOpen] = useState(false)
+  const [editTarget, setEditTarget] = useState<(SpecData & { itemName: string }) | null>(null)
 
   // Delete state
   const [deleteTarget, setDeleteTarget] = useState<SpecData | null>(null)
   const [deleting, setDeleting] = useState(false)
+
+  // History panel state
+  const [historyPanel, setHistoryPanel] = useState<{
+    itemId: string
+    itemName: string
+    specification: string
+  } | null>(null)
 
   // Export / Import state
   const [exporting, setExporting] = useState(false)
@@ -348,8 +368,10 @@ export function OpeningStockPageV2() {
       const res = await fetch('/api/inventory-items/import', { method: 'POST', body: form })
       if (res.ok) {
         const json = await res.json()
-        const msg = `Imported: ${json.imported}, Skipped: ${json.skipped}`
-        toast.success(msg)
+        const parts: string[] = [`Imported: ${json.imported}`, `Skipped: ${json.skipped}`]
+        if (json.productsCreated) parts.push(`Products created: ${json.productsCreated}`)
+        if (json.categoriesCreated) parts.push(`Categories created: ${json.categoriesCreated}`)
+        toast.success(parts.join(', '))
         if (json.warnings?.length > 0) {
           toast.info(`${json.warnings.length} row(s) had issues`, {
             description: json.warnings.slice(0, 3).map((w: { message: string }) => w.message).join('\n'),
@@ -516,231 +538,340 @@ export function OpeningStockPageV2() {
         </div>
       </div>
 
-      {/* ─── Accordion Table ───────────────────────────────────────────── */}
-      <div className="border rounded-lg overflow-hidden">
-        <div className="max-h-[calc(100vh-380px)] min-h-[300px] overflow-auto">
-          <Table>
-            <TableHeader className="sticky top-0 z-10 bg-muted">
-              <TableRow>
-                <TableHead className="w-[40px]" />
-                <TableHead className="min-w-[200px]">Item Name</TableHead>
-                <TableHead className="text-right min-w-[90px]">Inventory</TableHead>
-                <TableHead className="text-right min-w-[80px]">Issued</TableHead>
-                <TableHead className="text-right min-w-[110px]">Available</TableHead>
-                <TableHead className="text-right min-w-[100px]">Reserved</TableHead>
-                <TableHead className="w-[100px] text-center">Status</TableHead>
-                {canManage && <TableHead className="w-[50px]" />}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading ? (
-                Array.from({ length: 6 }).map((_, i) => (
-                  <TableRow key={i}>
-                    {Array.from({ length: canManage ? 8 : 7 }).map((_, j) => (
-                      <TableCell key={j}>
-                        <Skeleton className="h-5 w-full" />
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                ))
-              ) : data.length === 0 ? (
+      {/* ─── Main Content: Table + History Panel ───────────────────────── */}
+      <div className="flex gap-0 border rounded-lg overflow-hidden">
+        {/* Table Area */}
+        <div className={`flex-1 min-w-0 ${historyPanel ? 'hidden sm:block' : ''}`}>
+          <div className="max-h-[calc(100vh-380px)] min-h-[300px] overflow-auto">
+            <Table>
+              <TableHeader className="sticky top-0 z-10 bg-muted">
                 <TableRow>
-                  <TableCell colSpan={canManage ? 8 : 7} className="h-48 text-center">
-                    <div className="flex flex-col items-center gap-2 text-muted-foreground">
-                      <Package className="h-10 w-10" />
-                      <p>No inventory items found</p>
-                      {canManage && (
-                        <Button variant="outline" size="sm" onClick={() => setAddItemOpen(true)}>
-                          <Plus className="h-4 w-4 mr-1" /> Add Item
-                        </Button>
-                      )}
-                    </div>
-                  </TableCell>
+                  <TableHead className="w-[40px]" />
+                  <TableHead className="w-[50px] text-center">Sr.</TableHead>
+                  <TableHead className="min-w-[180px]">Item Name</TableHead>
+                  <TableHead className="text-right min-w-[90px]">Inventory Stock</TableHead>
+                  <TableHead className="text-right min-w-[80px]">Issued</TableHead>
+                  <TableHead className="text-right min-w-[110px]">Available Stock</TableHead>
+                  <TableHead className="text-right min-w-[100px]">Reserved</TableHead>
+                  <TableHead className="min-w-[130px]">Last Updated</TableHead>
+                  <TableHead className="w-[100px] text-center">Status</TableHead>
+                  {canManage && <TableHead className="w-[80px] text-center">Actions</TableHead>}
                 </TableRow>
-              ) : (
-                data.map((group, groupIdx) => {
-                  const isExpanded = expandedItems.has(group.itemName)
-                  const status = statusForGroup(group)
-                  const serialNo = (pagination.page - 1) * pagination.limit + groupIdx + 1
-
-                  return (
-                    <>
-                      {/* ── Parent Row ─────────────────────────────────────── */}
-                      <TableRow
-                        key={`parent-${group.itemName}`}
-                        className={isExpanded ? 'bg-muted/40' : 'hover:bg-muted/30 cursor-pointer'}
-                        onClick={() => toggleItem(group.itemName)}
-                      >
-                        <TableCell className="pl-3">
-                          <div className="flex items-center justify-center w-5 h-5 rounded transition-transform">
-                            {isExpanded ? (
-                              <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                            ) : (
-                              <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                            )}
-                          </div>
+              </TableHeader>
+              <TableBody>
+                {loading ? (
+                  Array.from({ length: 6 }).map((_, i) => (
+                    <TableRow key={i}>
+                      {Array.from({ length: canManage ? 10 : 9 }).map((_, j) => (
+                        <TableCell key={j}>
+                          <Skeleton className="h-5 w-full" />
                         </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2.5">
-                            <div className="flex flex-col">
-                              <span className="font-semibold text-sm">{group.itemName}</span>
-                              <Badge variant="outline" className="w-fit text-[10px] px-1.5 py-0 h-4 font-normal">
-                                {group.specCount} spec{group.specCount !== 1 ? 's' : ''}
-                              </Badge>
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right font-mono text-sm">
-                          {fmt(group.totalInventory)}
-                        </TableCell>
-                        <TableCell className="text-right font-mono text-sm text-orange-600">
-                          {group.totalIssued > 0 ? fmt(group.totalIssued) : '—'}
-                        </TableCell>
-                        <TableCell className="text-right font-mono text-sm font-semibold">
-                          <span className={
-                            group.totalAvailable <= 0
-                              ? 'text-red-600'
-                              : group.totalAvailable <= group.totalInventory * 0.2
-                                ? 'text-amber-600'
-                                : 'text-emerald-600'
-                          }>
-                            {fmt(group.totalAvailable)}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-right font-mono text-sm text-blue-600">
-                          {group.totalReserved > 0 ? fmt(group.totalReserved) : '—'}
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <Badge variant={status.variant} className={`${status.className} text-[11px] px-2 py-0 h-5`}>
-                            {status.label}
-                          </Badge>
-                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))
+                ) : data.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={canManage ? 10 : 9} className="h-48 text-center">
+                      <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                        <Package className="h-10 w-10" />
+                        <p>No inventory items found</p>
                         {canManage && (
+                          <Button variant="outline" size="sm" onClick={() => setAddItemOpen(true)}>
+                            <Plus className="h-4 w-4 mr-1" /> Add Item
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  data.map((group, groupIdx) => {
+                    const isExpanded = expandedItems.has(group.itemName)
+                    const status = statusForGroup(group)
+                    const serialNo = (pagination.page - 1) * pagination.limit + groupIdx + 1
+
+                    return (
+                      <>
+                        {/* ── Parent Row ─────────────────────────────────── */}
+                        <TableRow
+                          key={`parent-${group.itemName}`}
+                          className={isExpanded ? 'bg-muted/40' : 'hover:bg-muted/30 cursor-pointer'}
+                          onClick={() => toggleItem(group.itemName)}
+                        >
+                          <TableCell className="pl-3">
+                            <div className="flex items-center justify-center w-5 h-5 rounded transition-transform">
+                              {isExpanded ? (
+                                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-center text-xs text-muted-foreground font-mono">
+                            {serialNo}
+                          </TableCell>
                           <TableCell>
-                            <span className="text-xs text-muted-foreground font-mono w-6 inline-block text-center">
-                              {serialNo}
+                            <div className="flex items-center gap-2.5">
+                              <div className="flex flex-col">
+                                <span className="font-semibold text-sm">{group.itemName}</span>
+                                <Badge variant="outline" className="w-fit text-[10px] px-1.5 py-0 h-4 font-normal">
+                                  {group.specCount} spec{group.specCount !== 1 ? 's' : ''}
+                                </Badge>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-sm">
+                            {fmt(group.totalInventory)}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-sm text-orange-600">
+                            {group.totalIssued > 0 ? fmt(group.totalIssued) : '—'}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-sm font-semibold">
+                            <span className={
+                              group.totalAvailable <= 0
+                                ? 'text-red-600'
+                                : group.totalAvailable <= group.totalInventory * 0.2
+                                  ? 'text-amber-600'
+                                  : 'text-emerald-600'
+                            }>
+                              {fmt(group.totalAvailable)}
                             </span>
                           </TableCell>
-                        )}
-                      </TableRow>
+                          <TableCell className="text-right font-mono text-sm text-blue-600">
+                            {group.totalReserved > 0 ? fmt(group.totalReserved) : '—'}
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            —
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <Badge variant={status.variant} className={`${status.className} text-[11px] px-2 py-0 h-5`}>
+                              {status.label}
+                            </Badge>
+                          </TableCell>
+                          {canManage && <TableCell />}
+                        </TableRow>
 
-                      {/* ── Expanded Spec Rows ─────────────────────────────── */}
-                      {isExpanded &&
-                        group.specs.map((spec) => {
-                          const specStatus = statusForSpec(spec)
-                          return (
-                            <TableRow
-                              key={`spec-${spec.id}`}
-                              className="bg-slate-50/70 hover:bg-slate-100/80 group/row"
-                            >
-                              <TableCell className="pl-3" />
-                              <TableCell className="pl-8">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-muted-foreground text-xs">↳</span>
-                                  <div className="flex flex-col">
-                                    <span className="text-sm">{spec.specification}</span>
-                                    <span className="text-[11px] text-muted-foreground">
-                                      {spec.unit} · {spec.warehouse}
-                                    </span>
+                        {/* ── Expanded Spec Rows ────────────────────────── */}
+                        {isExpanded &&
+                          group.specs.map((spec) => {
+                            const specStatus = statusForSpec(spec)
+                            return (
+                              <TableRow
+                                key={`spec-${spec.id}`}
+                                className={`bg-slate-50/70 hover:bg-slate-100/80 group/row ${historyPanel?.itemId === spec.id ? 'ring-2 ring-primary/20' : ''}`}
+                              >
+                                <TableCell className="pl-3" />
+                                <TableCell className="text-center text-xs text-muted-foreground font-mono" />
+                                <TableCell className="pl-8">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-muted-foreground text-xs">↳</span>
+                                    <div className="flex flex-col">
+                                      <span className="text-sm">{spec.specification}</span>
+                                      <span className="text-[11px] text-muted-foreground">
+                                        {spec.unit} · {spec.warehouse}
+                                      </span>
+                                    </div>
                                   </div>
-                                </div>
-                              </TableCell>
-                              <TableCell className="text-right font-mono text-sm">
-                                {fmt(spec.quantity)}
-                              </TableCell>
-                              <TableCell className="text-right font-mono text-sm text-orange-600">
-                                {spec.issuedQty > 0 ? fmt(spec.issuedQty) : '—'}
-                              </TableCell>
-                              <TableCell className="text-right font-mono text-sm font-semibold">
-                                <span className={
-                                  spec.availableStock <= 0
-                                    ? 'text-red-600'
-                                    : spec.availableStock <= spec.minimumStock
-                                      ? 'text-amber-600'
-                                      : 'text-emerald-600'
-                                }>
-                                  {fmt(spec.availableStock)}
-                                </span>
-                              </TableCell>
-                              <TableCell className="text-right font-mono text-sm text-blue-600">
-                                {spec.reservedQty > 0 ? fmt(spec.reservedQty) : '—'}
-                              </TableCell>
-                              <TableCell className="text-center">
-                                <Badge className={`${specStatus.className} text-[10px] px-1.5 py-0 h-4 font-medium`}>
-                                  {specStatus.label}
-                                </Badge>
-                              </TableCell>
-                              {canManage && (
-                                <TableCell>
-                                  <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
+                                </TableCell>
+                                <TableCell className="text-right font-mono text-sm">
+                                  {fmt(spec.quantity)}
+                                </TableCell>
+                                <TableCell className="text-right font-mono text-sm text-orange-600">
+                                  {spec.issuedQty > 0 ? fmt(spec.issuedQty) : '—'}
+                                </TableCell>
+                                <TableCell className="text-right font-mono text-sm font-semibold">
+                                  <span className={
+                                    spec.availableStock <= 0
+                                      ? 'text-red-600'
+                                      : spec.availableStock <= spec.minimumStock
+                                        ? 'text-amber-600'
+                                        : 'text-emerald-600'
+                                  }>
+                                    {fmt(spec.availableStock)}
+                                  </span>
+                                </TableCell>
+                                <TableCell className="text-right font-mono text-sm text-blue-600">
+                                  {spec.reservedQty > 0 ? fmt(spec.reservedQty) : '—'}
+                                </TableCell>
+                                <TableCell className="text-xs text-muted-foreground">
+                                  {formatDateTime(spec.lastTransactionAt)}
+                                </TableCell>
+                                <TableCell className="text-center">
+                                  <Badge className={`${specStatus.className} text-[10px] px-1.5 py-0 h-4 font-medium`}>
+                                    {specStatus.label}
+                                  </Badge>
+                                </TableCell>
+                                {canManage && (
+                                  <TableCell>
+                                    <div className="flex items-center justify-center gap-0.5 opacity-0 group-hover/row:opacity-100 transition-opacity">
                                       <Button
                                         variant="ghost"
                                         size="icon"
-                                        className="h-7 w-7 opacity-0 group-hover/row:opacity-100 transition-opacity"
-                                        onClick={(e) => e.stopPropagation()}
-                                      >
-                                        <MoreHorizontal className="h-3.5 w-3.5" />
-                                      </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end">
-                                      <DropdownMenuItem
+                                        className="h-7 w-7 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
                                         onClick={(e) => {
                                           e.stopPropagation()
-                                          setDeleteTarget(spec)
+                                          setEditTarget({ ...spec, itemName: group.itemName })
                                         }}
-                                        className="text-destructive focus:text-destructive"
+                                        title="Edit Stock"
                                       >
-                                        <Trash2 className="h-4 w-4 mr-2" />
-                                        Delete
-                                      </DropdownMenuItem>
-                                    </DropdownMenuContent>
-                                  </DropdownMenu>
-                                </TableCell>
-                              )}
-                            </TableRow>
-                          )
-                        })}
-                    </>
-                  )
-                })
-              )}
-            </TableBody>
-          </Table>
+                                        <Pencil className="h-3.5 w-3.5" />
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-7 w-7 text-violet-600 hover:text-violet-700 hover:bg-violet-50"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          setHistoryPanel({
+                                            itemId: spec.id,
+                                            itemName: group.itemName,
+                                            specification: spec.specification,
+                                          })
+                                        }}
+                                        title="View History"
+                                      >
+                                        <History className="h-3.5 w-3.5" />
+                                      </Button>
+                                      <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                          <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-7 w-7"
+                                            onClick={(e) => e.stopPropagation()}
+                                          >
+                                            <MoreHorizontal className="h-3.5 w-3.5" />
+                                          </Button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent align="end">
+                                          <DropdownMenuItem
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              setEditTarget({ ...spec, itemName: group.itemName })
+                                            }}
+                                          >
+                                            <Pencil className="h-4 w-4 mr-2" />
+                                            Edit Stock
+                                          </DropdownMenuItem>
+                                          <DropdownMenuItem
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              setHistoryPanel({
+                                                itemId: spec.id,
+                                                itemName: group.itemName,
+                                                specification: spec.specification,
+                                              })
+                                            }}
+                                          >
+                                            <History className="h-4 w-4 mr-2" />
+                                            Movement History
+                                          </DropdownMenuItem>
+                                          <DropdownMenuItem
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              setDeleteTarget(spec)
+                                            }}
+                                            className="text-destructive focus:text-destructive"
+                                          >
+                                            <Trash2 className="h-4 w-4 mr-2" />
+                                            Delete
+                                          </DropdownMenuItem>
+                                        </DropdownMenuContent>
+                                      </DropdownMenu>
+                                    </div>
+                                  </TableCell>
+                                )}
+                              </TableRow>
+                            )
+                          })}
+                      </>
+                    )
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* ─── Pagination ─────────────────────────────────────────────── */}
+          {pageSize !== 'all' && totalPages > 1 && (
+            <div className="flex items-center justify-between px-4 py-3 border-t bg-muted/30">
+              <p className="text-sm text-muted-foreground">
+                Showing {(pagination.page - 1) * pagination.limit + 1}–{Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total} item groups
+              </p>
+              <div className="flex items-center gap-1">
+                <Button variant="outline" size="icon" className="h-8 w-8" disabled={pagination.page <= 1} onClick={() => setPagination((p) => ({ ...p, page: 1 }))}>
+                  <ChevronsLeft className="h-4 w-4" />
+                </Button>
+                <Button variant="outline" size="icon" className="h-8 w-8" disabled={pagination.page <= 1} onClick={() => setPagination((p) => ({ ...p, page: p.page - 1 }))}>
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <span className="px-3 text-sm font-medium">
+                  {pagination.page} / {totalPages}
+                </span>
+                <Button variant="outline" size="icon" className="h-8 w-8" disabled={pagination.page >= totalPages} onClick={() => setPagination((p) => ({ ...p, page: p.page + 1 }))}>
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+                <Button variant="outline" size="icon" className="h-8 w-8" disabled={pagination.page >= totalPages} onClick={() => setPagination((p) => ({ ...p, page: totalPages }))}>
+                  <ChevronsRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* ─── Pagination ─────────────────────────────────────────────── */}
-        {pageSize !== 'all' && totalPages > 1 && (
-          <div className="flex items-center justify-between px-4 py-3 border-t bg-muted/30">
-            <p className="text-sm text-muted-foreground">
-              Showing {(pagination.page - 1) * pagination.limit + 1}–{Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total} item groups
-            </p>
-            <div className="flex items-center gap-1">
-              <Button variant="outline" size="icon" className="h-8 w-8" disabled={pagination.page <= 1} onClick={() => setPagination((p) => ({ ...p, page: 1 }))}>
-                <ChevronsLeft className="h-4 w-4" />
-              </Button>
-              <Button variant="outline" size="icon" className="h-8 w-8" disabled={pagination.page <= 1} onClick={() => setPagination((p) => ({ ...p, page: p.page - 1 }))}>
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <span className="px-3 text-sm font-medium">
-                {pagination.page} / {totalPages}
-              </span>
-              <Button variant="outline" size="icon" className="h-8 w-8" disabled={pagination.page >= totalPages} onClick={() => setPagination((p) => ({ ...p, page: p.page + 1 }))}>
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-              <Button variant="outline" size="icon" className="h-8 w-8" disabled={pagination.page >= totalPages} onClick={() => setPagination((p) => ({ ...p, page: totalPages }))}>
-                <ChevronsRight className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
+        {/* ─── History Side Panel ─────────────────────────────────────── */}
+        {historyPanel && (
+          <StockMovementPanel
+            itemId={historyPanel.itemId}
+            itemName={historyPanel.itemName}
+            specification={historyPanel.specification}
+            onClose={() => setHistoryPanel(null)}
+          />
         )}
       </div>
+
+      {/* ─── Mobile History Overlay ────────────────────────────────────── */}
+      {historyPanel && (
+        <div className="sm:hidden fixed inset-0 z-50 flex">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setHistoryPanel(null)} />
+          <div className="relative ml-auto w-full max-w-[400px]">
+            <StockMovementPanel
+              itemId={historyPanel.itemId}
+              itemName={historyPanel.itemName}
+              specification={historyPanel.specification}
+              onClose={() => setHistoryPanel(null)}
+            />
+          </div>
+        </div>
+      )}
 
       {/* ─── Add Item Modal ──────────────────────────────────────────── */}
       <AddItemModal
         open={addItemOpen}
         onOpenChange={setAddItemOpen}
         onSuccess={() => fetchData()}
+      />
+
+      {/* ─── Edit Stock Modal ─────────────────────────────────────────── */}
+      <EditStockModal
+        open={!!editTarget}
+        onOpenChange={(open) => !open && setEditTarget(null)}
+        spec={editTarget}
+        onSuccess={() => {
+          fetchData()
+          // Refresh history panel if open
+          if (historyPanel && historyPanel.itemId === editTarget?.id) {
+            setHistoryPanel(null) // will re-open on next render
+            setTimeout(() => {
+              if (editTarget) {
+                setHistoryPanel({
+                  itemId: editTarget.id,
+                  itemName: editTarget.itemName,
+                  specification: editTarget.specification,
+                })
+              }
+            }, 100)
+          }
+        }}
       />
 
       {/* ─── Delete Confirmation ──────────────────────────────────────── */}

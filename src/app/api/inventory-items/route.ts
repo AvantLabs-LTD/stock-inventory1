@@ -20,6 +20,7 @@ interface SpecData {
   warehouse: string
   status: string
   remarks: string | null
+  lastTransactionAt: string | null
 }
 
 interface ItemGroup {
@@ -106,6 +107,7 @@ export async function GET(request: NextRequest) {
         minimumStock: spec.minimumStock,
         unitCost: spec.unitCost,
         warehouse: spec.warehouse,
+        lastTransactionAt: spec.lastTransactionAt?.toISOString() || null,
         status: spec.status,
         remarks: spec.remarks || null,
       }

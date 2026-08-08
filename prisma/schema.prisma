@@ -610,9 +610,35 @@ model InventoryItem {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
+  lastTransactionAt DateTime?
+  stockMovements  StockMovement[]
+
   @@unique([itemName, specification, warehouse])
   @@index([itemName])
   @@index([specification])
   @@index([warehouse])
   @@index([status])
+}
+
+// ─── STOCK MOVEMENT (Audit Trail for InventoryItem) ─────────────────────
+
+model StockMovement {
+  id              String   @id @default(cuid())
+  inventoryItemId String
+  action          String   // ADD, SUBTRACT, ISSUE, RETURN, RECEIVE, RESERVE, RELEASE, DAMAGED, CORRECTION, OPENING
+  reason          String   // Purchase, Manual Adjustment, Damaged, Lost, Found, Correction, Goods Received, Issue, Return, Reservation, Release
+  quantity        Int
+  previousStock   Int
+  newStock        Int
+  remarks         String?
+  userId          String
+  userName        String?
+  createdAt       DateTime @default(now())
+
+  inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+
+  @@index([inventoryItemId])
+  @@index([action])
+  @@index([createdAt])
+  @@index([userId])
 }

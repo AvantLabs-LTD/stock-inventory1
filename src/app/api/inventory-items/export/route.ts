@@ -61,6 +61,8 @@ export async function GET(request: NextRequest) {
       { header: 'Min Stock', key: 'minimumStock', width: 11 },
       { header: 'Unit Cost', key: 'unitCost', width: 11 },
       { header: 'Warehouse', key: 'warehouse', width: 18 },
+      { header: 'Last Updated', key: 'lastTransactionAt', width: 20 },
+      { header: 'Remarks', key: 'remarks', width: 25 },
     ]
 
     // Style header
@@ -86,6 +88,8 @@ export async function GET(request: NextRequest) {
         minimumStock: item.minimumStock || '',
         unitCost: item.unitCost || '',
         warehouse: item.warehouse,
+        lastTransactionAt: item.lastTransactionAt ? item.lastTransactionAt.toLocaleDateString('en-PK') : '',
+        remarks: item.remarks || '',
       })
 
       // Alternate row shading

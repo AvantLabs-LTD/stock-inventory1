@@ -5,7 +5,6 @@ import { getSession, unauthorizedResponse, forbiddenResponse } from '@/lib/auth-
 import { hasPermission } from '@/lib/permissions'
 
 // ─── Column mapping: flexible header matching ───────────────────────────
-// Each DB field maps to an array of possible header substrings (case-insensitive)
 
 const COLUMN_ALIASES: Record<string, string[]> = {
   itemName: ['item name', 'item_name', 'item', 'name', 'product name', 'product_name', 'product'],
@@ -17,23 +16,18 @@ const COLUMN_ALIASES: Record<string, string[]> = {
   minimumStock: ['min stock', 'min_stock', 'minimum stock', 'minimum_stock', 'reorder level', 'reorder_level', 'reorder', 'alert level'],
   unitCost: ['unit cost', 'unit_cost', 'cost', 'price', 'rate', 'unit price', 'unit_price'],
   warehouse: ['warehouse', 'location', 'store', 'godown', 'wh'],
+  category: ['category', 'category name', 'category_name', 'group', 'classification'],
+  remarks: ['remarks', 'notes', 'comment', 'comments', 'description'],
 }
 
-/**
- * Build a map from DB field name → Excel column index.
- * Never fails — unknown headers are simply ignored.
- */
+/** Build a map from DB field name → Excel column index. Never fails. */
 function mapColumns(headerRow: ExcelJS.Row): Record<string, number> {
   const mapping: Record<string, number> = {}
-
   headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
     const header = String(cell.value || '').trim().toLowerCase()
     if (!header) return
-
-    // Try exact alias match first (longer aliases first to avoid partial matches)
     for (const [field, aliases] of Object.entries(COLUMN_ALIASES)) {
-      if (mapping[field] !== undefined) continue // already mapped
-      // Sort aliases by length descending so "item name" matches before "item"
+      if (mapping[field] !== undefined) continue
       const sortedAliases = [...aliases].sort((a, b) => b.length - a.length)
       for (const alias of sortedAliases) {
         if (header === alias || header === alias.replace(/\s+/g, '_')) {
@@ -44,11 +38,9 @@ function mapColumns(headerRow: ExcelJS.Row): Record<string, number> {
       if (mapping[field] !== undefined) continue
     }
   })
-
   return mapping
 }
 
-/** Safely extract a string from a cell */
 function getCellString(row: ExcelJS.Row, colIndex: number | undefined): string {
   if (colIndex === undefined) return ''
   const cell = row.getCell(colIndex)
@@ -60,12 +52,77 @@ function getCellString(row: ExcelJS.Row, colIndex: number | undefined): string {
   return String(val).trim()
 }
 
-/** Safely parse a number */
 function parseNum(str: string): number {
   if (!str) return 0
   const cleaned = str.replace(/[,\s]/g, '')
   const n = Number(cleaned)
   return isNaN(n) ? 0 : n
+}
+
+/** Auto-create a Category if it doesn't exist */
+async function ensureCategory(name: string): Promise<string | null> {
+  if (!name) return null
+  const existing = await db.category.findUnique({ where: { name } })
+  if (existing) return existing.id
+  const code = name.toUpperCase().replace(/\s+/g, '_').slice(0, 20)
+  const created = await db.category.create({
+    data: { name, code },
+  })
+  return created.id
+}
+
+/** Auto-create a Product (parent) if it doesn't exist */
+async function ensureProduct(itemName: string, categoryId: string | null): Promise<string> {
+  const existing = await db.product.findFirst({
+    where: {
+      name: itemName,
+      parentProductId: null,
+      status: 'ACTIVE',
+    },
+  })
+  if (existing) return existing.id
+
+  const code = itemName.toUpperCase().replace(/\s+/g, '_').slice(0, 20) + '_' + Date.now().toString(36)
+  const sku = 'SKU-' + code
+  const created = await db.product.create({
+    data: {
+      name: itemName,
+      code,
+      sku,
+      categoryId,
+      unit: 'pcs',
+      status: 'ACTIVE',
+    },
+  })
+  return created.id
+}
+
+/** Auto-create a Product variant if it doesn't exist */
+async function ensureProductVariant(specName: string, parentProductId: string): Promise<string | null> {
+  if (!specName || specName === '-') return null
+  const existing = await db.product.findFirst({
+    where: {
+      parentProductId,
+      variantName: specName,
+      status: 'ACTIVE',
+    },
+  })
+  if (existing) return existing.id
+
+  const code = specName.toUpperCase().replace(/\s+/g, '_').slice(0, 20) + '_' + Date.now().toString(36)
+  const sku = 'SKU-' + code
+  const created = await db.product.create({
+    data: {
+      name: specName,
+      code,
+      sku,
+      parentProductId,
+      variantName: specName,
+      unit: 'pcs',
+      status: 'ACTIVE',
+    },
+  })
+  return created.id
 }
 
 // POST /api/inventory-items/import — Bulletproof Excel import
@@ -85,7 +142,6 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: 'No file provided' }, { status: 400 })
     }
 
-    // Validate file type
     if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls') && !file.name.endsWith('.csv')) {
       return Response.json({ error: 'Invalid file type. Please upload an Excel file (.xlsx, .xls)' }, { status: 400 })
     }
@@ -99,18 +155,23 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: 'Excel file is empty or has no data rows' }, { status: 400 })
     }
 
-    // Auto-map columns — never fails
     const headerRow = sheet.getRow(1)
     const colMap = mapColumns(headerRow)
 
     let imported = 0
     let skipped = 0
+    let productsCreated = 0
+    let categoriesCreated = 0
     const warnings: { row: number; message: string }[] = []
+
+    // Track created products/categories to avoid duplicates within the same import
+    const productCache = new Map<string, string>()   // itemName → productId
+    const variantCache = new Map<string, string>()    // "productId:spec" → variantId
+    const categoryCache = new Map<string, string>()   // categoryName → categoryId
 
     for (let rowNum = 2; rowNum <= sheet.rowCount; rowNum++) {
       const row = sheet.getRow(rowNum)
 
-      // Skip completely empty rows
       let allEmpty = true
       row.eachCell({ includeEmpty: true }, () => { allEmpty = false })
       if (allEmpty) continue
@@ -124,15 +185,45 @@ export async function POST(request: NextRequest) {
       const minimumStock = parseNum(getCellString(row, colMap.minimumStock))
       const unitCost = parseNum(getCellString(row, colMap.unitCost))
       const warehouse = getCellString(row, colMap.warehouse) || 'Main Warehouse'
+      const category = getCellString(row, colMap.category)
+      const remarks = getCellString(row, colMap.remarks)
 
-      // Item name is the only truly required field
       if (!itemName) {
         skipped++
-        warnings.push({ row: rowNum, message: `Row ${rowNum}: Skipped — no Item Name found (column may be missing or cell is empty)` })
+        warnings.push({ row: rowNum, message: `Row ${rowNum}: Skipped — no Item Name found` })
         continue
       }
 
       try {
+        // Auto-create Category if needed
+        let categoryId: string | null = null
+        if (category && !categoryCache.has(category)) {
+          categoryId = await ensureCategory(category)
+          if (categoryId) {
+            categoryCache.set(category, categoryId)
+            categoriesCreated++
+          }
+        } else if (category) {
+          categoryId = categoryCache.get(category) || null
+        }
+
+        // Auto-create Product (parent) if needed
+        if (!productCache.has(itemName)) {
+          const productId = await ensureProduct(itemName, categoryId)
+          productCache.set(itemName, productId)
+          productsCreated++
+        }
+        const productId = productCache.get(itemName)!
+
+        // Auto-create Product variant if needed
+        if (specification && specification !== '-' && !variantCache.has(`${productId}:${specification}`)) {
+          const variantId = await ensureProductVariant(specification, productId)
+          if (variantId) {
+            variantCache.set(`${productId}:${specification}`, variantId)
+          }
+        }
+
+        // Create or skip InventoryItem
         await db.inventoryItem.create({
           data: {
             itemName,
@@ -144,6 +235,8 @@ export async function POST(request: NextRequest) {
             minimumStock,
             unitCost,
             warehouse,
+            remarks: remarks || null,
+            ...(quantity > 0 ? { lastTransactionAt: new Date() } : {}),
           },
         })
         imported++
@@ -162,6 +255,8 @@ export async function POST(request: NextRequest) {
     return Response.json({
       imported,
       skipped,
+      productsCreated,
+      categoriesCreated,
       warnings,
       columnMapping: colMap,
     })

@@ -22,6 +22,10 @@ export async function GET(
       where: { id },
       include: {
         category: { select: { id: true, name: true, code: true } },
+        variants: {
+          select: { id: true, name: true, variantName: true, status: true },
+          orderBy: { name: 'asc' },
+        },
       },
     })
 
@@ -67,7 +71,6 @@ export async function PUT(
       return Response.json({ error: 'Product not found' }, { status: 404 })
     }
 
-    // Check SKU uniqueness if changed
     if (sku && sku !== existing.sku) {
       const existingSku = await db.product.findUnique({ where: { sku } })
       if (existingSku) {
@@ -92,6 +95,18 @@ export async function PUT(
       },
     })
 
+    // Sync name change to InventoryItem
+    if (name && name !== existing.name) {
+      try {
+        await db.inventoryItem.updateMany({
+          where: { itemName: existing.name },
+          data: { itemName: name },
+        })
+      } catch {
+        // Non-critical
+      }
+    }
+
     return Response.json(product)
   } catch (error) {
     console.error('PUT /api/products/[id] error:', error)
@@ -99,7 +114,7 @@ export async function PUT(
   }
 }
 
-// DELETE /api/products/[id] — Soft delete (set status to DISCONTINUED)
+// DELETE /api/products/[id] — Soft delete and sync InventoryItem
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -123,6 +138,16 @@ export async function DELETE(
       where: { id },
       data: { status: 'DISCONTINUED' },
     })
+
+    // Soft-delete all InventoryItems matching this product name
+    try {
+      await db.inventoryItem.updateMany({
+        where: { itemName: existing.name, status: 'ACTIVE' },
+        data: { status: 'DELETED' },
+      })
+    } catch {
+      // Non-critical
+    }
 
     return Response.json(product)
   } catch (error) {

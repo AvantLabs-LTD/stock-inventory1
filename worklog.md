@@ -76,3 +76,33 @@ Stage Summary:
 - ESLint clean, TypeScript clean for modified files
 - Production build succeeds
 - Direct Prisma verification confirms correct data structure
+---
+---
+Task ID: 1
+Agent: main
+Task: Update Opening Stock and Product modules with Edit Inventory, Auto Sync, Audit Trail
+
+Work Log:
+- Updated Prisma schema: Added StockMovement model (audit trail) with fields: id, inventoryItemId, action, reason, quantity, previousStock, newStock, remarks, userId, userName, createdAt. Added lastTransactionAt to InventoryItem. Added stockMovements relation.
+- Ran prisma db push successfully, generated Prisma client
+- Created POST /api/inventory-items/[id]/adjust - Stock adjustment API with validation, reason tracking, and StockMovement audit record creation in a Prisma transaction
+- Created GET /api/inventory-items/[id]/movements - Stock movement history API with pagination
+- Updated GET /api/inventory-items to include lastTransactionAt in SpecData response
+- Updated POST /api/inventory-items/import - Enhanced to auto-create Products (parent + variants) and Categories during import with caching to prevent duplicates
+- Updated POST /api/products - Now auto-syncs to InventoryItem: creates parent entry + variant entries
+- Updated PUT /api/products/[id] - Syncs name changes to InventoryItem
+- Updated DELETE /api/products/[id] - Soft-deletes matching InventoryItems
+- Created edit-stock-modal.tsx - Modal with Add/Subtract toggle, quantity input, reason selector (11 options), remarks, live stock preview showing before/after
+- Created stock-movement-panel.tsx - Side panel showing full audit trail with action icons, stock change visualization, timestamps, user info, remarks
+- Rebuilt opening-stock-page.tsx - Added: Sr. No column, Last Updated column, Edit (✏️) button per spec row, History button, side panel for movement history, mobile overlay for history panel. Maintains: accordion parent-child structure, summary cards, filters, pagination, import/export
+- Updated export API to include Last Updated and Remarks columns
+- Fixed indentation issue in edit-stock-modal.tsx
+
+Stage Summary:
+- 7 new/modified API routes created
+- 2 new frontend components (EditStockModal, StockMovementPanel)
+- 1 major frontend rebuild (OpeningStockPageV2)
+- Schema: 1 new model (StockMovement), 1 field addition (lastTransactionAt)
+- ESLint: zero errors on modified files
+- Production build: compiled successfully
+- Dev server verified: pages serve correctly, API routes respond properly
