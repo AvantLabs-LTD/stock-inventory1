@@ -8,27 +8,27 @@ import {
   Download,
   Search,
   X,
-  ChevronLeft,
   ChevronRight,
+  ChevronDown,
   ChevronsLeft,
   ChevronsRight,
+  ChevronLeft,
   MoreHorizontal,
   Trash2,
   Loader2,
   Filter,
+  Boxes,
+  AlertTriangle,
+  ArchiveX,
+  Lock,
+  TrendingUp,
 } from 'lucide-react'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Card, CardContent } from '@/components/ui/card'
 import {
   Select,
   SelectContent,
@@ -60,19 +60,31 @@ import { AddItemModal } from './add-item-modal'
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
-interface InventoryItemData {
+interface SpecData {
   id: string
-  itemName: string
   specification: string
   unit: string
   quantity: number
   issuedQty: number
   reservedQty: number
+  returnedQty: number
+  damagedQty: number
+  availableStock: number
   minimumStock: number
   unitCost: number
   warehouse: string
   status: string
-  availableStock: number
+  remarks: string | null
+}
+
+interface ItemGroup {
+  itemName: string
+  specCount: number
+  totalInventory: number
+  totalIssued: number
+  totalAvailable: number
+  totalReserved: number
+  specs: SpecData[]
 }
 
 interface PaginationInfo {
@@ -80,6 +92,93 @@ interface PaginationInfo {
   limit: number
   total: number
   totalPages: number
+}
+
+interface SummaryStats {
+  totalItems: number
+  totalSpecs: number
+  totalInventory: number
+  totalAvailable: number
+  lowStockCount: number
+  outOfStockCount: number
+  reservedCount: number
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────
+
+function statusForGroup(group: ItemGroup): {
+  label: string
+  variant: 'destructive' | 'secondary' | 'outline'
+  className: string
+} {
+  if (group.totalInventory === 0) {
+    return { label: 'Out of Stock', variant: 'destructive', className: 'bg-red-100 text-red-700 border-red-200' }
+  }
+  const hasLow = group.specs.some((s) => s.minimumStock > 0 && s.quantity > 0 && s.quantity <= s.minimumStock)
+  const hasReserved = group.totalReserved > 0
+  if (hasLow) {
+    return { label: 'Low Stock', variant: 'secondary', className: 'bg-amber-100 text-amber-700 border-amber-200' }
+  }
+  if (hasReserved) {
+    return { label: 'Reserved', variant: 'secondary', className: 'bg-blue-100 text-blue-700 border-blue-200' }
+  }
+  return { label: 'In Stock', variant: 'secondary', className: 'bg-emerald-100 text-emerald-700 border-emerald-200' }
+}
+
+function statusForSpec(spec: SpecData): {
+  label: string
+  className: string
+} {
+  if (spec.quantity === 0) return { label: 'Out', className: 'bg-red-100 text-red-700' }
+  if (spec.minimumStock > 0 && spec.quantity > 0 && spec.quantity <= spec.minimumStock) {
+    return { label: 'Low', className: 'bg-amber-100 text-amber-700' }
+  }
+  if (spec.reservedQty > 0) return { label: 'Reserved', className: 'bg-blue-100 text-blue-700' }
+  return { label: 'OK', className: 'bg-emerald-100 text-emerald-700' }
+}
+
+function fmt(n: number): string {
+  return n.toLocaleString()
+}
+
+// ─── Summary Cards ───────────────────────────────────────────────────────
+
+function SummaryCards({ summary, loading }: { summary: SummaryStats | null; loading: boolean }) {
+  if (loading || !summary) {
+    return (
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+        {Array.from({ length: 7 }).map((_, i) => (
+          <Skeleton key={i} className="h-20 rounded-lg" />
+        ))}
+      </div>
+    )
+  }
+
+  const cards = [
+    { label: 'Item Groups', value: summary.totalItems, icon: Boxes, color: 'text-slate-600', bg: 'bg-slate-50' },
+    { label: 'Specifications', value: summary.totalSpecs, icon: Package, color: 'text-violet-600', bg: 'bg-violet-50' },
+    { label: 'Total Inventory', value: summary.totalInventory, icon: TrendingUp, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+    { label: 'Available', value: summary.totalAvailable, icon: Package, color: 'text-teal-600', bg: 'bg-teal-50' },
+    { label: 'Low Stock', value: summary.lowStockCount, icon: AlertTriangle, color: 'text-amber-600', bg: 'bg-amber-50' },
+    { label: 'Out of Stock', value: summary.outOfStockCount, icon: ArchiveX, color: 'text-red-600', bg: 'bg-red-50' },
+    { label: 'Reserved', value: summary.reservedCount, icon: Lock, color: 'text-blue-600', bg: 'bg-blue-50' },
+  ]
+
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+      {cards.map((c) => (
+        <Card key={c.label} className={`${c.bg} border-none shadow-sm`}>
+          <CardContent className="p-3">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-medium text-muted-foreground truncate">{c.label}</span>
+              <c.icon className={`h-3.5 w-3.5 ${c.color} opacity-60`} />
+            </div>
+            <p className={`text-lg font-bold ${c.color}`}>{fmt(c.value)}</p>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  )
 }
 
 // ─── Component ────────────────────────────────────────────────────────────
@@ -91,8 +190,9 @@ export function OpeningStockPageV2() {
   const canView = hasPermission(role, 'stock', 'view')
 
   // Data state
-  const [data, setData] = useState<InventoryItemData[]>([])
+  const [data, setData] = useState<ItemGroup[]>([])
   const [pagination, setPagination] = useState<PaginationInfo>({ page: 1, limit: 50, total: 0, totalPages: 0 })
+  const [summary, setSummary] = useState<SummaryStats | null>(null)
   const [loading, setLoading] = useState(true)
 
   // Filter state
@@ -102,23 +202,24 @@ export function OpeningStockPageV2() {
   const [stockFilter, setStockFilter] = useState('all')
   const [pageSize, setPageSize] = useState('50')
 
-  // Dropdown options from API
+  // Dropdown options
   const [itemNames, setItemNames] = useState<string[]>([])
   const [warehouses, setWarehouses] = useState<string[]>([])
+
+  // Accordion state
+  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set())
 
   // Modal state
   const [addItemOpen, setAddItemOpen] = useState(false)
 
   // Delete state
-  const [deleteTarget, setDeleteTarget] = useState<InventoryItemData | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<SpecData | null>(null)
   const [deleting, setDeleting] = useState(false)
 
-  // Exporting state
+  // Export / Import state
   const [exporting, setExporting] = useState(false)
-
-  // Import
-  const importRef = useRef<HTMLInputElement>(null)
   const [importing, setImporting] = useState(false)
+  const importRef = useRef<HTMLInputElement>(null)
 
   // ─── Data Fetching ─────────────────────────────────────────────────────
 
@@ -145,6 +246,7 @@ export function OpeningStockPageV2() {
         setPagination(json.pagination || { page: 1, limit, total: 0, totalPages: 0 })
         setItemNames(json.itemNames || [])
         setWarehouses(json.warehouses || [])
+        setSummary(json.summary || null)
       } else {
         toast.error('Failed to load inventory data')
       }
@@ -164,7 +266,29 @@ export function OpeningStockPageV2() {
     setPagination((p) => ({ ...p, page: 1 }))
   }, [search, itemNameFilter, warehouseFilter, stockFilter, pageSize])
 
-  // Computed ──────────────────────────────────────────────────────────
+  // ─── Accordion Toggle ─────────────────────────────────────────────────
+
+  const toggleItem = (itemName: string) => {
+    setExpandedItems((prev) => {
+      const next = new Set(prev)
+      if (next.has(itemName)) {
+        next.delete(itemName)
+      } else {
+        next.add(itemName)
+      }
+      return next
+    })
+  }
+
+  const expandAll = () => {
+    setExpandedItems(new Set(data.map((g) => g.itemName)))
+  }
+
+  const collapseAll = () => {
+    setExpandedItems(new Set())
+  }
+
+  // ─── Actions ──────────────────────────────────────────────────────────
 
   const handleDelete = async () => {
     if (!deleteTarget) return
@@ -172,7 +296,7 @@ export function OpeningStockPageV2() {
     try {
       const res = await fetch(`/api/inventory-items/${deleteTarget.id}`, { method: 'DELETE' })
       if (res.ok) {
-        toast.success(`${deleteTarget.itemName} - ${deleteTarget.specification} deleted`)
+        toast.success(`Deleted: ${deleteTarget.specification}`)
         setDeleteTarget(null)
         fetchData()
       } else {
@@ -200,7 +324,7 @@ export function OpeningStockPageV2() {
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url
-        a.download = `inventory-stock-${new Date().toISOString().slice(0, 10)}.xlsx`
+        a.download = `inventory-register-${new Date().toISOString().slice(0, 10)}.xlsx`
         a.click()
         URL.revokeObjectURL(url)
         toast.success('Export completed')
@@ -224,10 +348,17 @@ export function OpeningStockPageV2() {
       const res = await fetch('/api/inventory-items/import', { method: 'POST', body: form })
       if (res.ok) {
         const json = await res.json()
-        toast.success(`Imported: ${json.imported}, Skipped: ${json.skipped}${json.errors?.length ? `, Errors: ${json.errors.length}` : ''}`)
+        const msg = `Imported: ${json.imported}, Skipped: ${json.skipped}`
+        toast.success(msg)
+        if (json.warnings?.length > 0) {
+          toast.info(`${json.warnings.length} row(s) had issues`, {
+            description: json.warnings.slice(0, 3).map((w: { message: string }) => w.message).join('\n'),
+          })
+        }
         fetchData()
       } else {
-        toast.error('Import failed')
+        const err = await res.json().catch(() => ({}))
+        toast.error(err.error || 'Import failed')
       }
     } catch {
       toast.error('Import error')
@@ -240,17 +371,7 @@ export function OpeningStockPageV2() {
   // ─── Computed ──────────────────────────────────────────────────────────
 
   const totalPages = pagination.totalPages
-
-  const stockBadge = (item: InventoryItemData) => {
-    if (item.quantity === 0) return <Badge variant="destructive">Out of Stock</Badge>
-    if (item.minimumStock > 0 && item.quantity <= item.minimumStock)
-      return <Badge className="bg-amber-500 text-white hover:bg-amber-600">Low Stock</Badge>
-    if (item.reservedQty > 0)
-      return <Badge className="bg-blue-500 text-white hover:bg-blue-600">Reserved</Badge>
-    return <Badge variant="secondary" className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">In Stock</Badge>
-  }
-
-  const serialNo = (index: number) => (pagination.page - 1) * pagination.limit + index + 1
+  const hasFilters = search || itemNameFilter !== 'all' || warehouseFilter !== 'all' || stockFilter !== 'all'
 
   // ─── Render ────────────────────────────────────────────────────────────
 
@@ -266,15 +387,18 @@ export function OpeningStockPageV2() {
     <div className="space-y-4">
       <PageHeader
         title="Opening Stock"
-        description="Live inventory register — automatically updated from all stock movements"
+        description="Live inventory register — grouped by item with expandable specifications"
       />
 
-      {/* ─── Toolbar ──────────────────────────────────────────────────── */}
+      {/* ─── Summary Cards ──────────────────────────────────────────────── */}
+      <SummaryCards summary={summary} loading={loading} />
+
+      {/* ─── Toolbar ───────────────────────────────────────────────────── */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search by item name or specification..."
+            placeholder="Search item name or specification..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-9 h-9"
@@ -289,6 +413,12 @@ export function OpeningStockPageV2() {
           )}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <Button variant="ghost" size="sm" onClick={expandAll} className="h-8 text-xs">
+            Expand All
+          </Button>
+          <Button variant="ghost" size="sm" onClick={collapseAll} className="h-8 text-xs">
+            Collapse All
+          </Button>
           {canManage && (
             <Button size="sm" onClick={() => setAddItemOpen(true)}>
               <Plus className="h-4 w-4 mr-1.5" />
@@ -345,7 +475,7 @@ export function OpeningStockPageV2() {
           </Select>
 
           <Select value={stockFilter} onValueChange={setStockFilter}>
-            <SelectTrigger className="w-[150px] h-9">
+            <SelectTrigger className="w-[140px] h-9">
               <SelectValue placeholder="Stock Status" />
             </SelectTrigger>
             <SelectContent>
@@ -368,7 +498,7 @@ export function OpeningStockPageV2() {
             </SelectContent>
           </Select>
 
-          {(itemNameFilter !== 'all' || warehouseFilter !== 'all' || stockFilter !== 'all' || search) && (
+          {hasFilters && (
             <Button
               variant="ghost"
               size="sm"
@@ -386,26 +516,25 @@ export function OpeningStockPageV2() {
         </div>
       </div>
 
-      {/* ─── Table ────────────────────────────────────────────────────── */}
+      {/* ─── Accordion Table ───────────────────────────────────────────── */}
       <div className="border rounded-lg overflow-hidden">
-        <div className="max-h-[calc(100vh-340px)] min-h-[300px] overflow-auto">
+        <div className="max-h-[calc(100vh-380px)] min-h-[300px] overflow-auto">
           <Table>
             <TableHeader className="sticky top-0 z-10 bg-muted">
               <TableRow>
-                <TableHead className="w-[60px] text-center">S.No</TableHead>
-                <TableHead className="min-w-[180px]">Item Name</TableHead>
-                <TableHead className="min-w-[200px]">Specification</TableHead>
+                <TableHead className="w-[40px]" />
+                <TableHead className="min-w-[200px]">Item Name</TableHead>
                 <TableHead className="text-right min-w-[90px]">Inventory</TableHead>
-                <TableHead className="text-right min-w-[90px]">Issued</TableHead>
-                <TableHead className="text-right min-w-[120px]">Available Stock</TableHead>
-                <TableHead className="text-right min-w-[120px]">Reserved Stock</TableHead>
-                <TableHead className="w-[60px]">Status</TableHead>
+                <TableHead className="text-right min-w-[80px]">Issued</TableHead>
+                <TableHead className="text-right min-w-[110px]">Available</TableHead>
+                <TableHead className="text-right min-w-[100px]">Reserved</TableHead>
+                <TableHead className="w-[100px] text-center">Status</TableHead>
                 {canManage && <TableHead className="w-[50px]" />}
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? (
-                Array.from({ length: 10 }).map((_, i) => (
+                Array.from({ length: 6 }).map((_, i) => (
                   <TableRow key={i}>
                     {Array.from({ length: canManage ? 8 : 7 }).map((_, j) => (
                       <TableCell key={j}>
@@ -429,52 +558,152 @@ export function OpeningStockPageV2() {
                   </TableCell>
                 </TableRow>
               ) : (
-                data.map((item, idx) => (
-                  <TableRow key={item.id} className="group">
-                    <TableCell className="text-center text-muted-foreground text-sm">
-                      {serialNo(idx)}
-                    </TableCell>
-                    <TableCell className="font-medium">{item.itemName}</TableCell>
-                    <TableCell>
-                      <span className="text-sm">{item.specification}</span>
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-sm">
-                      {item.quantity.toLocaleString()}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-sm text-orange-600">
-                      {item.issuedQty > 0 ? item.issuedQty.toLocaleString() : '—'}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-sm font-semibold">
-                      <span className={item.availableStock <= 0 ? 'text-red-600' : item.availableStock <= item.minimumStock ? 'text-amber-600' : 'text-emerald-600'}>
-                        {item.availableStock.toLocaleString()}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-sm text-blue-600">
-                      {item.reservedQty > 0 ? item.reservedQty.toLocaleString() : '—'}
-                    </TableCell>
-                    <TableCell>{stockBadge(item)}</TableCell>
-                    {canManage && (
-                      <TableCell>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              onClick={() => setDeleteTarget(item)}
-                              className="text-destructive focus:text-destructive"
+                data.map((group, groupIdx) => {
+                  const isExpanded = expandedItems.has(group.itemName)
+                  const status = statusForGroup(group)
+                  const serialNo = (pagination.page - 1) * pagination.limit + groupIdx + 1
+
+                  return (
+                    <>
+                      {/* ── Parent Row ─────────────────────────────────────── */}
+                      <TableRow
+                        key={`parent-${group.itemName}`}
+                        className={isExpanded ? 'bg-muted/40' : 'hover:bg-muted/30 cursor-pointer'}
+                        onClick={() => toggleItem(group.itemName)}
+                      >
+                        <TableCell className="pl-3">
+                          <div className="flex items-center justify-center w-5 h-5 rounded transition-transform">
+                            {isExpanded ? (
+                              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2.5">
+                            <div className="flex flex-col">
+                              <span className="font-semibold text-sm">{group.itemName}</span>
+                              <Badge variant="outline" className="w-fit text-[10px] px-1.5 py-0 h-4 font-normal">
+                                {group.specCount} spec{group.specCount !== 1 ? 's' : ''}
+                              </Badge>
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-sm">
+                          {fmt(group.totalInventory)}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-sm text-orange-600">
+                          {group.totalIssued > 0 ? fmt(group.totalIssued) : '—'}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-sm font-semibold">
+                          <span className={
+                            group.totalAvailable <= 0
+                              ? 'text-red-600'
+                              : group.totalAvailable <= group.totalInventory * 0.2
+                                ? 'text-amber-600'
+                                : 'text-emerald-600'
+                          }>
+                            {fmt(group.totalAvailable)}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-sm text-blue-600">
+                          {group.totalReserved > 0 ? fmt(group.totalReserved) : '—'}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <Badge variant={status.variant} className={`${status.className} text-[11px] px-2 py-0 h-5`}>
+                            {status.label}
+                          </Badge>
+                        </TableCell>
+                        {canManage && (
+                          <TableCell>
+                            <span className="text-xs text-muted-foreground font-mono w-6 inline-block text-center">
+                              {serialNo}
+                            </span>
+                          </TableCell>
+                        )}
+                      </TableRow>
+
+                      {/* ── Expanded Spec Rows ─────────────────────────────── */}
+                      {isExpanded &&
+                        group.specs.map((spec) => {
+                          const specStatus = statusForSpec(spec)
+                          return (
+                            <TableRow
+                              key={`spec-${spec.id}`}
+                              className="bg-slate-50/70 hover:bg-slate-100/80 group/row"
                             >
-                              <Trash2 className="h-4 w-4 mr-2" />
-                              Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    )}
-                  </TableRow>
-                ))
+                              <TableCell className="pl-3" />
+                              <TableCell className="pl-8">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-muted-foreground text-xs">↳</span>
+                                  <div className="flex flex-col">
+                                    <span className="text-sm">{spec.specification}</span>
+                                    <span className="text-[11px] text-muted-foreground">
+                                      {spec.unit} · {spec.warehouse}
+                                    </span>
+                                  </div>
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-right font-mono text-sm">
+                                {fmt(spec.quantity)}
+                              </TableCell>
+                              <TableCell className="text-right font-mono text-sm text-orange-600">
+                                {spec.issuedQty > 0 ? fmt(spec.issuedQty) : '—'}
+                              </TableCell>
+                              <TableCell className="text-right font-mono text-sm font-semibold">
+                                <span className={
+                                  spec.availableStock <= 0
+                                    ? 'text-red-600'
+                                    : spec.availableStock <= spec.minimumStock
+                                      ? 'text-amber-600'
+                                      : 'text-emerald-600'
+                                }>
+                                  {fmt(spec.availableStock)}
+                                </span>
+                              </TableCell>
+                              <TableCell className="text-right font-mono text-sm text-blue-600">
+                                {spec.reservedQty > 0 ? fmt(spec.reservedQty) : '—'}
+                              </TableCell>
+                              <TableCell className="text-center">
+                                <Badge className={`${specStatus.className} text-[10px] px-1.5 py-0 h-4 font-medium`}>
+                                  {specStatus.label}
+                                </Badge>
+                              </TableCell>
+                              {canManage && (
+                                <TableCell>
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-7 w-7 opacity-0 group-hover/row:opacity-100 transition-opacity"
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        <MoreHorizontal className="h-3.5 w-3.5" />
+                                      </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end">
+                                      <DropdownMenuItem
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          setDeleteTarget(spec)
+                                        }}
+                                        className="text-destructive focus:text-destructive"
+                                      >
+                                        <Trash2 className="h-4 w-4 mr-2" />
+                                        Delete
+                                      </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                </TableCell>
+                              )}
+                            </TableRow>
+                          )
+                        })}
+                    </>
+                  )
+                })
               )}
             </TableBody>
           </Table>
@@ -484,46 +713,22 @@ export function OpeningStockPageV2() {
         {pageSize !== 'all' && totalPages > 1 && (
           <div className="flex items-center justify-between px-4 py-3 border-t bg-muted/30">
             <p className="text-sm text-muted-foreground">
-              Showing {(pagination.page - 1) * pagination.limit + 1}–{Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total} items
+              Showing {(pagination.page - 1) * pagination.limit + 1}–{Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total} item groups
             </p>
             <div className="flex items-center gap-1">
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-8 w-8"
-                disabled={pagination.page <= 1}
-                onClick={() => setPagination((p) => ({ ...p, page: 1 }))}
-              >
+              <Button variant="outline" size="icon" className="h-8 w-8" disabled={pagination.page <= 1} onClick={() => setPagination((p) => ({ ...p, page: 1 }))}>
                 <ChevronsLeft className="h-4 w-4" />
               </Button>
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-8 w-8"
-                disabled={pagination.page <= 1}
-                onClick={() => setPagination((p) => ({ ...p, page: p.page - 1 }))}
-              >
+              <Button variant="outline" size="icon" className="h-8 w-8" disabled={pagination.page <= 1} onClick={() => setPagination((p) => ({ ...p, page: p.page - 1 }))}>
                 <ChevronLeft className="h-4 w-4" />
               </Button>
               <span className="px-3 text-sm font-medium">
                 {pagination.page} / {totalPages}
               </span>
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-8 w-8"
-                disabled={pagination.page >= totalPages}
-                onClick={() => setPagination((p) => ({ ...p, page: p.page + 1 }))}
-              >
+              <Button variant="outline" size="icon" className="h-8 w-8" disabled={pagination.page >= totalPages} onClick={() => setPagination((p) => ({ ...p, page: p.page + 1 }))}>
                 <ChevronRight className="h-4 w-4" />
               </Button>
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-8 w-8"
-                disabled={pagination.page >= totalPages}
-                onClick={() => setPagination((p) => ({ ...p, page: totalPages }))}
-              >
+              <Button variant="outline" size="icon" className="h-8 w-8" disabled={pagination.page >= totalPages} onClick={() => setPagination((p) => ({ ...p, page: totalPages }))}>
                 <ChevronsRight className="h-4 w-4" />
               </Button>
             </div>
@@ -542,11 +747,10 @@ export function OpeningStockPageV2() {
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Item</AlertDialogTitle>
+            <AlertDialogTitle>Delete Specification</AlertDialogTitle>
             <AlertDialogDescription>
               Are you sure you want to delete{' '}
-              <strong>{deleteTarget?.itemName} — {deleteTarget?.specification}</strong>?{' '}
-              This action can be undone later.
+              <strong>{deleteTarget?.specification}</strong>? This action can be undone later.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

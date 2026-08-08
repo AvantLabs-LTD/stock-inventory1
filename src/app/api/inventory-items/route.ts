@@ -3,7 +3,36 @@ import { db } from '@/lib/db'
 import { getSession, unauthorizedResponse, forbiddenResponse } from '@/lib/auth-middleware'
 import { hasPermission } from '@/lib/permissions'
 
-// GET /api/inventory-items — List with pagination, search, filters
+// ─── Types ──────────────────────────────────────────────────────────────
+
+interface SpecData {
+  id: string
+  specification: string
+  unit: string
+  quantity: number
+  issuedQty: number
+  reservedQty: number
+  returnedQty: number
+  damagedQty: number
+  availableStock: number
+  minimumStock: number
+  unitCost: number
+  warehouse: string
+  status: string
+  remarks: string | null
+}
+
+interface ItemGroup {
+  itemName: string
+  specCount: number
+  totalInventory: number
+  totalIssued: number
+  totalAvailable: number
+  totalReserved: number
+  specs: SpecData[]
+}
+
+// GET /api/inventory-items — List grouped by item name with pagination
 export async function GET(request: NextRequest) {
   try {
     const session = await getSession(request)
@@ -15,13 +44,14 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url)
     const page = parseInt(searchParams.get('page') || '1', 10)
-    const limit = parseInt(searchParams.get('limit') || '10', 10)
+    const limit = parseInt(searchParams.get('limit') || '50', 10)
     const search = searchParams.get('search') || ''
-    const itemName = searchParams.get('itemName') || ''
+    const itemNameFilter = searchParams.get('itemName') || ''
     const warehouse = searchParams.get('warehouse') || ''
     const stockFilter = searchParams.get('stockFilter') || 'all'
+    const expandAll = searchParams.get('expandAll') === 'true'
 
-    // Build where clause
+    // Build where clause for specs
     const where: Record<string, unknown> = { status: 'ACTIVE' }
 
     if (search) {
@@ -31,33 +61,91 @@ export async function GET(request: NextRequest) {
       ]
     }
 
-    if (itemName) {
-      where.itemName = itemName
+    if (itemNameFilter) {
+      where.itemName = itemNameFilter
     }
 
     if (warehouse) {
       where.warehouse = warehouse
     }
 
-    // Stock filters
-    if (stockFilter === 'lowStock') {
-      where.minimumStock = { gt: 0 }
-      where.quantity = { gt: 0 }
-    } else if (stockFilter === 'outOfStock') {
-      where.quantity = 0
-    } else if (stockFilter === 'reserved') {
-      where.reservedQty = { gt: 0 }
+    // Fetch ALL matching specs (grouping happens after)
+    const allSpecs = await db.inventoryItem.findMany({
+      where,
+      orderBy: [{ itemName: 'asc' }, { specification: 'asc' }],
+    })
+
+    // Apply stock filters (need arithmetic)
+    const filteredSpecs = allSpecs.filter((item) => {
+      if (stockFilter === 'lowStock') {
+        return item.minimumStock > 0 && item.quantity > 0 && item.quantity <= item.minimumStock
+      }
+      if (stockFilter === 'outOfStock') {
+        return item.quantity === 0
+      }
+      if (stockFilter === 'reserved') {
+        return item.reservedQty > 0
+      }
+      return true
+    })
+
+    // Group by itemName
+    const groupMap = new Map<string, SpecData[]>()
+    for (const spec of filteredSpecs) {
+      const available = Math.max(0, spec.quantity - spec.issuedQty - spec.reservedQty)
+      const specData: SpecData = {
+        id: spec.id,
+        specification: spec.specification,
+        unit: spec.unit,
+        quantity: spec.quantity,
+        issuedQty: spec.issuedQty,
+        reservedQty: spec.reservedQty,
+        returnedQty: spec.returnedQty || 0,
+        damagedQty: spec.damagedQty || 0,
+        availableStock: available,
+        minimumStock: spec.minimumStock,
+        unitCost: spec.unitCost,
+        warehouse: spec.warehouse,
+        status: spec.status,
+        remarks: spec.remarks || null,
+      }
+      const existing = groupMap.get(spec.itemName)
+      if (existing) {
+        existing.push(specData)
+      } else {
+        groupMap.set(spec.itemName, [specData])
+      }
     }
 
-    // Fetch items and counts in parallel
-    const [items, total, distinctItemNames, distinctWarehouses] = await Promise.all([
-      db.inventoryItem.findMany({
-        where,
-        orderBy: [{ itemName: 'asc' }, { specification: 'asc' }],
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      db.inventoryItem.count({ where }),
+    // Sort groups alphabetically
+    const sortedGroups: ItemGroup[] = Array.from(groupMap.entries())
+      .map(([itemName, specs]) => {
+        const totalInventory = specs.reduce((sum, s) => sum + s.quantity, 0)
+        const totalIssued = specs.reduce((sum, s) => sum + s.issuedQty, 0)
+        const totalAvailable = specs.reduce((sum, s) => sum + s.availableStock, 0)
+        const totalReserved = specs.reduce((sum, s) => sum + s.reservedQty, 0)
+        return {
+          itemName,
+          specCount: specs.length,
+          totalInventory,
+          totalIssued,
+          totalAvailable,
+          totalReserved,
+          specs,
+        }
+      })
+      .sort((a, b) => a.itemName.localeCompare(b.itemName))
+
+    // Pagination at group level
+    const totalGroups = sortedGroups.length
+    const totalPages = limit >= totalGroups ? 1 : Math.ceil(totalGroups / limit)
+    const startIdx = (page - 1) * limit
+    const paginatedGroups = limit >= totalGroups
+      ? sortedGroups
+      : sortedGroups.slice(startIdx, startIdx + limit)
+
+    // Fetch distinct item names and warehouses for filters
+    const [distinctItemNames, distinctWarehouses] = await Promise.all([
       db.inventoryItem.findMany({
         where: { status: 'ACTIVE' },
         select: { itemName: true },
@@ -72,30 +160,26 @@ export async function GET(request: NextRequest) {
       }),
     ])
 
-    // Post-process: apply stock filters that need arithmetic comparison
-    const filteredItems = items.filter((item) => {
-      if (stockFilter === 'lowStock') {
-        return item.minimumStock > 0 && item.quantity > 0 && item.quantity <= item.minimumStock
-      }
-      return true
+    // Summary stats
+    const allSpecsForSummary = await db.inventoryItem.findMany({
+      where: { status: 'ACTIVE' },
     })
-
-    // Calculate available stock for each item (never negative)
-    const data = filteredItems.map((item) => ({
-      ...item,
-      availableStock: Math.max(0, item.quantity - item.issuedQty - item.reservedQty),
-    }))
+    const summary = {
+      totalItems: new Set(allSpecsForSummary.map((s) => s.itemName)).size,
+      totalSpecs: allSpecsForSummary.length,
+      totalInventory: allSpecsForSummary.reduce((sum, s) => sum + s.quantity, 0),
+      totalAvailable: allSpecsForSummary.reduce((sum, s) => sum + Math.max(0, s.quantity - s.issuedQty - s.reservedQty), 0),
+      lowStockCount: allSpecsForSummary.filter((s) => s.minimumStock > 0 && s.quantity > 0 && s.quantity <= s.minimumStock).length,
+      outOfStockCount: allSpecsForSummary.filter((s) => s.quantity === 0).length,
+      reservedCount: allSpecsForSummary.filter((s) => s.reservedQty > 0).length,
+    }
 
     return Response.json({
-      data,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
+      data: paginatedGroups,
+      pagination: { page, limit, total: totalGroups, totalPages },
       itemNames: distinctItemNames.map((i) => i.itemName),
       warehouses: distinctWarehouses.map((w) => w.warehouse),
+      summary,
     })
   } catch (error) {
     console.error('GET /api/inventory-items error:', error)
@@ -138,13 +222,9 @@ export async function POST(request: NextRequest) {
       const wh = item.warehouse || 'Main Warehouse'
       const spec = item.specification || ''
 
-      // Validate required fields
       if (!item.itemName) {
         errors.push({
-          index: i,
-          itemName: item.itemName || '',
-          specification: spec,
-          warehouse: wh,
+          index: i, itemName: item.itemName || '', specification: spec, warehouse: wh,
           error: 'Item name is required',
         })
         continue
@@ -165,23 +245,13 @@ export async function POST(request: NextRequest) {
         created.push(createdItem)
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err)
-        // Check for unique constraint violation
         if (message.includes('Unique constraint')) {
           errors.push({
-            index: i,
-            itemName: item.itemName,
-            specification: spec,
-            warehouse: wh,
-            error: `Duplicate item: "${item.itemName}" with spec "${spec}" in "${wh}" already exists`,
+            index: i, itemName: item.itemName, specification: spec, warehouse: wh,
+            error: `Duplicate: "${item.itemName}" with spec "${spec}" in "${wh}" already exists`,
           })
         } else {
-          errors.push({
-            index: i,
-            itemName: item.itemName,
-            specification: spec,
-            warehouse: wh,
-            error: message,
-          })
+          errors.push({ index: i, itemName: item.itemName, specification: spec, warehouse: wh, error: message })
         }
       }
     }

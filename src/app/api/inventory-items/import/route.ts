@@ -4,7 +4,71 @@ import { db } from '@/lib/db'
 import { getSession, unauthorizedResponse, forbiddenResponse } from '@/lib/auth-middleware'
 import { hasPermission } from '@/lib/permissions'
 
-// POST /api/inventory-items/import — Import inventory items from Excel file
+// ─── Column mapping: flexible header matching ───────────────────────────
+// Each DB field maps to an array of possible header substrings (case-insensitive)
+
+const COLUMN_ALIASES: Record<string, string[]> = {
+  itemName: ['item name', 'item_name', 'item', 'name', 'product name', 'product_name', 'product'],
+  specification: ['specification', 'spec', 'size', 'model', 'type', 'variant', 'description'],
+  unit: ['unit', 'uom', 'measurement'],
+  quantity: ['quantity', 'qty', 'stock', 'inventory', 'opening stock', 'opening_stock', 'current stock', 'current_stock', 'on hand', 'on_hand', 'available'],
+  issuedQty: ['issued', 'issued qty', 'issued_qty', 'issued quantity', 'issued_quantity', 'total issued'],
+  reservedQty: ['reserved', 'reserved qty', 'reserved_qty', 'reserved quantity', 'reserved_quantity'],
+  minimumStock: ['min stock', 'min_stock', 'minimum stock', 'minimum_stock', 'reorder level', 'reorder_level', 'reorder', 'alert level'],
+  unitCost: ['unit cost', 'unit_cost', 'cost', 'price', 'rate', 'unit price', 'unit_price'],
+  warehouse: ['warehouse', 'location', 'store', 'godown', 'wh'],
+}
+
+/**
+ * Build a map from DB field name → Excel column index.
+ * Never fails — unknown headers are simply ignored.
+ */
+function mapColumns(headerRow: ExcelJS.Row): Record<string, number> {
+  const mapping: Record<string, number> = {}
+
+  headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+    const header = String(cell.value || '').trim().toLowerCase()
+    if (!header) return
+
+    // Try exact alias match first (longer aliases first to avoid partial matches)
+    for (const [field, aliases] of Object.entries(COLUMN_ALIASES)) {
+      if (mapping[field] !== undefined) continue // already mapped
+      // Sort aliases by length descending so "item name" matches before "item"
+      const sortedAliases = [...aliases].sort((a, b) => b.length - a.length)
+      for (const alias of sortedAliases) {
+        if (header === alias || header === alias.replace(/\s+/g, '_')) {
+          mapping[field] = colNumber
+          break
+        }
+      }
+      if (mapping[field] !== undefined) continue
+    }
+  })
+
+  return mapping
+}
+
+/** Safely extract a string from a cell */
+function getCellString(row: ExcelJS.Row, colIndex: number | undefined): string {
+  if (colIndex === undefined) return ''
+  const cell = row.getCell(colIndex)
+  const val = cell.value
+  if (val === null || val === undefined) return ''
+  if (typeof val === 'object' && val !== null && 'result' in val) {
+    return String((val as { result: unknown }).result ?? '').trim()
+  }
+  return String(val).trim()
+}
+
+/** Safely parse a number */
+function parseNum(str: string): number {
+  if (!str) return 0
+  const cleaned = str.replace(/[,\s]/g, '')
+  const n = Number(cleaned)
+  return isNaN(n) ? 0 : n
+}
+
+// POST /api/inventory-items/import — Bulletproof Excel import
 export async function POST(request: NextRequest) {
   try {
     const session = await getSession(request)
@@ -22,101 +86,49 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate file type
-    const validTypes = [
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'application/vnd.ms-excel',
-    ]
-    if (!validTypes.includes(file.type) && !file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
-      return Response.json({ error: 'Invalid file type. Please upload an Excel file (.xlsx)' }, { status: 400 })
+    if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls') && !file.name.endsWith('.csv')) {
+      return Response.json({ error: 'Invalid file type. Please upload an Excel file (.xlsx, .xls)' }, { status: 400 })
     }
 
-    const buffer = Buffer.from(await file.arrayBuffer())
+    const arrayBuffer = await file.arrayBuffer()
     const workbook = new ExcelJS.Workbook()
-    await workbook.xlsx.load(buffer)
+    await workbook.xlsx.load(Buffer.from(arrayBuffer) as never)
 
     const sheet = workbook.worksheets[0]
     if (!sheet || sheet.rowCount < 2) {
       return Response.json({ error: 'Excel file is empty or has no data rows' }, { status: 400 })
     }
 
-    // Get header row and map column indices
+    // Auto-map columns — never fails
     const headerRow = sheet.getRow(1)
-    const headers: Record<string, number> = {}
-    headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-      const value = String(cell.value || '').trim().toLowerCase()
-      if (value.includes('item name')) headers.itemName = colNumber
-      else if (value.includes('specification') || value.includes('spec')) headers.specification = colNumber
-      else if (value.includes('unit')) headers.unit = colNumber
-      else if (value.includes('quantity') || value.includes('qty') || value.includes('inventory')) headers.quantity = colNumber
-      else if (value.includes('min') || value.includes('minimum stock') || value.includes('min stock')) headers.minimumStock = colNumber
-      else if (value.includes('unit cost') || value.includes('cost') || value.includes('price')) headers.unitCost = colNumber
-      else if (value.includes('warehouse')) headers.warehouse = colNumber
-    })
-
-    // Validate required columns
-    if (headers.itemName === undefined) {
-      return Response.json({ error: 'Missing required column: Item Name' }, { status: 400 })
-    }
+    const colMap = mapColumns(headerRow)
 
     let imported = 0
     let skipped = 0
-    const errors: { row: number; error: string }[] = []
+    const warnings: { row: number; message: string }[] = []
 
-    // Process each data row
     for (let rowNum = 2; rowNum <= sheet.rowCount; rowNum++) {
       const row = sheet.getRow(rowNum)
 
       // Skip completely empty rows
-      const allEmpty = Array.from(row.values).every((v) => v === null || v === undefined || String(v).trim() === '')
+      let allEmpty = true
+      row.eachCell({ includeEmpty: true }, () => { allEmpty = false })
       if (allEmpty) continue
 
-      const getCellValue = (colIndex: number | undefined): string => {
-        if (colIndex === undefined) return ''
-        const cell = row.getCell(colIndex)
-        const val = cell.value
-        if (val === null || val === undefined) return ''
-        // Handle formula results
-        if (typeof val === 'object' && val !== null && 'result' in val) {
-          return String((val as { result: unknown }).result ?? '')
-        }
-        return String(val).trim()
-      }
+      const itemName = getCellString(row, colMap.itemName)
+      const specification = getCellString(row, colMap.specification)
+      const unit = getCellString(row, colMap.unit) || 'pcs'
+      const quantity = parseNum(getCellString(row, colMap.quantity))
+      const issuedQty = parseNum(getCellString(row, colMap.issuedQty))
+      const reservedQty = parseNum(getCellString(row, colMap.reservedQty))
+      const minimumStock = parseNum(getCellString(row, colMap.minimumStock))
+      const unitCost = parseNum(getCellString(row, colMap.unitCost))
+      const warehouse = getCellString(row, colMap.warehouse) || 'Main Warehouse'
 
-      const itemName = getCellValue(headers.itemName)
-      const specification = getCellValue(headers.specification)
-      const unit = getCellValue(headers.unit) || 'pcs'
-      const quantityStr = getCellValue(headers.quantity)
-      const minimumStockStr = getCellValue(headers.minimumStock)
-      const unitCostStr = getCellValue(headers.unitCost)
-      const warehouse = getCellValue(headers.warehouse) || 'Main Warehouse'
-
-      // Validate item name
+      // Item name is the only truly required field
       if (!itemName) {
-        errors.push({ row: rowNum, error: 'Item name is empty' })
         skipped++
-        continue
-      }
-
-      // Parse numeric values
-      const quantity = parseInt(quantityStr, 10)
-      const minimumStock = parseInt(minimumStockStr, 10)
-      const unitCost = parseFloat(unitCostStr)
-
-      if (quantityStr && isNaN(quantity)) {
-        errors.push({ row: rowNum, error: `Invalid quantity value: "${quantityStr}"` })
-        skipped++
-        continue
-      }
-
-      if (minimumStockStr && isNaN(minimumStock)) {
-        errors.push({ row: rowNum, error: `Invalid minimum stock value: "${minimumStockStr}"` })
-        skipped++
-        continue
-      }
-
-      if (unitCostStr && isNaN(unitCost)) {
-        errors.push({ row: rowNum, error: `Invalid unit cost value: "${unitCostStr}"` })
-        skipped++
+        warnings.push({ row: rowNum, message: `Row ${rowNum}: Skipped — no Item Name found (column may be missing or cell is empty)` })
         continue
       }
 
@@ -124,11 +136,13 @@ export async function POST(request: NextRequest) {
         await db.inventoryItem.create({
           data: {
             itemName,
-            specification: specification || '',
+            specification: specification || '-',
             unit,
-            quantity: isNaN(quantity) ? 0 : quantity,
-            minimumStock: isNaN(minimumStock) ? 0 : minimumStock,
-            unitCost: isNaN(unitCost) ? 0 : unitCost,
+            quantity,
+            issuedQty,
+            reservedQty,
+            minimumStock,
+            unitCost,
             warehouse,
           },
         })
@@ -137,17 +151,20 @@ export async function POST(request: NextRequest) {
         const message = err instanceof Error ? err.message : String(err)
         if (message.includes('Unique constraint')) {
           skipped++
-          errors.push({
-            row: rowNum,
-            error: `Duplicate: "${itemName}" with spec "${specification}" in "${warehouse}" already exists`,
-          })
+          warnings.push({ row: rowNum, message: `Duplicate: "${itemName}" / "${specification || '-'}" in "${warehouse}" — skipped` })
         } else {
-          errors.push({ row: rowNum, error: message })
+          skipped++
+          warnings.push({ row: rowNum, message: `Error: ${message}` })
         }
       }
     }
 
-    return Response.json({ imported, skipped, errors })
+    return Response.json({
+      imported,
+      skipped,
+      warnings,
+      columnMapping: colMap,
+    })
   } catch (error) {
     console.error('POST /api/inventory-items/import error:', error)
     return Response.json({ error: 'Failed to import inventory items' }, { status: 500 })
