@@ -1,0 +1,539 @@
+   365→    try {
+   366→      const form = new FormData()
+   367→      form.append('file', file)
+   368→      const res = await fetch('/api/inventory-items/import', { method: 'POST', body: form })
+   369→      if (res.ok) {
+   370→        const json = await res.json()
+   371→        const parts: string[] = [`Imported: ${json.imported}`, `Skipped: ${json.skipped}`]
+   372→        if (json.productsCreated) parts.push(`Products created: ${json.productsCreated}`)
+   373→        if (json.categoriesCreated) parts.push(`Categories created: ${json.categoriesCreated}`)
+   374→        toast.success(parts.join(', '))
+   375→        if (json.warnings?.length > 0) {
+   376→          toast.info(`${json.warnings.length} row(s) had issues`, {
+   377→            description: json.warnings.slice(0, 3).map((w: { message: string }) => w.message).join('\n'),
+   378→          })
+   379→        }
+   380→        fetchData()
+   381→      } else {
+   382→        const err = await res.json().catch(() => ({}))
+   383→        toast.error(err.error || 'Import failed')
+   384→      }
+   385→    } catch {
+   386→      toast.error('Import error')
+   387→    } finally {
+   388→      setImporting(false)
+   389→      e.target.value = ''
+   390→    }
+   391→  }
+   392→
+   393→  // ─── Computed ──────────────────────────────────────────────────────────
+   394→
+   395→  const totalPages = pagination.totalPages
+   396→  const hasFilters = search || itemNameFilter !== 'all' || warehouseFilter !== 'all' || stockFilter !== 'all'
+   397→
+   398→  // ─── Render ────────────────────────────────────────────────────────────
+   399→
+   400→  if (!canView) {
+   401→    return (
+   402→      <div className="flex items-center justify-center h-64">
+   403→        <p className="text-muted-foreground">You do not have permission to view this page.</p>
+   404→      </div>
+   405→    )
+   406→  }
+   407→
+   408→  return (
+   409→    <div className="space-y-4">
+   410→      <PageHeader
+   411→        title="Opening Stock"
+   412→        description="Live inventory register — grouped by item with expandable specifications"
+   413→      />
+   414→
+   415→      {/* ─── Summary Cards ──────────────────────────────────────────────── */}
+   416→      <SummaryCards summary={summary} loading={loading} />
+   417→
+   418→      {/* ─── Toolbar ───────────────────────────────────────────────────── */}
+   419→      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+   420→        <div className="relative flex-1 max-w-sm">
+   421→          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+   422→          <Input
+   423→            placeholder="Search item name or specification..."
+   424→            value={search}
+   425→            onChange={(e) => setSearch(e.target.value)}
+   426→            className="pl-9 h-9"
+   427→          />
+   428→          {search && (
+   429→            <button
+   430→              onClick={() => setSearch('')}
+   431→              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+   432→            >
+   433→              <X className="h-3.5 w-3.5" />
+   434→            </button>
+   435→          )}
+   436→        </div>
+   437→        <div className="flex items-center gap-2 flex-wrap">
+   438→          <Button variant="ghost" size="sm" onClick={expandAll} className="h-8 text-xs">
+   439→            Expand All
+   440→          </Button>
+   441→          <Button variant="ghost" size="sm" onClick={collapseAll} className="h-8 text-xs">
+   442→            Collapse All
+   443→          </Button>
+   444→          {canManage && (
+   445→            <Button size="sm" onClick={() => setAddItemOpen(true)}>
+   446→              <Plus className="h-4 w-4 mr-1.5" />
+   447→              Add Item
+   448→            </Button>
+   449→          )}
+   450→          <input
+   451→            ref={importRef}
+   452→            type="file"
+   453→            accept=".xlsx,.xls,.csv"
+   454→            className="hidden"
+   455→            onChange={handleImport}
+   456→          />
+   457→          <Button variant="outline" size="sm" onClick={() => importRef.current?.click()} disabled={importing}>
+   458→            {importing ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Upload className="h-4 w-4 mr-1.5" />}
+   459→            Import
+   460→          </Button>
+   461→          <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting}>
+   462→            {exporting ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Download className="h-4 w-4 mr-1.5" />}
+   463→            Export
+   464→          </Button>
+   465→        </div>
+   466→      </div>
+   467→
+   468→      {/* ─── Filters ──────────────────────────────────────────────────── */}
+   469→      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+   470→        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+   471→          <Filter className="h-4 w-4" />
+   472→          <span className="font-medium">Filters:</span>
+   473→        </div>
+   474→        <div className="flex flex-wrap items-center gap-2">
+   475→          <Select value={itemNameFilter} onValueChange={setItemNameFilter}>
+   476→            <SelectTrigger className="w-[180px] h-9">
+   477→              <SelectValue placeholder="Item Name" />
+   478→            </SelectTrigger>
+   479→            <SelectContent>
+   480→              <SelectItem value="all">All Items</SelectItem>
+   481→              {itemNames.map((name) => (
+   482→                <SelectItem key={name} value={name}>{name}</SelectItem>
+   483→              ))}
+   484→            </SelectContent>
+   485→          </Select>
+   486→
+   487→          <Select value={warehouseFilter} onValueChange={setWarehouseFilter}>
+   488→            <SelectTrigger className="w-[160px] h-9">
+   489→              <SelectValue placeholder="Warehouse" />
+   490→            </SelectTrigger>
+   491→            <SelectContent>
+   492→              <SelectItem value="all">All Warehouses</SelectItem>
+   493→              {warehouses.map((w) => (
+   494→                <SelectItem key={w} value={w}>{w}</SelectItem>
+   495→              ))}
+   496→            </SelectContent>
+   497→          </Select>
+   498→
+   499→          <Select value={stockFilter} onValueChange={setStockFilter}>
+   500→            <SelectTrigger className="w-[140px] h-9">
+   501→              <SelectValue placeholder="Stock Status" />
+   502→            </SelectTrigger>
+   503→            <SelectContent>
+   504→              <SelectItem value="all">All Status</SelectItem>
+   505→              <SelectItem value="lowStock">Low Stock</SelectItem>
+   506→              <SelectItem value="outOfStock">Out of Stock</SelectItem>
+   507→              <SelectItem value="reserved">Reserved</SelectItem>
+   508→            </SelectContent>
+   509→          </Select>
+   510→
+   511→          <Select value={pageSize} onValueChange={setPageSize}>
+   512→            <SelectTrigger className="w-[110px] h-9">
+   513→              <SelectValue />
+   514→            </SelectTrigger>
+   515→            <SelectContent>
+   516→              <SelectItem value="25">25 / page</SelectItem>
+   517→              <SelectItem value="50">50 / page</SelectItem>
+   518→              <SelectItem value="100">100 / page</SelectItem>
+   519→              <SelectItem value="all">All</SelectItem>
+   520→            </SelectContent>
+   521→          </Select>
+   522→
+   523→          {hasFilters && (
+   524→            <Button
+   525→              variant="ghost"
+   526→              size="sm"
+   527→              onClick={() => {
+   528→                setItemNameFilter('all')
+   529→                setWarehouseFilter('all')
+   530→                setStockFilter('all')
+   531→                setSearch('')
+   532→              }}
+   533→              className="h-9 text-xs"
+   534→            >
+   535→              Clear All
+   536→            </Button>
+   537→          )}
+   538→        </div>
+   539→      </div>
+   540→
+   541→      {/* ─── Main Content: Table + History Panel ───────────────────────── */}
+   542→      <div className="flex gap-0 border rounded-lg overflow-hidden">
+   543→        {/* Table Area */}
+   544→        <div className={`flex-1 min-w-0 ${historyPanel ? 'hidden sm:block' : ''}`}>
+   545→          <div className="max-h-[calc(100vh-380px)] min-h-[300px] overflow-auto">
+   546→            <Table>
+   547→              <TableHeader className="sticky top-0 z-10 bg-muted">
+   548→                <TableRow>
+   549→                  <TableHead className="w-[40px]" />
+   550→                  <TableHead className="w-[50px] text-center">Sr.</TableHead>
+   551→                  <TableHead className="min-w-[180px]">Item Name</TableHead>
+   552→                  <TableHead className="text-right min-w-[90px]">Inventory Stock</TableHead>
+   553→                  <TableHead className="text-right min-w-[80px]">Issued</TableHead>
+   554→                  <TableHead className="text-right min-w-[110px]">Available Stock</TableHead>
+   555→                  <TableHead className="text-right min-w-[100px]">Reserved</TableHead>
+   556→                  <TableHead className="min-w-[130px]">Last Updated</TableHead>
+   557→                  <TableHead className="w-[100px] text-center">Status</TableHead>
+   558→                  {canManage && <TableHead className="w-[80px] text-center">Actions</TableHead>}
+   559→                </TableRow>
+   560→              </TableHeader>
+   561→              <TableBody>
+   562→                {loading ? (
+   563→                  Array.from({ length: 6 }).map((_, i) => (
+   564→                    <TableRow key={i}>
+   565→                      {Array.from({ length: canManage ? 10 : 9 }).map((_, j) => (
+   566→                        <TableCell key={j}>
+   567→                          <Skeleton className="h-5 w-full" />
+   568→                        </TableCell>
+   569→                      ))}
+   570→                    </TableRow>
+   571→                  ))
+   572→                ) : data.length === 0 ? (
+   573→                  <TableRow>
+   574→                    <TableCell colSpan={canManage ? 10 : 9} className="h-48 text-center">
+   575→                      <div className="flex flex-col items-center gap-2 text-muted-foreground">
+   576→                        <Package className="h-10 w-10" />
+   577→                        <p>No inventory items found</p>
+   578→                        {canManage && (
+   579→                          <Button variant="outline" size="sm" onClick={() => setAddItemOpen(true)}>
+   580→                            <Plus className="h-4 w-4 mr-1" /> Add Item
+   581→                          </Button>
+   582→                        )}
+   583→                      </div>
+   584→                    </TableCell>
+   585→                  </TableRow>
+   586→                ) : (
+   587→                  data.map((group, groupIdx) => {
+   588→                    const isExpanded = expandedItems.has(group.itemName)
+   589→                    const status = statusForGroup(group)
+   590→                    const serialNo = (pagination.page - 1) * pagination.limit + groupIdx + 1
+   591→
+   592→                    return (
+   593→                      <>
+   594→                        {/* ── Parent Row ─────────────────────────────────── */}
+   595→                        <TableRow
+   596→                          key={`parent-${group.itemName}`}
+   597→                          className={isExpanded ? 'bg-muted/40' : 'hover:bg-muted/30 cursor-pointer'}
+   598→                          onClick={() => toggleItem(group.itemName)}
+   599→                        >
+   600→                          <TableCell className="pl-3">
+   601→                            <div className="flex items-center justify-center w-5 h-5 rounded transition-transform">
+   602→                              {isExpanded ? (
+   603→                                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+   604→                              ) : (
+   605→                                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+   606→                              )}
+   607→                            </div>
+   608→                          </TableCell>
+   609→                          <TableCell className="text-center text-xs text-muted-foreground font-mono">
+   610→                            {serialNo}
+   611→                          </TableCell>
+   612→                          <TableCell>
+   613→                            <div className="flex items-center gap-2.5">
+   614→                              <div className="flex flex-col">
+   615→                                <span className="font-semibold text-sm">{group.itemName}</span>
+   616→                                <Badge variant="outline" className="w-fit text-[10px] px-1.5 py-0 h-4 font-normal">
+   617→                                  {group.specCount} spec{group.specCount !== 1 ? 's' : ''}
+   618→                                </Badge>
+   619→                              </div>
+   620→                            </div>
+   621→                          </TableCell>
+   622→                          <TableCell className="text-right font-mono text-sm">
+   623→                            {fmt(group.totalInventory)}
+   624→                          </TableCell>
+   625→                          <TableCell className="text-right font-mono text-sm text-orange-600">
+   626→                            {group.totalIssued > 0 ? fmt(group.totalIssued) : '—'}
+   627→                          </TableCell>
+   628→                          <TableCell className="text-right font-mono text-sm font-semibold">
+   629→                            <span className={
+   630→                              group.totalAvailable <= 0
+   631→                                ? 'text-red-600'
+   632→                                : group.totalAvailable <= group.totalInventory * 0.2
+   633→                                  ? 'text-amber-600'
+   634→                                  : 'text-emerald-600'
+   635→                            }>
+   636→                              {fmt(group.totalAvailable)}
+   637→                            </span>
+   638→                          </TableCell>
+   639→                          <TableCell className="text-right font-mono text-sm text-blue-600">
+   640→                            {group.totalReserved > 0 ? fmt(group.totalReserved) : '—'}
+   641→                          </TableCell>
+   642→                          <TableCell className="text-xs text-muted-foreground">
+   643→                            —
+   644→                          </TableCell>
+   645→                          <TableCell className="text-center">
+   646→                            <Badge variant={status.variant} className={`${status.className} text-[11px] px-2 py-0 h-5`}>
+   647→                              {status.label}
+   648→                            </Badge>
+   649→                          </TableCell>
+   650→                          {canManage && <TableCell />}
+   651→                        </TableRow>
+   652→
+   653→                        {/* ── Expanded Spec Rows ────────────────────────── */}
+   654→                        {isExpanded &&
+   655→                          group.specs.map((spec) => {
+   656→                            const specStatus = statusForSpec(spec)
+   657→                            return (
+   658→                              <TableRow
+   659→                                key={`spec-${spec.id}`}
+   660→                                className={`bg-slate-50/70 hover:bg-slate-100/80 group/row ${historyPanel?.itemId === spec.id ? 'ring-2 ring-primary/20' : ''}`}
+   661→                              >
+   662→                                <TableCell className="pl-3" />
+   663→                                <TableCell className="text-center text-xs text-muted-foreground font-mono" />
+   664→                                <TableCell className="pl-8">
+   665→                                  <div className="flex items-center gap-2">
+   666→                                    <span className="text-muted-foreground text-xs">↳</span>
+   667→                                    <div className="flex flex-col">
+   668→                                      <span className="text-sm">{spec.specification}</span>
+   669→                                      <span className="text-[11px] text-muted-foreground">
+   670→                                        {spec.unit} · {spec.warehouse}
+   671→                                      </span>
+   672→                                    </div>
+   673→                                  </div>
+   674→                                </TableCell>
+   675→                                <TableCell className="text-right font-mono text-sm">
+   676→                                  {fmt(spec.quantity)}
+   677→                                </TableCell>
+   678→                                <TableCell className="text-right font-mono text-sm text-orange-600">
+   679→                                  {spec.issuedQty > 0 ? fmt(spec.issuedQty) : '—'}
+   680→                                </TableCell>
+   681→                                <TableCell className="text-right font-mono text-sm font-semibold">
+   682→                                  <span className={
+   683→                                    spec.availableStock <= 0
+   684→                                      ? 'text-red-600'
+   685→                                      : spec.availableStock <= spec.minimumStock
+   686→                                        ? 'text-amber-600'
+   687→                                        : 'text-emerald-600'
+   688→                                  }>
+   689→                                    {fmt(spec.availableStock)}
+   690→                                  </span>
+   691→                                </TableCell>
+   692→                                <TableCell className="text-right font-mono text-sm text-blue-600">
+   693→                                  {spec.reservedQty > 0 ? fmt(spec.reservedQty) : '—'}
+   694→                                </TableCell>
+   695→                                <TableCell className="text-xs text-muted-foreground">
+   696→                                  {formatDateTime(spec.lastTransactionAt)}
+   697→                                </TableCell>
+   698→                                <TableCell className="text-center">
+   699→                                  <Badge className={`${specStatus.className} text-[10px] px-1.5 py-0 h-4 font-medium`}>
+   700→                                    {specStatus.label}
+   701→                                  </Badge>
+   702→                                </TableCell>
+   703→                                {canManage && (
+   704→                                  <TableCell>
+   705→                                    <div className="flex items-center justify-center gap-0.5 opacity-0 group-hover/row:opacity-100 transition-opacity">
+   706→                                      <Button
+   707→                                        variant="ghost"
+   708→                                        size="icon"
+   709→                                        className="h-7 w-7 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+   710→                                        onClick={(e) => {
+   711→                                          e.stopPropagation()
+   712→                                          setEditTarget({ ...spec, itemName: group.itemName })
+   713→                                        }}
+   714→                                        title="Edit Stock"
+   715→                                      >
+   716→                                        <Pencil className="h-3.5 w-3.5" />
+   717→                                      </Button>
+   718→                                      <Button
+   719→                                        variant="ghost"
+   720→                                        size="icon"
+   721→                                        className="h-7 w-7 text-violet-600 hover:text-violet-700 hover:bg-violet-50"
+   722→                                        onClick={(e) => {
+   723→                                          e.stopPropagation()
+   724→                                          setHistoryPanel({
+   725→                                            itemId: spec.id,
+   726→                                            itemName: group.itemName,
+   727→                                            specification: spec.specification,
+   728→                                          })
+   729→                                        }}
+   730→                                        title="View History"
+   731→                                      >
+   732→                                        <History className="h-3.5 w-3.5" />
+   733→                                      </Button>
+   734→                                      <DropdownMenu>
+   735→                                        <DropdownMenuTrigger asChild>
+   736→                                          <Button
+   737→                                            variant="ghost"
+   738→                                            size="icon"
+   739→                                            className="h-7 w-7"
+   740→                                            onClick={(e) => e.stopPropagation()}
+   741→                                          >
+   742→                                            <MoreHorizontal className="h-3.5 w-3.5" />
+   743→                                          </Button>
+   744→                                        </DropdownMenuTrigger>
+   745→                                        <DropdownMenuContent align="end">
+   746→                                          <DropdownMenuItem
+   747→                                            onClick={(e) => {
+   748→                                              e.stopPropagation()
+   749→                                              setEditTarget({ ...spec, itemName: group.itemName })
+   750→                                            }}
+   751→                                          >
+   752→                                            <Pencil className="h-4 w-4 mr-2" />
+   753→                                            Edit Stock
+   754→                                          </DropdownMenuItem>
+   755→                                          <DropdownMenuItem
+   756→                                            onClick={(e) => {
+   757→                                              e.stopPropagation()
+   758→                                              setHistoryPanel({
+   759→                                                itemId: spec.id,
+   760→                                                itemName: group.itemName,
+   761→                                                specification: spec.specification,
+   762→                                              })
+   763→                                            }}
+   764→                                          >
+   765→                                            <History className="h-4 w-4 mr-2" />
+   766→                                            Movement History
+   767→                                          </DropdownMenuItem>
+   768→                                          <DropdownMenuItem
+   769→                                            onClick={(e) => {
+   770→                                              e.stopPropagation()
+   771→                                              setDeleteTarget(spec)
+   772→                                            }}
+   773→                                            className="text-destructive focus:text-destructive"
+   774→                                          >
+   775→                                            <Trash2 className="h-4 w-4 mr-2" />
+   776→                                            Delete
+   777→                                          </DropdownMenuItem>
+   778→                                        </DropdownMenuContent>
+   779→                                      </DropdownMenu>
+   780→                                    </div>
+   781→                                  </TableCell>
+   782→                                )}
+   783→                              </TableRow>
+   784→                            )
+   785→                          })}
+   786→                      </>
+   787→                    )
+   788→                  })
+   789→                )}
+   790→              </TableBody>
+   791→            </Table>
+   792→          </div>
+   793→
+   794→          {/* ─── Pagination ─────────────────────────────────────────────── */}
+   795→          {pageSize !== 'all' && totalPages > 1 && (
+   796→            <div className="flex items-center justify-between px-4 py-3 border-t bg-muted/30">
+   797→              <p className="text-sm text-muted-foreground">
+   798→                Showing {(pagination.page - 1) * pagination.limit + 1}–{Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total} item groups
+   799→              </p>
+   800→              <div className="flex items-center gap-1">
+   801→                <Button variant="outline" size="icon" className="h-8 w-8" disabled={pagination.page <= 1} onClick={() => setPagination((p) => ({ ...p, page: 1 }))}>
+   802→                  <ChevronsLeft className="h-4 w-4" />
+   803→                </Button>
+   804→                <Button variant="outline" size="icon" className="h-8 w-8" disabled={pagination.page <= 1} onClick={() => setPagination((p) => ({ ...p, page: p.page - 1 }))}>
+   805→                  <ChevronLeft className="h-4 w-4" />
+   806→                </Button>
+   807→                <span className="px-3 text-sm font-medium">
+   808→                  {pagination.page} / {totalPages}
+   809→                </span>
+   810→                <Button variant="outline" size="icon" className="h-8 w-8" disabled={pagination.page >= totalPages} onClick={() => setPagination((p) => ({ ...p, page: p.page + 1 }))}>
+   811→                  <ChevronRight className="h-4 w-4" />
+   812→                </Button>
+   813→                <Button variant="outline" size="icon" className="h-8 w-8" disabled={pagination.page >= totalPages} onClick={() => setPagination((p) => ({ ...p, page: totalPages }))}>
+   814→                  <ChevronsRight className="h-4 w-4" />
+   815→                </Button>
+   816→              </div>
+   817→            </div>
+   818→          )}
+   819→        </div>
+   820→
+   821→        {/* ─── History Side Panel ─────────────────────────────────────── */}
+   822→        {historyPanel && (
+   823→          <StockMovementPanel
+   824→            itemId={historyPanel.itemId}
+   825→            itemName={historyPanel.itemName}
+   826→            specification={historyPanel.specification}
+   827→            onClose={() => setHistoryPanel(null)}
+   828→          />
+   829→        )}
+   830→      </div>
+   831→
+   832→      {/* ─── Mobile History Overlay ────────────────────────────────────── */}
+   833→      {historyPanel && (
+   834→        <div className="sm:hidden fixed inset-0 z-50 flex">
+   835→          <div className="absolute inset-0 bg-black/40" onClick={() => setHistoryPanel(null)} />
+   836→          <div className="relative ml-auto w-full max-w-[400px]">
+   837→            <StockMovementPanel
+   838→              itemId={historyPanel.itemId}
+   839→              itemName={historyPanel.itemName}
+   840→              specification={historyPanel.specification}
+   841→              onClose={() => setHistoryPanel(null)}
+   842→            />
+   843→          </div>
+   844→        </div>
+   845→      )}
+   846→
+   847→      {/* ─── Add Item Modal ──────────────────────────────────────────── */}
+   848→      <AddItemModal
+   849→        open={addItemOpen}
+   850→        onOpenChange={setAddItemOpen}
+   851→        onSuccess={() => fetchData()}
+   852→      />
+   853→
+   854→      {/* ─── Edit Stock Modal ─────────────────────────────────────────── */}
+   855→      <EditStockModal
+   856→        open={!!editTarget}
+   857→        onOpenChange={(open) => !open && setEditTarget(null)}
+   858→        spec={editTarget}
+   859→        onSuccess={() => {
+   860→          fetchData()
+   861→          // Refresh history panel if open
+   862→          if (historyPanel && historyPanel.itemId === editTarget?.id) {
+   863→            setHistoryPanel(null) // will re-open on next render
+   864→            setTimeout(() => {
+   865→              if (editTarget) {
+   866→                setHistoryPanel({
+   867→                  itemId: editTarget.id,
+   868→                  itemName: editTarget.itemName,
+   869→                  specification: editTarget.specification,
+   870→                })
+   871→              }
+   872→            }, 100)
+   873→          }
+   874→        }}
+   875→      />
+   876→
+   877→      {/* ─── Delete Confirmation ──────────────────────────────────────── */}
+   878→      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+   879→        <AlertDialogContent>
+   880→          <AlertDialogHeader>
+   881→            <AlertDialogTitle>Delete Specification</AlertDialogTitle>
+   882→            <AlertDialogDescription>
+   883→              Are you sure you want to delete{' '}
+   884→              <strong>{deleteTarget?.specification}</strong>? This action can be undone later.
+   885→            </AlertDialogDescription>
+   886→          </AlertDialogHeader>
+   887→          <AlertDialogFooter>
+   888→            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+   889→            <AlertDialogAction
+   890→              onClick={handleDelete}
+   891→              disabled={deleting}
+   892→              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+   893→            >
+   894→              {deleting && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
+   895→              Delete
+   896→            </AlertDialogAction>
+   897→          </AlertDialogFooter>
+   898→        </AlertDialogContent>
+   899→      </AlertDialog>
+   900→    </div>
+   901→  )
+   902→}
+   903→
