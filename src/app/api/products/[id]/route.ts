@@ -114,7 +114,7 @@ export async function PUT(
   }
 }
 
-// DELETE /api/products/[id] — Soft delete and sync InventoryItem
+// DELETE /api/products/[id] — Delete product + variants + inventory items
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -129,27 +129,34 @@ export async function DELETE(
 
     const { id } = await params
 
-    const existing = await db.product.findUnique({ where: { id } })
+    const existing = await db.product.findUnique({
+      where: { id },
+      include: { variants: { select: { id: true } } },
+    })
     if (!existing) {
       return Response.json({ error: 'Product not found' }, { status: 404 })
     }
 
-    const product = await db.product.update({
-      where: { id },
-      data: { status: 'DISCONTINUED' },
-    })
+    // Delete variant products
+    if (existing.variants.length > 0) {
+      await db.product.deleteMany({
+        where: { parentProductId: existing.id },
+      })
+    }
 
-    // Soft-delete all InventoryItems matching this product name
+    // Delete the parent product
+    await db.product.delete({ where: { id } })
+
+    // Delete all InventoryItems matching this product name
     try {
-      await db.inventoryItem.updateMany({
-        where: { itemName: existing.name, status: 'ACTIVE' },
-        data: { status: 'DELETED' },
+      await db.inventoryItem.deleteMany({
+        where: { itemName: existing.name },
       })
     } catch {
       // Non-critical
     }
 
-    return Response.json(product)
+    return Response.json({ success: true })
   } catch (error) {
     console.error('DELETE /api/products/[id] error:', error)
     return Response.json({ error: 'Failed to delete product' }, { status: 500 })

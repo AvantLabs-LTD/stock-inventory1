@@ -3,7 +3,36 @@ import { db } from '@/lib/db'
 import { getSession, unauthorizedResponse, forbiddenResponse } from '@/lib/auth-middleware'
 import { hasPermission } from '@/lib/permissions'
 
-// GET /api/products — List with search, filter, sort, pagination
+// ─── Types ──────────────────────────────────────────────────────────────
+
+interface VariantData {
+  id: string
+  name: string
+  variantName: string | null
+  sku: string
+  unit: string
+  minimumStock: number
+  unitCost: number
+  status: string
+  size: string | null
+}
+
+interface ParentProduct {
+  id: string
+  code: string
+  name: string
+  sku: string
+  unit: string
+  minimumStock: number
+  unitCost: number
+  status: string
+  categoryId: string | null
+  category: { id: string; name: string; code: string } | null
+  variantCount: number
+  variants: VariantData[]
+}
+
+// GET /api/products — Parent products with variants, grouped accordion style
 export async function GET(request: NextRequest) {
   try {
     const session = await getSession(request)
@@ -15,50 +44,88 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url)
     const page = parseInt(searchParams.get('page') || '1', 10)
-    const limit = parseInt(searchParams.get('limit') || '10', 10)
+    const limit = parseInt(searchParams.get('limit') || '50', 10)
     const search = searchParams.get('search') || ''
     const categoryId = searchParams.get('categoryId') || ''
     const status = searchParams.get('status') || ''
-    const sort = searchParams.get('sort') || 'createdAt'
-    const order = searchParams.get('order') || 'desc'
 
-    const where: Record<string, unknown> = {}
+    // Build where for parent products only
+    const where: Record<string, unknown> = { parentProductId: null, status: 'ACTIVE' }
 
     if (search) {
       where.OR = [
         { name: { contains: search } },
         { code: { contains: search } },
         { sku: { contains: search } },
-        { size: { contains: search } },
+        // Also search in variant names
+        { variants: { some: { name: { contains: search } } } },
+        { variants: { some: { variantName: { contains: search } } } },
       ]
     }
 
     if (categoryId) where.categoryId = categoryId
     if (status) where.status = status
 
-    const orderBy: Record<string, string> = { [sort]: order }
-
-    const [products, total] = await Promise.all([
-      db.product.findMany({
-        where,
-        orderBy,
-        skip: (page - 1) * limit,
-        take: limit,
-        include: {
-          category: { select: { id: true, name: true, code: true } },
+    // Fetch parent products with variants
+    const parents = await db.product.findMany({
+      where,
+      orderBy: { name: 'asc' },
+      include: {
+        category: { select: { id: true, name: true, code: true } },
+        variants: {
+          where: { status: 'ACTIVE' },
+          orderBy: { name: 'asc' },
+          select: {
+            id: true,
+            name: true,
+            variantName: true,
+            sku: true,
+            unit: true,
+            minimumStock: true,
+            unitCost: true,
+            status: true,
+            size: true,
+          },
         },
-      }),
-      db.product.count({ where }),
-    ])
+      },
+    })
+
+    // Build response data
+    const data: ParentProduct[] = parents.map((p) => ({
+      id: p.id,
+      code: p.code,
+      name: p.name,
+      sku: p.sku,
+      unit: p.unit,
+      minimumStock: p.minimumStock,
+      unitCost: p.unitCost,
+      status: p.status,
+      categoryId: p.categoryId,
+      category: p.category,
+      variantCount: p.variants.length,
+      variants: p.variants,
+    }))
+
+    // Pagination at parent level
+    const total = data.length
+    const totalPages = limit >= total ? 1 : Math.ceil(total / limit)
+    const startIdx = (page - 1) * limit
+    const paginatedData = limit >= total ? data : data.slice(startIdx, startIdx + limit)
+
+    // Summary stats
+    const allParents = await db.product.count({ where: { parentProductId: null, status: 'ACTIVE' } })
+    const allVariants = await db.product.count({ where: { parentProductId: { not: null }, status: 'ACTIVE' } })
+    const allCategories = await db.category.findMany({
+      where: { status: 'ACTIVE' },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true, code: true },
+    })
 
     return Response.json({
-      data: products,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
+      data: paginatedData,
+      pagination: { page, limit, total, totalPages },
+      summary: { parentProducts: allParents, variants: allVariants, totalProducts: allParents + allVariants },
+      categories: allCategories,
     })
   } catch (error) {
     console.error('GET /api/products error:', error)

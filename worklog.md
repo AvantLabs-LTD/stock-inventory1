@@ -138,3 +138,26 @@ Stage Summary:
   7. ✅ Audit Trail (StockMovement model + movements API + side panel)
 - Next.js dev server stable with auto-restart loop
 - Login page confirmed rendering via browser screenshot
+
+---
+Task ID: 2
+Agent: Main
+Task: Sync Products with Opening Stock — replace demo products with inventory items
+
+Work Log:
+- Examined current data: 100 inventory items across 18 groups, 6 demo products
+- Deleted 6 demo products (HP Laptop, Wireless Mouse, A4 Paper, Office Chair, USB Keyboard, Test Resistor)
+- Deleted orphan demo data (InventoryTransactions, InventoryRequests)
+- Created 18 parent Products from item groups (Connector, Braided Sleeve, Wire, etc.)
+- Created 100 variant Products from each specification
+- Organized into 8 categories: Connectors, Sleeves & Tubes, Wires, Soldering, Tapes & Cables, Bags & Packaging, Thermal, Accessories
+- Updated GET /api/products to return parent-child grouped data (not flat list)
+- Rebuilt ProductList component with accordion UI matching Opening Stock style
+- Updated DELETE /api/products/[id] to delete parent + variants + inventory items
+- Verified both APIs return 18 parent groups, 100 specs — fully in sync
+
+Stage Summary:
+- Products = master data source with 18 parent items, 100 specifications
+- Opening Stock = live inventory register with identical 18 groups, 100 specs
+- Single source of truth: both modules show the same items
+- Products page now has accordion parent-child UI, summary cards, search, category filter, pagination

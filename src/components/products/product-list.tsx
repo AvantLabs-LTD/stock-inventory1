@@ -4,14 +4,21 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   Plus,
   Search,
+  X,
+  ChevronRight,
+  ChevronDown,
+  ChevronsLeft,
+  ChevronsRight,
+  ChevronLeft,
+  PackageOpen,
+  Layers,
+  Tag,
+  Loader2,
   Eye,
   Pencil,
   Trash2,
-  ChevronUp,
-  ChevronDown,
-  ChevronsUpDown,
-  PackageOpen,
-  Loader2,
+  MoreHorizontal,
+  Package,
 } from 'lucide-react'
 import {
   Table,
@@ -25,6 +32,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Card, CardContent } from '@/components/ui/card'
 import {
   Select,
   SelectContent,
@@ -32,6 +40,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -42,12 +56,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import { PageHeader } from '@/components/shared/page-header'
 import { ProductFormDialog } from '@/components/products/product-form-dialog'
 import { useAppStore } from '@/stores/app-store'
@@ -55,16 +63,46 @@ import { hasPermission } from '@/lib/permissions'
 import { useAuthStore } from '@/stores/auth-store'
 import { toast } from 'sonner'
 
-interface Product {
+// ─── Types ──────────────────────────────────────────────────────────────
+
+interface VariantData {
+  id: string
+  name: string
+  variantName: string | null
+  sku: string
+  unit: string
+  minimumStock: number
+  unitCost: number
+  status: string
+  size: string | null
+}
+
+interface ParentProduct {
   id: string
   code: string
   name: string
   sku: string
-  size: string | null
   unit: string
   minimumStock: number
+  unitCost: number
   status: string
+  categoryId: string | null
   category: { id: string; name: string; code: string } | null
+  variantCount: number
+  variants: VariantData[]
+}
+
+interface PaginationInfo {
+  page: number
+  limit: number
+  total: number
+  totalPages: number
+}
+
+interface SummaryStats {
+  parentProducts: number
+  variants: number
+  totalProducts: number
 }
 
 interface Category {
@@ -73,101 +111,124 @@ interface Category {
   code: string
 }
 
-const statusColorMap: Record<string, string> = {
-  ACTIVE: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
-  INACTIVE: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
-  DISCONTINUED: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
+// ─── Summary Cards ─────────────────────────────────────────────────────
+
+function SummaryCards({ summary, loading }: { summary: SummaryStats | null; loading: boolean }) {
+  if (loading || !summary) {
+    return (
+      <div className="grid grid-cols-3 gap-3">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Skeleton key={i} className="h-20 rounded-lg" />
+        ))}
+      </div>
+    )
+  }
+
+  const cards = [
+    { label: 'Item Groups', value: summary.parentProducts, icon: PackageOpen, color: 'text-violet-600', bg: 'bg-violet-50' },
+    { label: 'Specifications', value: summary.variants, icon: Layers, color: 'text-teal-600', bg: 'bg-teal-50' },
+    { label: 'Total Products', value: summary.totalProducts, icon: Package, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+  ]
+
+  return (
+    <div className="grid grid-cols-3 gap-3">
+      {cards.map((c) => (
+        <Card key={c.label} className={`${c.bg} border-none shadow-sm`}>
+          <CardContent className="p-3">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-medium text-muted-foreground truncate">{c.label}</span>
+              <c.icon className={`h-3.5 w-3.5 ${c.color} opacity-60`} />
+            </div>
+            <p className={`text-lg font-bold ${c.color}`}>{c.value.toLocaleString()}</p>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  )
 }
 
-type SortField = 'code' | 'name' | 'sku' | 'minimumStock' | 'status' | 'createdAt'
-type SortOrder = 'asc' | 'desc'
+// ─── Component ──────────────────────────────────────────────────────────
 
 export function ProductList() {
   const user = useAuthStore((s) => s.user)
   const navigate = useAppStore((s) => s.navigate)
+  const role = user?.role || ''
+  const canCreate = hasPermission(role, 'products', 'create')
+  const canEdit = hasPermission(role, 'products', 'edit')
+  const canDelete = hasPermission(role, 'products', 'delete')
 
-  const [products, setProducts] = useState<Product[]>([])
+  // Data state
+  const [data, setData] = useState<ParentProduct[]>([])
+  const [pagination, setPagination] = useState<PaginationInfo>({ page: 1, limit: 50, total: 0, totalPages: 0 })
+  const [summary, setSummary] = useState<SummaryStats | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
-  const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
 
-  // Filters & pagination
-  const [page, setPage] = useState(1)
-  const [limit, setLimit] = useState(10)
+  // Filters
   const [search, setSearch] = useState('')
-  const [searchInput, setSearchInput] = useState('')
   const [categoryId, setCategoryId] = useState('')
-  const [status, setStatus] = useState('')
-  const [sortField, setSortField] = useState<SortField>('createdAt')
-  const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
+  const [pageSize, setPageSize] = useState('50')
+
+  // Accordion
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
   // Dialogs
   const [formOpen, setFormOpen] = useState(false)
-  const [editingProduct, setEditingProduct] = useState<Product | null>(null)
+  const [editingProduct, setEditingProduct] = useState<ParentProduct | null>(null)
   const [deleteOpen, setDeleteOpen] = useState(false)
-  const [deletingProduct, setDeletingProduct] = useState<Product | null>(null)
+  const [deletingProduct, setDeletingProduct] = useState<ParentProduct | null>(null)
   const [deleting, setDeleting] = useState(false)
 
-  const fetchProducts = useCallback(async () => {
+  // ─── Data Fetching ───────────────────────────────────────────────────
+
+  const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      const params = new URLSearchParams({
-        page: String(page),
-        limit: String(limit),
-        sort: sortField,
-        order: sortOrder,
-      })
+      const params = new URLSearchParams()
+      params.set('page', String(pagination.page))
+      const limit = pageSize === 'all' ? 9999 : parseInt(pageSize, 10)
+      params.set('limit', String(limit))
       if (search) params.set('search', search)
-      if (categoryId) params.set('categoryId', categoryId)
-      if (status) params.set('status', status)
+      if (categoryId && categoryId !== 'all') params.set('categoryId', categoryId)
 
       const res = await fetch(`/api/products?${params}`)
       if (res.ok) {
-        const data = await res.json()
-        setProducts(data.data || [])
-        setTotal(data.pagination?.total || 0)
+        const json = await res.json()
+        setData(json.data || [])
+        setPagination(json.pagination || { page: 1, limit, total: 0, totalPages: 0 })
+        setSummary(json.summary || null)
+        setCategories(json.categories || [])
       }
     } catch {
       // ignore
     } finally {
       setLoading(false)
     }
-  }, [page, limit, search, categoryId, status, sortField, sortOrder])
+  }, [pagination.page, pageSize, search, categoryId])
 
   useEffect(() => {
-    fetchProducts()
-  }, [fetchProducts])
+    fetchData()
+  }, [fetchData])
 
   useEffect(() => {
-    fetch('/api/categories')
-      .then((r) => r.json())
-      .then((d) => setCategories(d.data || []))
-      .catch(() => {})
-  }, [])
+    setPagination((p) => ({ ...p, page: 1 }))
+  }, [search, categoryId, pageSize])
 
-  function handleSearch() {
-    setSearch(searchInput)
-    setPage(1)
+  // ─── Accordion ──────────────────────────────────────────────────────
+
+  const toggleItem = (id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   }
 
-  function handleSort(field: SortField) {
-    if (sortField === field) {
-      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')
-    } else {
-      setSortField(field)
-      setSortOrder('asc')
-    }
-    setPage(1)
-  }
+  const expandAll = () => setExpanded(new Set(data.map((p) => p.id)))
+  const collapseAll = () => setExpanded(new Set())
 
-  function SortIcon({ field }: { field: SortField }) {
-    if (sortField !== field) return <ChevronsUpDown className="ml-1 size-3 opacity-50" />
-    return sortOrder === 'asc' ? (
-      <ChevronUp className="ml-1 size-3" />
-    ) : (
-      <ChevronDown className="ml-1 size-3" />
-    )
-  }
+  // ─── Actions ────────────────────────────────────────────────────────
 
   async function handleDelete() {
     if (!deletingProduct) return
@@ -175,22 +236,22 @@ export function ProductList() {
     try {
       const res = await fetch(`/api/products/${deletingProduct.id}`, { method: 'DELETE' })
       if (res.ok) {
-        toast.success('Product discontinued successfully')
+        toast.success('Product deleted successfully')
         setDeleteOpen(false)
         setDeletingProduct(null)
-        fetchProducts()
+        fetchData()
       } else {
         const data = await res.json().catch(() => ({}))
-        toast.error(data.error || 'Failed to discontinue product')
+        toast.error(data.error || 'Failed to delete product')
       }
     } catch {
-      toast.error('Network error. Please try again.')
+      toast.error('Network error')
     } finally {
       setDeleting(false)
     }
   }
 
-  function openEdit(product: Product) {
+  function openEdit(product: ParentProduct) {
     setEditingProduct(product)
     setFormOpen(true)
   }
@@ -200,16 +261,16 @@ export function ProductList() {
     setFormOpen(true)
   }
 
-  const totalPages = Math.ceil(total / limit)
-  const canCreate = user ? hasPermission(user.role, 'products', 'create') : false
-  const canEdit = user ? hasPermission(user.role, 'products', 'edit') : false
-  const canDelete = user ? hasPermission(user.role, 'products', 'delete') : false
+  const totalPages = pagination.totalPages
+  const hasFilters = search || (categoryId && categoryId !== 'all')
+
+  // ─── Render ──────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <PageHeader
         title="Products"
-        description="Manage your parts & items catalog"
+        description="Master product catalog — synced with Opening Stock inventory"
         icon={PackageOpen}
       >
         {canCreate && (
@@ -220,26 +281,47 @@ export function ProductList() {
         )}
       </PageHeader>
 
-      {/* Filters */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="flex flex-1 items-center gap-2">
-          <div className="relative flex-1 sm:max-w-xs">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-            <Input
-              placeholder="Search products..."
-              className="pl-9"
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-            />
-          </div>
-          <Button variant="outline" size="sm" onClick={handleSearch}>
-            Search
+      {/* ─── Summary Cards ──────────────────────────────────────────────── */}
+      <SummaryCards summary={summary} loading={loading} />
+
+      {/* ─── Toolbar ────────────────────────────────────────────────────── */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search product or specification..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9 h-9"
+          />
+          {search && (
+            <button
+              onClick={() => setSearch('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button variant="ghost" size="sm" onClick={expandAll} className="h-8 text-xs">
+            Expand All
+          </Button>
+          <Button variant="ghost" size="sm" onClick={collapseAll} className="h-8 text-xs">
+            Collapse All
           </Button>
         </div>
-        <div className="flex items-center gap-2">
-          <Select value={categoryId} onValueChange={(v) => { setCategoryId(v === 'all' ? '' : v); setPage(1) }}>
-            <SelectTrigger className="w-[160px]">
+      </div>
+
+      {/* ─── Filters ────────────────────────────────────────────────────── */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Tag className="h-4 w-4" />
+          <span className="font-medium">Filter:</span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Select value={categoryId || 'all'} onValueChange={setCategoryId}>
+            <SelectTrigger className="w-[180px] h-9">
               <SelectValue placeholder="All Categories" />
             </SelectTrigger>
             <SelectContent>
@@ -251,223 +333,265 @@ export function ProductList() {
               ))}
             </SelectContent>
           </Select>
-          <Select value={status} onValueChange={(v) => { setStatus(v === 'all' ? '' : v); setPage(1) }}>
-            <SelectTrigger className="w-[140px]">
-              <SelectValue placeholder="All Status" />
+
+          <Select value={pageSize} onValueChange={setPageSize}>
+            <SelectTrigger className="w-[110px] h-9">
+              <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Status</SelectItem>
-              <SelectItem value="ACTIVE">Active</SelectItem>
-              <SelectItem value="INACTIVE">Inactive</SelectItem>
-              <SelectItem value="DISCONTINUED">Discontinued</SelectItem>
+              <SelectItem value="25">25 / page</SelectItem>
+              <SelectItem value="50">50 / page</SelectItem>
+              <SelectItem value="100">100 / page</SelectItem>
+              <SelectItem value="all">All</SelectItem>
             </SelectContent>
           </Select>
+
+          {hasFilters && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => { setCategoryId(''); setSearch('') }}
+              className="h-9 text-xs"
+            >
+              Clear All
+            </Button>
+          )}
         </div>
       </div>
 
-      {/* Table */}
-      <div className="rounded-lg border overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-[100px] cursor-pointer select-none" onClick={() => handleSort('code')}>
-                <span className="flex items-center">Code <SortIcon field="code" /></span>
-              </TableHead>
-              <TableHead className="cursor-pointer select-none" onClick={() => handleSort('name')}>
-                <span className="flex items-center">Name <SortIcon field="name" /></span>
-              </TableHead>
-              <TableHead className="hidden md:table-cell cursor-pointer select-none" onClick={() => handleSort('sku')}>
-                <span className="flex items-center">SKU <SortIcon field="sku" /></span>
-              </TableHead>
-              <TableHead className="hidden sm:table-cell">Specs</TableHead>
-              <TableHead className="hidden sm:table-cell">Category</TableHead>
-              <TableHead className="hidden lg:table-cell">Unit</TableHead>
-              <TableHead className="hidden lg:table-cell cursor-pointer select-none text-center" onClick={() => handleSort('minimumStock')}>
-                <span className="flex items-center justify-center">Min Stock <SortIcon field="minimumStock" /></span>
-              </TableHead>
-              <TableHead className="cursor-pointer select-none" onClick={() => handleSort('status')}>
-                <span className="flex items-center">Status <SortIcon field="status" /></span>
-              </TableHead>
-              <TableHead className="w-[80px] text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading ? (
-              Array.from({ length: 5 }).map((_, i) => (
-                <TableRow key={i}>
-                  {Array.from({ length: 9 }).map((_, j) => (
-                    <TableCell key={j}>
-                      <Skeleton className="h-4 w-full" />
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
-            ) : products.length === 0 ? (
+      {/* ─── Main Table ──────────────────────────────────────────────────── */}
+      <div className="rounded-lg border overflow-hidden">
+        <div className="max-h-[calc(100vh-380px)] min-h-[300px] overflow-auto">
+          <Table>
+            <TableHeader className="sticky top-0 z-10 bg-muted">
               <TableRow>
-                <TableCell colSpan={9}>
-                  <div className="flex flex-col items-center justify-center py-12">
-                    <PackageOpen className="size-12 text-muted-foreground/50 mb-4" />
-                    <p className="text-lg font-medium">No products found</p>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      {search || categoryId || status
-                        ? 'Try adjusting your search or filters.'
-                        : 'Get started by adding your first product.'}
-                    </p>
-                  </div>
-                </TableCell>
+                <TableHead className="w-[40px]" />
+                <TableHead className="w-[50px] text-center">Sr.</TableHead>
+                <TableHead className="min-w-[180px]">Product Name</TableHead>
+                <TableHead className="hidden md:table-cell min-w-[140px]">Category</TableHead>
+                <TableHead className="text-center min-w-[80px]">Specs</TableHead>
+                <TableHead className="hidden sm:table-cell">Unit</TableHead>
+                <TableHead className="hidden lg:table-cell text-right">Unit Cost</TableHead>
+                <TableHead className="hidden lg:table-cell text-center">Min Stock</TableHead>
+                <TableHead className="w-[80px] text-center">Status</TableHead>
+                {(canEdit || canDelete) && <TableHead className="w-[80px] text-center">Actions</TableHead>}
               </TableRow>
-            ) : (
-              products.map((product) => (
-                <TableRow key={product.id} className="group">
-                  <TableCell className="font-mono text-xs">{product.code}</TableCell>
-                  <TableCell className="font-medium max-w-[200px] truncate">{product.name}</TableCell>
-                  <TableCell className="hidden md:table-cell font-mono text-xs">{product.sku}</TableCell>
-                  <TableCell className="hidden sm:table-cell text-sm">
-                    {product.size ? (
-                      <Badge variant="outline" className="text-[10px] font-mono">
-                        {product.size}
-                      </Badge>
-                    ) : (
-                      <span className="text-muted-foreground text-sm">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="hidden sm:table-cell">
-                    {product.category ? (
-                      <Badge variant="secondary" className="text-[10px]">
-                        {product.category.name}
-                      </Badge>
-                    ) : (
-                      <span className="text-muted-foreground text-sm">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="hidden lg:table-cell text-sm">{product.unit}</TableCell>
-                  <TableCell className="hidden lg:table-cell text-sm text-center">{product.minimumStock}</TableCell>
-                  <TableCell>
-                    <Badge variant="secondary" className={`text-[10px] ${statusColorMap[product.status] || ''}`}>
-                      {product.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="size-8">
-                          <Eye className="size-4" />
-                          <span className="sr-only">Actions</span>
+            </TableHeader>
+            <TableBody>
+              {loading ? (
+                Array.from({ length: 6 }).map((_, i) => (
+                  <TableRow key={i}>
+                    {Array.from({ length: canEdit || canDelete ? 10 : 9 }).map((_, j) => (
+                      <TableCell key={j}><Skeleton className="h-5 w-full" /></TableCell>
+                    ))}
+                  </TableRow>
+                ))
+              ) : data.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={canEdit || canDelete ? 10 : 9} className="h-48 text-center">
+                    <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                      <PackageOpen className="h-10 w-10" />
+                      <p>No products found</p>
+                      {canCreate && (
+                        <Button variant="outline" size="sm" onClick={openCreate}>
+                          <Plus className="h-4 w-4 mr-1" /> Add Product
                         </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => navigate('product-detail', product.id)}>
-                          <Eye className="mr-2 size-4" />
-                          View Details
-                        </DropdownMenuItem>
-                        {canEdit && (
-                          <DropdownMenuItem onClick={() => openEdit(product)}>
-                            <Pencil className="mr-2 size-4" />
-                            Edit
-                          </DropdownMenuItem>
-                        )}
-                        {canDelete && product.status !== 'DISCONTINUED' && (
-                          <DropdownMenuItem
-                            className="text-red-600 focus:text-red-600 dark:text-red-400"
-                            onClick={() => {
-                              setDeletingProduct(product)
-                              setDeleteOpen(true)
-                            }}
-                          >
-                            <Trash2 className="mr-2 size-4" />
-                            Discontinue
-                          </DropdownMenuItem>
-                        )}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+              ) : (
+                data.map((product, idx) => {
+                  const isExpanded = expanded.has(product.id)
+                  const serialNo = (pagination.page - 1) * pagination.limit + idx + 1
 
-      {/* Pagination */}
-      {!loading && products.length > 0 && (
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-muted-foreground">
-            Showing {Math.min((page - 1) * limit + 1, total)} to {Math.min(page * limit, total)} of {total} results
-          </p>
-          <div className="flex items-center gap-2">
-            <Select value={String(limit)} onValueChange={(v) => { setLimit(Number(v)); setPage(1) }}>
-              <SelectTrigger className="w-[70px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="10">10</SelectItem>
-                <SelectItem value="25">25</SelectItem>
-                <SelectItem value="50">50</SelectItem>
-              </SelectContent>
-            </Select>
+                  return (
+                    <>
+                      {/* ── Parent Row ─────────────────────────────────── */}
+                      <TableRow
+                        key={product.id}
+                        className={isExpanded ? 'bg-muted/40' : 'hover:bg-muted/30 cursor-pointer'}
+                        onClick={() => toggleItem(product.id)}
+                      >
+                        <TableCell className="pl-3">
+                          <div className="flex items-center justify-center w-5 h-5 rounded transition-transform">
+                            {isExpanded ? (
+                              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-center text-xs text-muted-foreground font-mono">
+                          {serialNo}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-col">
+                            <span className="font-semibold text-sm">{product.name}</span>
+                            <span className="text-[11px] text-muted-foreground font-mono">{product.code}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell">
+                          {product.category ? (
+                            <Badge variant="outline" className="text-[10px]">
+                              {product.category.name}
+                            </Badge>
+                          ) : (
+                            <span className="text-muted-foreground text-sm">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-5">
+                            {product.variantCount} spec{product.variantCount !== 1 ? 's' : ''}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="hidden sm:table-cell text-sm text-muted-foreground">
+                          {product.unit}
+                        </TableCell>
+                        <TableCell className="hidden lg:table-cell text-right font-mono text-sm">
+                          {product.unitCost > 0 ? product.unitCost.toLocaleString() : '—'}
+                        </TableCell>
+                        <TableCell className="hidden lg:table-cell text-center text-sm">
+                          {product.minimumStock > 0 ? product.minimumStock : '—'}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <Badge className="bg-emerald-100 text-emerald-700 text-[10px] px-2 py-0 h-5">
+                            {product.status}
+                          </Badge>
+                        </TableCell>
+                        {(canEdit || canDelete) && (
+                          <TableCell>
+                            <div className="flex items-center justify-center gap-0.5 opacity-0 group-hover/row:opacity-100">
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <MoreHorizontal className="h-3.5 w-3.5" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem onClick={(e) => { e.stopPropagation(); navigate('product-detail', product.id) }}>
+                                    <Eye className="h-4 w-4 mr-2" />
+                                    View Details
+                                  </DropdownMenuItem>
+                                  {canEdit && (
+                                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); openEdit(product) }}>
+                                      <Pencil className="h-4 w-4 mr-2" />
+                                      Edit
+                                    </DropdownMenuItem>
+                                  )}
+                                  {canDelete && (
+                                    <DropdownMenuItem
+                                      className="text-destructive focus:text-destructive"
+                                              onClick={(e) => {
+                                                e.stopPropagation()
+                                                setDeletingProduct(product)
+                                                setDeleteOpen(true)
+                                              }}
+                                            >
+                                              <Trash2 className="h-4 w-4 mr-2" />
+                                              Delete
+                                            </DropdownMenuItem>
+                                          )}
+                                        </DropdownMenuContent>
+                                      </DropdownMenu>
+                                    </div>
+                                  </TableCell>
+                                )}
+                              </TableRow>
+
+                              {/* ── Expanded Variant Rows ────────────────────── */}
+                              {isExpanded &&
+                                product.variants.map((variant) => (
+                                  <TableRow
+                                    key={variant.id}
+                                    className="bg-slate-50/70 hover:bg-slate-100/80"
+                                  >
+                                    <TableCell className="pl-3" />
+                                    <TableCell className="text-center text-xs text-muted-foreground font-mono" />
+                                    <TableCell className="pl-8">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-muted-foreground text-xs">↳</span>
+                                        <div className="flex flex-col">
+                                          <span className="text-sm">{variant.name}</span>
+                                          <span className="text-[11px] text-muted-foreground font-mono">{variant.sku}</span>
+                                        </div>
+                                      </div>
+                                    </TableCell>
+                                    <TableCell className="hidden md:table-cell" />
+                                    <TableCell className="text-center" />
+                                    <TableCell className="hidden sm:table-cell text-sm text-muted-foreground">
+                                      {variant.unit}
+                                    </TableCell>
+                                    <TableCell className="hidden lg:table-cell text-right font-mono text-sm">
+                                      {variant.unitCost > 0 ? variant.unitCost.toLocaleString() : '—'}
+                                    </TableCell>
+                                    <TableCell className="hidden lg:table-cell text-center text-sm">
+                                      {variant.minimumStock > 0 ? variant.minimumStock : '—'}
+                                    </TableCell>
+                                    <TableCell className="text-center">
+                                      <Badge className="bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0 h-4">
+                                        {variant.status}
+                                      </Badge>
+                                    </TableCell>
+                                    {(canEdit || canDelete) && <TableCell />}
+                                  </TableRow>
+                                ))}
+                            </>
+                          )
+                })
+              )}
+            </TableBody>
+          </Table>
+        </div>
+
+        {/* ─── Pagination ─────────────────────────────────────────────────── */}
+        {pageSize !== 'all' && totalPages > 1 && (
+          <div className="flex items-center justify-between px-4 py-3 border-t bg-muted/30">
+            <p className="text-sm text-muted-foreground">
+              Showing {(pagination.page - 1) * pagination.limit + 1}–{Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total} item groups
+            </p>
             <div className="flex items-center gap-1">
-              <Button
-                variant="outline"
-                size="icon"
-                className="size-8"
-                disabled={page <= 1}
-                onClick={() => setPage((p) => p - 1)}
-              >
-                ‹
+              <Button variant="outline" size="icon" className="h-8 w-8" disabled={pagination.page <= 1} onClick={() => setPagination((p) => ({ ...p, page: 1 }))}>
+                <ChevronsLeft className="h-4 w-4" />
               </Button>
-              {Array.from({ length: Math.min(5, totalPages) }).map((_, i) => {
-                let pageNum: number
-                if (totalPages <= 5) {
-                  pageNum = i + 1
-                } else if (page <= 3) {
-                  pageNum = i + 1
-                } else if (page >= totalPages - 2) {
-                  pageNum = totalPages - 4 + i
-                } else {
-                  pageNum = page - 2 + i
-                }
-                return (
-                  <Button
-                    key={pageNum}
-                    variant={page === pageNum ? 'default' : 'outline'}
-                    size="icon"
-                    className="size-8"
-                    onClick={() => setPage(pageNum)}
-                  >
-                    {pageNum}
-                  </Button>
-                )
-              })}
-              <Button
-                variant="outline"
-                size="icon"
-                className="size-8"
-                disabled={page >= totalPages}
-                onClick={() => setPage((p) => p + 1)}
-              >
-                ›
+              <Button variant="outline" size="icon" className="h-8 w-8" disabled={pagination.page <= 1} onClick={() => setPagination((p) => ({ ...p, page: p.page - 1 }))}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="px-3 text-sm font-medium">
+                {pagination.page} / {totalPages}
+              </span>
+              <Button variant="outline" size="icon" className="h-8 w-8" disabled={pagination.page >= totalPages} onClick={() => setPagination((p) => ({ ...p, page: p.page + 1 }))}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              <Button variant="outline" size="icon" className="h-8 w-8" disabled={pagination.page >= totalPages} onClick={() => setPagination((p) => ({ ...p, page: totalPages }))}>
+                <ChevronsRight className="h-4 w-4" />
               </Button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* Form Dialog */}
+      {/* ─── Form Dialog ────────────────────────────────────────────────── */}
       <ProductFormDialog
         open={formOpen}
         onOpenChange={setFormOpen}
         product={editingProduct}
-        onSuccess={fetchProducts}
+        onSuccess={fetchData}
       />
 
-      {/* Delete Confirmation */}
+      {/* ─── Delete Confirmation ─────────────────────────────────────────── */}
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Discontinue Product</AlertDialogTitle>
+            <AlertDialogTitle>Delete Product</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to discontinue &ldquo;{deletingProduct?.name}&rdquo;? This will set the
-              product status to Discontinued.
+              Are you sure you want to delete &ldquo;{deletingProduct?.name}&rdquo; and all its {deletingProduct?.variantCount || 0} specification(s)?
+              This will also remove the corresponding items from Opening Stock.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -475,10 +599,10 @@ export function ProductList() {
             <AlertDialogAction
               onClick={handleDelete}
               disabled={deleting}
-              className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+              className="bg-red-600 hover:bg-red-700"
             >
               {deleting && <Loader2 className="mr-2 size-4 animate-spin" />}
-              Discontinue Product
+              Delete
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
