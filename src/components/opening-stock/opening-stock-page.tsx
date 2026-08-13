@@ -408,7 +408,7 @@ export function OpeningStockPageV2() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Opening Stock"
+        title="Stock"
         description="Live inventory register — grouped by item with expandable specifications"
       />
 

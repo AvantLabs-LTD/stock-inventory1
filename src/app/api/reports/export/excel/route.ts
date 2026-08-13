@@ -91,7 +91,7 @@ export async function GET(request: NextRequest) {
           }
         }
 
-        const headers = ['Product Code', 'Product Name', 'SKU', 'Category', 'Supplier', 'Unit', 'Status', 'Opening Stock', 'Received', 'Issued', 'Returned', 'Reserved', 'Available', 'Unit Cost', 'Total Value']
+        const headers = ['Product Code', 'Product Name', 'SKU', 'Category', 'Supplier', 'Unit', 'Status', 'Stock', 'Received', 'Issued', 'Returned', 'Reserved', 'Available', 'Unit Cost', 'Total Value']
         const rows = products.map((p) => {
           const tx = txMap.get(p.id)!
           const reserved = reservedMap.get(p.id) || 0
@@ -104,7 +104,7 @@ export async function GET(request: NextRequest) {
             'Supplier': p.supplier?.name ?? '',
             'Unit': p.unit,
             'Status': p.status,
-            'Opening Stock': tx.opening,
+            'Stock': tx.opening,
             'Received': tx.received,
             'Issued': tx.issued,
             'Returned': tx.returned,

@@ -56,7 +56,7 @@ interface FilterOption {
 
 const TYPE_CONFIG: Record<string, { label: string; color: string; icon: React.ElementType }> = {
   OPENING_STOCK: {
-    label: "Opening Stock",
+    label: "Stock",
     color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
     icon: ArrowDownToLine,
   },
@@ -99,7 +99,7 @@ const TYPE_CONFIG: Record<string, { label: string; color: string; icon: React.El
 
 const TRANSACTION_TYPES = [
   { value: "", label: "All Types" },
-  { value: "OPENING_STOCK", label: "Opening Stock" },
+  { value: "OPENING_STOCK", label: "Stock" },
   { value: "GOODS_RECEIVED", label: "Goods Received" },
   { value: "ISSUED", label: "Issued" },
   { value: "RETURNED", label: "Returned" },

@@ -270,7 +270,7 @@ export function ProductList() {
     <div className="space-y-4">
       <PageHeader
         title="Products"
-        description="Master product catalog — synced with Opening Stock inventory"
+        description="Master product catalog — synced with Stock inventory"
         icon={PackageOpen}
       >
         {canCreate && (
@@ -591,7 +591,7 @@ export function ProductList() {
             <AlertDialogTitle>Delete Product</AlertDialogTitle>
             <AlertDialogDescription>
               Are you sure you want to delete &ldquo;{deletingProduct?.name}&rdquo; and all its {deletingProduct?.variantCount || 0} specification(s)?
-              This will also remove the corresponding items from Opening Stock.
+              This will also remove the corresponding items from Stock.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

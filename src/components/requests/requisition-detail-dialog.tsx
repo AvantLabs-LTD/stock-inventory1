@@ -16,6 +16,10 @@ import {
   PenLine,
   Hash,
   CalendarDays,
+  Warehouse,
+  Truck,
+  PackageCheck,
+  PackageX,
 } from 'lucide-react'
 import {
   Dialog,
@@ -55,6 +59,13 @@ import { toast } from 'sonner'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+interface StockInfo {
+  totalInStock: number
+  totalIssued: number
+  totalReserved: number
+  availableInStore: number
+}
+
 interface RequisitionItemData {
   id: string
   productId: string
@@ -63,6 +74,7 @@ interface RequisitionItemData {
   issuedQty: number
   remarks: string | null
   product: { id: string; name: string; code: string; sku: string; unit: string }
+  stockInfo?: StockInfo
 }
 
 interface RequisitionData {
@@ -89,13 +101,14 @@ interface RequisitionData {
   items: RequisitionItemData[]
 }
 
-// ─── Status / Priority Colors ────────────────────────────────────────────────
+// ─── Status Colors ──────────────────────────────────────────────────────────
 
 const statusColors: Record<string, string> = {
   PENDING: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
   APPROVED: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
   PARTIAL_APPROVED: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
   REJECTED: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
+  CLOSED: 'bg-gray-200 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
   COMPLETED: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400',
   CANCELLED: 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400',
 }
@@ -209,14 +222,14 @@ export function RequisitionDetailDialog({ requisitionId, open, onOpenChange, onA
     } catch { toast.error('Network error') } finally { setActionLoading(false) }
   }
 
-  // ─── Complete ────────────────────────────────────────────────────────────
+  // ─── Complete (Issue & Close) ───────────────────────────────────────────
   async function handleComplete() {
     if (!requisitionId) return
     setActionLoading(true)
     try {
       const res = await fetch(`/api/requisitions/${requisitionId}/complete`, { method: 'PUT' })
       if (res.ok) {
-        toast.success('Requisition completed — inventory issued')
+        toast.success('Requisition closed — inventory issued & stock updated')
         setCompleteOpen(false)
         onOpenChange(false)
         onAction()
@@ -257,10 +270,12 @@ export function RequisitionDetailDialog({ requisitionId, open, onOpenChange, onA
     setApproveOpen(true)
   }
 
+  const isClosed = data?.status === 'CLOSED' || data?.status === 'COMPLETED'
+
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-4xl max-h-[92vh] overflow-hidden flex flex-col">
+        <DialogContent className="max-w-5xl max-h-[92vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle className="text-center font-bold tracking-wider uppercase flex items-center justify-center gap-2">
               <FileText className="size-5" />
@@ -283,8 +298,8 @@ export function RequisitionDetailDialog({ requisitionId, open, onOpenChange, onA
             <div className="flex-1 overflow-y-auto space-y-4">
               {/* ─── Status Row ──────────────────────────────────────────── */}
               <div className="flex items-center justify-between px-1">
-                <Badge className={`${statusColors[data.status] || ''} text-xs font-semibold border-0 px-3 py-1`}>
-                  {data.status.replace(/_/g, ' ')}
+                <Badge className={`${statusColors[data.status] || statusColors.CANCELLED} text-xs font-semibold border-0 px-3 py-1`}>
+                  {data.status === 'CLOSED' ? 'Closed' : data.status.replace(/_/g, ' ')}
                 </Badge>
                 <span className="text-xs text-muted-foreground">
                   {format(new Date(data.date), 'dd-MMM-yy')}
@@ -319,51 +334,104 @@ export function RequisitionDetailDialog({ requisitionId, open, onOpenChange, onA
                 </div>
               </div>
 
-              {/* ─── Items Table (matches the paper form) ────────────────── */}
+              {/* ─── Items Table with Stock Info ──────────────────────────── */}
               <div className="border rounded-lg overflow-hidden">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/50">
-                      <TableHead className="w-[50px] text-center font-semibold">S/No</TableHead>
-                      <TableHead className="font-semibold">Item Name</TableHead>
-                      <TableHead className="font-semibold">Spec / Description</TableHead>
-                      <TableHead className="w-[100px] text-center font-semibold">Req Qty</TableHead>
-                      <TableHead className="w-[100px] text-center font-semibold">Issued Qty</TableHead>
-                      <TableHead className="font-semibold">Remarks</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {data.items.map((item, idx) => (
-                      <TableRow key={item.id}>
-                        <TableCell className="text-center font-mono text-sm text-muted-foreground">
-                          {idx + 1}
-                        </TableCell>
-                        <TableCell>
-                          <p className="font-medium text-sm">{item.product.name}</p>
-                          <p className="text-[10px] text-muted-foreground font-mono">{item.product.code}</p>
-                        </TableCell>
-                        <TableCell className="text-sm">
-                          {item.specDescription || '—'}
-                        </TableCell>
-                        <TableCell className="text-center font-semibold text-sm">
-                          {item.requiredQty} <span className="text-[10px] font-normal text-muted-foreground">{item.product.unit}</span>
-                        </TableCell>
-                        <TableCell className="text-center font-semibold text-sm">
-                          {item.issuedQty > 0 ? (
-                            <span className="text-green-600 dark:text-green-400">
-                              {item.issuedQty} <span className="text-[10px] font-normal text-muted-foreground">{item.product.unit}</span>
-                            </span>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {item.remarks || '—'}
-                        </TableCell>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-muted/50">
+                        <TableHead className="w-[50px] text-center font-semibold">S/No</TableHead>
+                        <TableHead className="font-semibold min-w-[160px]">Item Name</TableHead>
+                        <TableHead className="font-semibold">Item ID</TableHead>
+                        <TableHead className="font-semibold">Spec</TableHead>
+                        <TableHead className="w-[90px] text-center font-semibold">Req Qty</TableHead>
+                        <TableHead className="w-[90px] text-center font-semibold">Issued</TableHead>
+                        <TableHead className="w-[90px] text-center font-semibold">In Stock</TableHead>
+                        <TableHead className="w-[90px] text-center font-semibold">Ordered</TableHead>
+                        <TableHead className="w-[90px] text-center font-semibold">Left</TableHead>
+                        <TableHead className="font-semibold">Status</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {data.items.map((item, idx) => {
+                        const stock = item.stockInfo
+                        const allIssued = item.issuedQty >= item.requiredQty
+                        const partialIssued = item.issuedQty > 0 && !allIssued
+
+                        return (
+                          <TableRow key={item.id}>
+                            <TableCell className="text-center font-mono text-sm text-muted-foreground">
+                              {idx + 1}
+                            </TableCell>
+                            <TableCell>
+                              <p className="font-medium text-sm">{item.product.name}</p>
+                              <p className="text-[10px] text-muted-foreground font-mono">{item.product.code}</p>
+                            </TableCell>
+                            <TableCell className="text-xs font-mono text-muted-foreground">
+                              {item.product.sku || item.product.code}
+                            </TableCell>
+                            <TableCell className="text-sm">
+                              {item.specDescription || '—'}
+                            </TableCell>
+                            <TableCell className="text-center font-semibold text-sm">
+                              {item.requiredQty} <span className="text-[10px] font-normal text-muted-foreground">{item.product.unit}</span>
+                            </TableCell>
+                            <TableCell className="text-center text-sm">
+                              {item.issuedQty > 0 ? (
+                                <span className="font-semibold text-green-600 dark:text-green-400">
+                                  {item.issuedQty}
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-center text-sm">
+                              <span className="flex items-center justify-center gap-1">
+                                <Warehouse className="size-3 text-muted-foreground" />
+                                <span className="font-medium">{stock?.totalInStock ?? '—'}</span>
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-center text-sm">
+                              <span className="flex items-center justify-center gap-1">
+                                <Truck className="size-3 text-muted-foreground" />
+                                <span className="font-medium">{stock?.totalIssued ?? '—'}</span>
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-center text-sm">
+                              <span className={`font-semibold ${
+                                (stock?.availableInStore ?? 0) > item.requiredQty ? 'text-green-600 dark:text-green-400' :
+                                (stock?.availableInStore ?? 0) === 0 ? 'text-red-600 dark:text-red-400' :
+                                'text-amber-600 dark:text-amber-400'
+                              }`}>
+                                {stock?.availableInStore ?? '—'}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-center">
+                              {isClosed ? (
+                                <Badge className="bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300 text-[10px] border-0 font-semibold px-2">
+                                  Closed
+                                </Badge>
+                              ) : allIssued ? (
+                                <Badge className="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 text-[10px] border-0 font-semibold px-2 flex items-center justify-center gap-0.5 w-fit mx-auto">
+                                  <PackageCheck className="size-3" />
+                                  Fulfilled
+                                </Badge>
+                              ) : partialIssued ? (
+                                <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 text-[10px] border-0 font-semibold px-2">
+                                  Partial
+                                </Badge>
+                              ) : (
+                                <Badge className="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 text-[10px] border-0 font-semibold px-2">
+                                  Pending
+                                </Badge>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
               </div>
 
               {/* ─── Rejection Remarks ────────────────────────────────────── */}
@@ -376,6 +444,20 @@ export function RequisitionDetailDialog({ requisitionId, open, onOpenChange, onA
                 </div>
               )}
 
+              {/* ─── Closed Banner ─────────────────────────────────────────── */}
+              {isClosed && (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 dark:bg-emerald-900/10 p-3 flex items-center gap-2">
+                  <CheckCheck className="size-5 text-emerald-600" />
+                  <div>
+                    <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">Requisition Closed</p>
+                    <p className="text-xs text-emerald-600 dark:text-emerald-500">
+                      All items have been issued. Stock has been automatically deducted.
+                      {data.completedAt && ` Closed: ${format(new Date(data.completedAt), "MMM dd, yyyy 'at' HH:mm")}`}
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* ─── Issued By / Received By (Signature Sections) ─────────── */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="border-2 border-dashed rounded-lg p-4 min-h-[100px]">
@@ -383,7 +465,7 @@ export function RequisitionDetailDialog({ requisitionId, open, onOpenChange, onA
                     <Label className="text-xs uppercase tracking-wider font-bold text-muted-foreground">
                       Issued By
                     </Label>
-                    {(data.status === 'APPROVED' || data.status === 'PARTIAL_APPROVED' || data.status === 'COMPLETED') && canEdit && !editIssuedBy && (
+                    {(data.status === 'APPROVED' || data.status === 'PARTIAL_APPROVED' || isClosed) && canEdit && !editIssuedBy && (
                       <Button variant="ghost" size="icon" className="size-6" onClick={() => setEditIssuedBy(true)}>
                         <PenLine className="size-3" />
                       </Button>
@@ -415,7 +497,7 @@ export function RequisitionDetailDialog({ requisitionId, open, onOpenChange, onA
                     <Label className="text-xs uppercase tracking-wider font-bold text-muted-foreground">
                       Received By
                     </Label>
-                    {(data.status === 'APPROVED' || data.status === 'PARTIAL_APPROVED' || data.status === 'COMPLETED') && canEdit && !editReceivedBy && (
+                    {(data.status === 'APPROVED' || data.status === 'PARTIAL_APPROVED' || isClosed) && canEdit && !editReceivedBy && (
                       <Button variant="ghost" size="icon" className="size-6" onClick={() => setEditReceivedBy(true)}>
                         <PenLine className="size-3" />
                       </Button>
@@ -466,7 +548,7 @@ export function RequisitionDetailDialog({ requisitionId, open, onOpenChange, onA
                     <CheckCheck className="mr-2 size-4" /> Complete & Issue Inventory
                   </Button>
                   <p className="text-xs text-muted-foreground mt-1.5">
-                    This will issue all approved items to {data.department.name} — {data.project.name}.
+                    This will issue all approved items to {data.department.name} — {data.project.name} and automatically deduct stock.
                   </p>
                 </div>
               )}
@@ -475,7 +557,7 @@ export function RequisitionDetailDialog({ requisitionId, open, onOpenChange, onA
               <p className="text-[10px] text-muted-foreground text-center pt-1">
                 Created: {format(new Date(data.createdAt), "MMM dd, yyyy 'at' HH:mm")}
                 {data.approvedAt && ` · Approved: ${format(new Date(data.approvedAt), "MMM dd, yyyy 'at' HH:mm")}`}
-                {data.completedAt && ` · Completed: ${format(new Date(data.completedAt), "MMM dd, yyyy 'at' HH:mm")}`}
+                {data.completedAt && ` · Closed: ${format(new Date(data.completedAt), "MMM dd, yyyy 'at' HH:mm")}`}
               </p>
             </div>
           ) : (
@@ -506,6 +588,7 @@ export function RequisitionDetailDialog({ requisitionId, open, onOpenChange, onA
                     <TableHead>Item</TableHead>
                     <TableHead className="text-center">Requested</TableHead>
                     <TableHead className="text-center">Approve Qty</TableHead>
+                    <TableHead className="text-center">Available</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -527,6 +610,15 @@ export function RequisitionDetailDialog({ requisitionId, open, onOpenChange, onA
                             }))
                           }
                         />
+                      </TableCell>
+                      <TableCell className="text-center text-sm font-medium">
+                        <span className={
+                          (item.stockInfo?.availableInStore ?? 0) >= item.requiredQty
+                            ? 'text-green-600 dark:text-green-400'
+                            : 'text-red-600 dark:text-red-400'
+                        }>
+                          {item.stockInfo?.availableInStore ?? '—'}
+                        </span>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -579,14 +671,15 @@ export function RequisitionDetailDialog({ requisitionId, open, onOpenChange, onA
             </AlertDialogTitle>
             <AlertDialogDescription>
               This will issue all approved items to <strong>{data?.department.name}</strong> — <strong>{data?.project.name}</strong>.<br />
-              Inventory transactions will be created automatically.
+              Inventory will be automatically deducted from Stock.
+              The requisition will be marked as <strong>Closed</strong>.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleComplete} disabled={actionLoading} className="bg-emerald-600 hover:bg-emerald-700">
               {actionLoading && <Loader2 className="mr-2 size-4 animate-spin" />}
-              Complete & Issue
+              Complete & Close
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

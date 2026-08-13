@@ -17,7 +17,7 @@ const VALID_REASONS = [
   'Return',
   'Reservation',
   'Release',
-  'Opening Stock',
+  'Stock',
   'Stock Take',
   'Other',
 ]

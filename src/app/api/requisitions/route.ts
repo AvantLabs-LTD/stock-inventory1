@@ -56,9 +56,6 @@ export async function GET(request: NextRequest) {
           project: { select: { id: true, name: true, code: true } },
           requestedByUser: { select: { id: true, name: true, email: true } },
           items: {
-            include: {
-              product: { select: { id: true, name: true, code: true, sku: true, unit: true } },
-            },
             select: {
               id: true,
               specDescription: true,

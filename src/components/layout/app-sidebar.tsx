@@ -67,7 +67,7 @@ const navItems: NavItem[] = [
 
 const inventoryItems: NavItem[] = [
   {
-    title: "Opening Stock",
+    title: "Stock",
     icon: ArrowDownToLine,
     page: "opening-stock",
     module: "stock",

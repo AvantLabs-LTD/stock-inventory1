@@ -9,6 +9,7 @@ import {
   FolderKanban,
   Eye,
   Loader2,
+  Upload,
 } from 'lucide-react'
 import {
   Table,
@@ -47,6 +48,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { PageHeader } from '@/components/shared/page-header'
 import { ProjectFormDialog, type Project } from '@/components/projects/project-form-dialog'
+import { BomUploadDialog } from '@/components/projects/bom-upload-dialog'
 import { hasPermission } from '@/lib/permissions'
 import { useAuthStore } from '@/stores/auth-store'
 import { useAppStore } from '@/stores/app-store'
@@ -88,6 +90,9 @@ export function ProjectPage() {
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deletingProject, setDeletingProject] = useState<Project | null>(null)
   const [deleting, setDeleting] = useState(false)
+  // BOM
+  const [bomOpen, setBomOpen] = useState(false)
+  const [bomProject, setBomProject] = useState<Project | null>(null)
 
   const fetchDepartments = useCallback(async () => {
     try {
@@ -311,10 +316,16 @@ export function ProjectPage() {
                           View Details
                         </DropdownMenuItem>
                         {canEdit && (
-                          <DropdownMenuItem onClick={() => openEdit(proj)}>
-                            <Pencil className="mr-2 size-4" />
-                            Edit
-                          </DropdownMenuItem>
+                          <>
+                            <DropdownMenuItem onClick={() => { setBomProject(proj); setBomOpen(true) }}>
+                              <Upload className="mr-2 size-4" />
+                              Upload BOM
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => openEdit(proj)}>
+                              <Pencil className="mr-2 size-4" />
+                              Edit
+                            </DropdownMenuItem>
+                          </>
                         )}
                         {canDelete && (
                           <DropdownMenuItem
@@ -407,6 +418,15 @@ export function ProjectPage() {
         open={formOpen}
         onOpenChange={setFormOpen}
         project={editingProject}
+        onSuccess={fetchProjects}
+      />
+
+      {/* BOM Upload Dialog */}
+      <BomUploadDialog
+        open={bomOpen}
+        onOpenChange={(open) => { if (!open) setBomProject(null); setBomOpen(open) }}
+        projectId={bomProject?.id || null}
+        projectName={bomProject?.name || ''}
         onSuccess={fetchProjects}
       />
 

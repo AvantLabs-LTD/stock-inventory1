@@ -46,7 +46,7 @@ interface AuditLogEntry {
 
 const ACTION_CONFIG: Record<string, { label: string; color: string }> = {
   OPENING_STOCK_SET: {
-    label: "Opening Stock",
+    label: "Stock",
     color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
   },
   GOODS_RECEIVED: {
@@ -97,7 +97,7 @@ const ACTION_CONFIG: Record<string, { label: string; color: string }> = {
 
 const AUDIT_ACTIONS = [
   { value: "", label: "All Actions" },
-  { value: "OPENING_STOCK_SET", label: "Opening Stock" },
+  { value: "OPENING_STOCK_SET", label: "Stock" },
   { value: "GOODS_RECEIVED", label: "Goods Received" },
   { value: "GOODS_RECEIVED_DELETED", label: "GR Deleted" },
   { value: "ISSUED", label: "Issued" },

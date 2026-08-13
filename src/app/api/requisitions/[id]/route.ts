@@ -3,7 +3,7 @@ import { db } from '@/lib/db'
 import { getSession, unauthorizedResponse, forbiddenResponse } from '@/lib/auth-middleware'
 import { hasPermission } from '@/lib/permissions'
 
-// GET /api/requisitions/[id] — Get single material requisition detail
+// GET /api/requisitions/[id] — Get single material requisition detail with stock info
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -26,7 +26,7 @@ export async function GET(
         requestedByUser: { select: { id: true, name: true, email: true } },
         items: {
           include: {
-            product: { select: { id: true, name: true, code: true, sku: true, unit: true } },
+            product: { select: { id: true, name: true, code: true, sku: true, unit: true, variantName: true } },
           },
         },
       },
@@ -36,7 +36,79 @@ export async function GET(
       return Response.json({ error: 'Requisition not found' }, { status: 404 })
     }
 
-    return Response.json({ data: requisition })
+    // Fetch stock availability for each item's product
+    const productIds = requisition.items.map((item) => item.productId)
+    const inventoryItems = await db.inventoryItem.findMany({
+      where: {
+        OR: [
+          // Match by product variantName → itemName + specification
+          ...productIds.map((pid) => ({
+            product: {
+              id: pid,
+            },
+          })),
+        ],
+      },
+    })
+
+    // Simpler approach: fetch all InventoryItems and group by name+spec
+    const allInventory = await db.inventoryItem.findMany({
+      where: { status: 'ACTIVE' },
+    })
+
+    // Build a lookup: productName+variantName → stock info
+    const stockLookup = new Map<string, { totalStock: number; issuedQty: number; reservedQty: number; available: number }>()
+    for (const inv of allInventory) {
+      const key = `${inv.itemName}|${inv.specification}`
+      const existing = stockLookup.get(key)
+      const avail = Math.max(0, inv.quantity - inv.issuedQty - inv.reservedQty)
+      if (existing) {
+        existing.totalStock += inv.quantity
+        existing.issuedQty += inv.issuedQty
+        existing.reservedQty += inv.reservedQty
+        existing.available += avail
+      } else {
+        stockLookup.set(key, {
+          totalStock: inv.quantity,
+          issuedQty: inv.issuedQty,
+          reservedQty: inv.reservedQty,
+          available: avail,
+        })
+      }
+    }
+
+    // Fetch product info to build lookup
+    const products = await db.product.findMany({
+      where: { id: { in: productIds } },
+      select: { id: true, name: true, variantName: true, parentProductId: true },
+    })
+    const productMap = new Map(products.map((p) => [p.id, p]))
+
+    // Build enriched items with stock info
+    const enrichedItems = requisition.items.map((item) => {
+      const prod = productMap.get(item.productId)
+      const parentName = prod?.name || item.product.name
+      const specName = prod?.variantName || item.specDescription || ''
+      const stockKey = `${parentName}|${specName}`
+      const stock = stockLookup.get(stockKey) || { totalStock: 0, issuedQty: 0, reservedQty: 0, available: 0 }
+
+      return {
+        ...item,
+        stockInfo: {
+          totalInStock: stock.totalStock,
+          totalIssued: stock.issuedQty,
+          totalReserved: stock.reservedQty,
+          availableInStore: stock.available,
+        },
+      }
+    })
+
+    const result = {
+      ...requisition,
+      items: enrichedItems,
+    }
+
+    return Response.json({ data: result })
   } catch (error) {
     console.error('GET /api/requisitions/[id] error:', error)
     return Response.json({ error: 'Failed to fetch requisition detail' }, { status: 500 })

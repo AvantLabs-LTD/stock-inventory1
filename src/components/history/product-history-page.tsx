@@ -58,7 +58,7 @@ interface ProductInfo {
 }
 
 const TX_TYPE_CONFIG: Record<string, { label: string; color: string; icon: React.ElementType; isIn: boolean }> = {
-  OPENING_STOCK: { label: 'Opening Stock', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400', icon: PackageOpen, isIn: true },
+  OPENING_STOCK: { label: 'Stock', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400', icon: PackageOpen, isIn: true },
   GOODS_RECEIVED: { label: 'Goods Received', color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400', icon: ArrowDownToLine, isIn: true },
   ISSUED: { label: 'Issued', color: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400', icon: ArrowUpFromLine, isIn: false },
   RETURNED: { label: 'Returned', color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400', icon: RotateCcw, isIn: true },

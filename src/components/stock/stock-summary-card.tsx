@@ -144,7 +144,7 @@ export function StockSummaryCard({ productId, compact = false }: StockSummaryCar
     return (
       <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
         <div className="rounded-lg border p-3">
-          <p className="text-xs text-muted-foreground">Opening Stock</p>
+          <p className="text-xs text-muted-foreground">Stock</p>
           <p className="text-lg font-semibold mt-0.5">{summary.openingStock}</p>
         </div>
         <div className="rounded-lg border p-3">
@@ -177,7 +177,7 @@ export function StockSummaryCard({ productId, compact = false }: StockSummaryCar
           <CardHeader className="pb-2 pt-4 px-4">
             <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
               <ArrowDownToLine className="size-3.5" />
-              Opening Stock
+              Stock
             </CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-4">

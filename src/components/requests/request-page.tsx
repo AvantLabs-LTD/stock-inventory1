@@ -84,13 +84,15 @@ const statusColors: Record<string, string> = {
   PARTIAL_APPROVED: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
   REJECTED: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
   COMPLETED: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400',
+  CLOSED: 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300',
   CANCELLED: 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400',
 }
 
 function StatusBadge({ status }: { status: string }) {
+  const displayText = status === 'CLOSED' ? 'Closed' : status.replace(/_/g, ' ')
   return (
     <Badge className={`${statusColors[status] || 'bg-gray-100 text-gray-800'} text-[10px] font-semibold border-0`}>
-      {status.replace(/_/g, ' ')}
+      {displayText}
     </Badge>
   )
 }
@@ -196,6 +198,7 @@ export function RequestPage() {
           <TabsTrigger value="ALL" className="text-xs">All</TabsTrigger>
           <TabsTrigger value="PENDING" className="text-xs">Pending</TabsTrigger>
           <TabsTrigger value="APPROVED" className="text-xs">Approved</TabsTrigger>
+          <TabsTrigger value="CLOSED" className="text-xs">Closed</TabsTrigger>
           <TabsTrigger value="REJECTED" className="text-xs">Rejected</TabsTrigger>
           <TabsTrigger value="COMPLETED" className="text-xs">Completed</TabsTrigger>
         </TabsList>

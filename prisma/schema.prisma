@@ -82,6 +82,7 @@ model Project {
   reservations ReservedInventory[]
   returns      InventoryReturn[]
   requisitions MaterialRequisition[]
+  bomItems    ProjectBomItem[]
 
   @@index([departmentId])
   @@index([status])
@@ -618,6 +619,23 @@ model InventoryItem {
   @@index([specification])
   @@index([warehouse])
   @@index([status])
+}
+
+// ─── PROJECT BOM (Bill of Materials) ───────────────────────────────
+
+model ProjectBomItem {
+  id          String   @id @default(cuid())
+  projectId   String
+  fileName    String
+  sheetName   String?
+  rowData     String   // JSON string of the entire row
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([sortOrder])
 }
 
 // ─── STOCK MOVEMENT (Audit Trail for InventoryItem) ─────────────────────

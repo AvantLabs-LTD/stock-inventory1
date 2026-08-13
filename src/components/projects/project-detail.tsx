@@ -1,14 +1,26 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { ArrowLeft, FolderKanban, Package, Calendar, Building2 } from 'lucide-react'
+import { ArrowLeft, FolderKanban, Package, Calendar, Building2, Upload, Trash2, Loader2, FileSpreadsheet, CheckCircle } from 'lucide-react'
 import { format } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Separator } from '@/components/ui/separator'
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from '@/components/ui/table'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel,
+  AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
+  AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { useAppStore } from '@/stores/app-store'
+import { BomUploadDialog } from './bom-upload-dialog'
+import { hasPermission } from '@/lib/permissions'
+import { useAuthStore } from '@/stores/auth-store'
+import { toast } from 'sonner'
 
 interface ProjectIssue {
   id: string
@@ -42,6 +54,15 @@ interface ProjectDetail {
   requests: ProjectRequest[]
 }
 
+interface BomData {
+  projectId: string
+  fileName: string
+  sheetName: string
+  columns: string[]
+  rowCount: number
+  rows: Record<string, unknown>[]
+}
+
 const statusColorMap: Record<string, string> = {
   ACTIVE: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
   COMPLETED: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
@@ -55,15 +76,26 @@ const requestStatusColor: Record<string, string> = {
   REJECTED: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
   PARTIAL_APPROVED: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400',
   COMPLETED: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+  CLOSED: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
   CANCELLED: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
 }
 
 export function ProjectDetail() {
+  const user = useAuthStore((s) => s.user)
   const selectedId = useAppStore((s) => s.selectedProductId)
   const goBack = useAppStore((s) => s.goBack)
   const navigate = useAppStore((s) => s.navigate)
   const [project, setProject] = useState<ProjectDetail | null>(null)
   const [loading, setLoading] = useState(true)
+
+  // BOM state
+  const [bomOpen, setBomOpen] = useState(false)
+  const [bomData, setBomData] = useState<BomData | null>(null)
+  const [bomLoading, setBomLoading] = useState(false)
+  const [deleteBomOpen, setDeleteBomOpen] = useState(false)
+  const [deletingBom, setDeletingBom] = useState(false)
+
+  const canEdit = user ? hasPermission(user.role, 'projects', 'edit') : false
 
   const fetchDetail = useCallback(async () => {
     if (!selectedId) return
@@ -74,16 +106,38 @@ export function ProjectDetail() {
         const data = await res.json()
         setProject(data)
       }
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false)
-    }
+    } catch { /* ignore */ } finally { setLoading(false) }
   }, [selectedId])
 
-  useEffect(() => {
-    fetchDetail()
-  }, [fetchDetail])
+  const fetchBom = useCallback(async () => {
+    if (!selectedId) return
+    setBomLoading(true)
+    try {
+      const res = await fetch(`/api/projects/bom?projectId=${selectedId}`)
+      if (res.ok) {
+        const data = await res.json()
+        setBomData(data.data)
+      } else {
+        setBomData(null)
+      }
+    } catch { setBomData(null) } finally { setBomLoading(false) }
+  }, [selectedId])
+
+  useEffect(() => { fetchDetail() }, [fetchDetail])
+  useEffect(() => { fetchBom() }, [fetchBom])
+
+  async function handleDeleteBom() {
+    if (!selectedId) return
+    setDeletingBom(true)
+    try {
+      const res = await fetch(`/api/projects/bom?projectId=${selectedId}`, { method: 'DELETE' })
+      if (res.ok) {
+        toast.success('BOM deleted')
+        setBomData(null)
+        setDeleteBomOpen(false)
+      }
+    } catch { toast.error('Failed to delete BOM') } finally { setDeletingBom(false) }
+  }
 
   if (loading) {
     return (
@@ -117,7 +171,7 @@ export function ProjectDetail() {
         <Button variant="ghost" size="icon" onClick={goBack}>
           <ArrowLeft className="size-4" />
         </Button>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-xl font-bold tracking-tight sm:text-2xl truncate">{project.name}</h1>
             <Badge variant="secondary" className={`text-[10px] ${statusColorMap[project.status] || ''}`}>
@@ -139,6 +193,12 @@ export function ProjectDetail() {
             )}
           </div>
         </div>
+        {canEdit && (
+          <Button size="sm" onClick={() => setBomOpen(true)}>
+            <Upload className="mr-2 size-4" />
+            Upload BOM
+          </Button>
+        )}
       </div>
 
       {/* Stat cards */}
@@ -275,7 +335,119 @@ export function ProjectDetail() {
             )}
           </CardContent>
         </Card>
+
+        {/* BOM Section */}
+        <Card className="lg:col-span-2">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base flex items-center gap-2">
+                <FileSpreadsheet className="size-4" />
+                Bill of Materials (BOM)
+              </CardTitle>
+              {canEdit && bomData && (
+                <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => setDeleteBomOpen(true)}>
+                  <Trash2 className="mr-1.5 size-3.5" />
+                  Delete BOM
+                </Button>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            {bomLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="size-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : bomData ? (
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline" className="text-xs">
+                    <FileSpreadsheet className="mr-1 size-3" />
+                    {bomData.fileName}
+                  </Badge>
+                  <Badge variant="secondary" className="text-xs">
+                    Sheet: {bomData.sheetName}
+                  </Badge>
+                  <Badge variant="secondary" className="text-xs">
+                    {bomData.columns.length} Columns
+                  </Badge>
+                  <Badge variant="secondary" className="text-xs">
+                    {bomData.rowCount} Rows
+                  </Badge>
+                </div>
+                <div className="max-h-96 overflow-auto rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-12 text-center">#</TableHead>
+                        {bomData.columns.map((col) => (
+                          <TableHead key={col} className="text-xs whitespace-nowrap">{col}</TableHead>
+                        ))}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {bomData.rows.map((row, idx) => (
+                        <TableRow key={idx}>
+                          <TableCell className="text-center text-muted-foreground text-xs font-mono">
+                            {idx + 1}
+                          </TableCell>
+                          {bomData.columns.map((col) => (
+                            <TableCell key={col} className="text-xs whitespace-nowrap">
+                              {String(row[col] ?? '')}
+                            </TableCell>
+                          ))}
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-10">
+                <FileSpreadsheet className="size-10 text-muted-foreground/40 mb-3" />
+                <p className="text-sm text-muted-foreground">No BOM uploaded</p>
+                {canEdit && (
+                  <Button variant="outline" size="sm" className="mt-3" onClick={() => setBomOpen(true)}>
+                    <Upload className="mr-2 size-4" />
+                    Upload BOM
+                  </Button>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
+
+      {/* BOM Upload Dialog */}
+      <BomUploadDialog
+        open={bomOpen}
+        onOpenChange={setBomOpen}
+        projectId={selectedId}
+        projectName={project?.name || ''}
+        onSuccess={fetchBom}
+      />
+
+      {/* Delete BOM Confirmation */}
+      <AlertDialog open={deleteBomOpen} onOpenChange={setDeleteBomOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete BOM</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete the BOM for &ldquo;{project?.name}&rdquo;? This will remove all BOM data.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingBom}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteBom}
+              disabled={deletingBom}
+              className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+            >
+              {deletingBom && <Loader2 className="mr-2 size-4 animate-spin" />}
+              Delete BOM
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

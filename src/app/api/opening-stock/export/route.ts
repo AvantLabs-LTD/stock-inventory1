@@ -66,7 +66,7 @@ export async function GET(request: NextRequest) {
     workbook.creator = 'InventoryPro'
     workbook.created = new Date()
 
-    const sheet = workbook.addWorksheet('Opening Stock')
+    const sheet = workbook.addWorksheet('Stock')
 
     // Columns
     const baseColumns = [
@@ -202,7 +202,7 @@ export async function GET(request: NextRequest) {
     // Generate buffer
     const buffer = await workbook.xlsx.writeBuffer()
     const dateStr = new Date().toISOString().split('T')[0]
-    const filename = `Opening Stock Export - ${dateStr}.xlsx`
+    const filename = `Stock Export - ${dateStr}.xlsx`
 
     return new Response(buffer, {
       status: 200,

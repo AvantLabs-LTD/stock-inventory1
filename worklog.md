@@ -161,3 +161,32 @@ Stage Summary:
 - Opening Stock = live inventory register with identical 18 groups, 100 specs
 - Single source of truth: both modules show the same items
 - Products page now has accordion parent-child UI, summary cards, search, category filter, pagination
+---
+Task ID: 1
+Agent: Main
+Task: Rename Opening Stock to Stock + BOM Upload + Request Stock Integration
+
+Work Log:
+- Renamed all user-facing 'Opening Stock' labels to 'Stock' across 14 source files
+- Updated sidebar, page headers, history filters, audit log filters, report export columns, template/export filenames
+- Created ProjectBomItem Prisma model for storing BOM data
+- Created POST/GET/DELETE /api/projects/bom route for BOM Excel upload/parse/delete
+- Created BomUploadDialog component with drag-and-drop Excel upload and column preview
+- Updated ProjectDetail to show BOM data table with column headers, row data, delete capability
+- Updated ProjectPage to add 'Upload BOM' option in project actions dropdown
+- Enhanced RequisitionDetailDialog with stock info per item (In Stock, Ordered, Left in Store)
+- Added item-level status badges (Fulfilled, Partial, Pending, Closed)
+- Added 'Closed' status with auto-visual indicator when requisition is completed
+- Updated complete route to set status to 'CLOSED' and auto-subtract from InventoryItem stock
+- Created StockMovement audit records when stock is deducted on issue
+- Added 'Closed' tab to requests page filter tabs
+- Fixed Prisma include+select conflict in requisitions list route
+- Updated CLOSED status colors in request-page and requisition-detail
+- Clean lint, successful production build
+
+Stage Summary:
+- 'Opening Stock' → 'Stock' renamed throughout the application
+- BOM upload feature added to Projects (upload Excel, parse columns, display data table)
+- Requisition items now show stock availability (total, issued, available) and item-level status
+- Completing a requisition auto-closes it (CLOSED status) and deducts stock from InventoryItem
+- Products → InventoryItem auto-sync already existed from previous session
