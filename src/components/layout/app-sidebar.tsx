@@ -69,7 +69,7 @@ const inventoryItems: NavItem[] = [
   {
     title: "Stock",
     icon: ArrowDownToLine,
-    page: "opening-stock",
+    page: "stock",
     module: "stock",
     action: "view",
   },

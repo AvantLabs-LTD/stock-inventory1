@@ -12,8 +12,7 @@ import { ProductList } from "@/components/products/product-list"
 import { ProductDetail } from "@/components/products/product-detail"
 import { CategoryPage } from "@/components/categories/category-page"
 import { SupplierPage } from "@/components/suppliers/supplier-page"
-import { OpeningStockPage } from "@/components/stock/opening-stock-page"
-import { OpeningStockPageV2 } from "@/components/opening-stock/opening-stock-page"
+import { StockPage } from "@/components/stock/stock-page"
 import { GoodsReceivedPage } from "@/components/stock/goods-received-page"
 import { StockSummaryPage } from "@/components/stock/stock-summary-page"
 import { DepartmentPage } from "@/components/departments/department-page"
@@ -61,8 +60,8 @@ function PageContent() {
       return <CategoryPage />
     case 'suppliers':
       return <SupplierPage />
-    case 'opening-stock':
-      return <OpeningStockPageV2 />
+    case 'stock':
+      return <StockPage />
     case 'goods-received':
       return <GoodsReceivedPage />
     case 'stock-summary':

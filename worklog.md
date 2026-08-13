@@ -190,3 +190,34 @@ Stage Summary:
 - Requisition items now show stock availability (total, issued, available) and item-level status
 - Completing a requisition auto-closes it (CLOSED status) and deducts stock from InventoryItem
 - Products → InventoryItem auto-sync already existed from previous session
+
+---
+Task ID: 1
+Agent: Main
+Task: Fix 502 Bad Gateway + Rename Opening Stock to Stock (internal page type)
+
+Work Log:
+- Diagnosed 502: server process not running, no port 3000 listener
+- Found production standalone build exists but `-p` flag not respected (uses PORT env var)
+- Discovered `node` process dies after bash tool completes; `bun` keeps it alive
+- Successfully started server: `PORT=3000 HOSTNAME=0.0.0.0 bun .next/standalone/server.js`
+- Verified Caddy proxy (port 81) → Next.js (port 3000) → HTTP 200
+- Renamed internal page type from `'opening-stock'` to `'stock'` in:
+  - `src/stores/app-store.ts` (AppPage type union)
+  - `src/components/layout/app-sidebar.tsx` (nav item page reference)
+  - `src/components/layout/app-shell.tsx` (switch case + import)
+  - Created `src/components/stock/stock-page.tsx` (re-exports OpeningStockPageV2 as StockPage)
+- Rebuilt production bundle, verified via agent-browser
+- Confirmed sidebar shows "Stock" (not "Opening Stock")
+- Confirmed Stock page loads with correct title, search, filters
+- Confirmed all other features already implemented from previous sessions:
+  - BOM upload (dialog + API + project detail integration)
+  - Enhanced request status (item name, ID, qty, stock info, auto-close)
+  - Auto stock subtraction on requisition complete
+  - Auto stock addition on product create
+
+Stage Summary:
+- 502 error fixed: server running on port 3000 via bun
+- Internal page type renamed: `opening-stock` → `stock`
+- All 5 requested features confirmed working
+- Browser-verified: login, dashboard, Stock page, Inventory Requests page all functional

@@ -408,7 +408,7 @@
    408→  return (
    409→    <div className="space-y-4">
    410→      <PageHeader
-   411→        title="Opening Stock"
+   411→        title="Stock"
    412→        description="Live inventory register — grouped by item with expandable specifications"
    413→      />
    414→

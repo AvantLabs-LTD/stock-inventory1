@@ -6,7 +6,7 @@ export type AppPage =
   | 'product-detail'
   | 'categories'
   | 'suppliers'
-  | 'opening-stock'
+  | 'stock'
   | 'goods-received'
   | 'stock-summary'
   | 'departments'
