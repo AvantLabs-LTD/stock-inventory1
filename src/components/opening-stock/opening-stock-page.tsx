@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   Package,
   Plus,
@@ -61,6 +61,7 @@ import { toast } from 'sonner'
 import { AddItemModal } from './add-item-modal'
 import { EditStockModal } from './edit-stock-modal'
 import { StockMovementPanel } from './stock-movement-panel'
+import { ImportExcelDialog } from './import-excel-dialog'
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -238,8 +239,7 @@ export function OpeningStockPageV2() {
 
   // Export / Import state
   const [exporting, setExporting] = useState(false)
-  const [importing, setImporting] = useState(false)
-  const importRef = useRef<HTMLInputElement>(null)
+  const [importDialogOpen, setImportDialogOpen] = useState(false)
 
   // ─── Data Fetching ─────────────────────────────────────────────────────
 
@@ -358,37 +358,7 @@ export function OpeningStockPageV2() {
     }
   }
 
-  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setImporting(true)
-    try {
-      const form = new FormData()
-      form.append('file', file)
-      const res = await fetch('/api/inventory-items/import', { method: 'POST', body: form })
-      if (res.ok) {
-        const json = await res.json()
-        const parts: string[] = [`Imported: ${json.imported}`, `Skipped: ${json.skipped}`]
-        if (json.productsCreated) parts.push(`Products created: ${json.productsCreated}`)
-        if (json.categoriesCreated) parts.push(`Categories created: ${json.categoriesCreated}`)
-        toast.success(parts.join(', '))
-        if (json.warnings?.length > 0) {
-          toast.info(`${json.warnings.length} row(s) had issues`, {
-            description: json.warnings.slice(0, 3).map((w: { message: string }) => w.message).join('\n'),
-          })
-        }
-        fetchData()
-      } else {
-        const err = await res.json().catch(() => ({}))
-        toast.error(err.error || 'Import failed')
-      }
-    } catch {
-      toast.error('Import error')
-    } finally {
-      setImporting(false)
-      e.target.value = ''
-    }
-  }
+  // handleImport is now handled by ImportExcelDialog
 
   // ─── Computed ──────────────────────────────────────────────────────────
 
@@ -447,15 +417,8 @@ export function OpeningStockPageV2() {
               Add Item
             </Button>
           )}
-          <input
-            ref={importRef}
-            type="file"
-            accept=".xlsx,.xls,.csv"
-            className="hidden"
-            onChange={handleImport}
-          />
-          <Button variant="outline" size="sm" onClick={() => importRef.current?.click()} disabled={importing}>
-            {importing ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Upload className="h-4 w-4 mr-1.5" />}
+          <Button variant="outline" size="sm" onClick={() => setImportDialogOpen(true)}>
+            <Upload className="h-4 w-4 mr-1.5" />
             Import
           </Button>
           <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting}>
@@ -843,6 +806,13 @@ export function OpeningStockPageV2() {
           </div>
         </div>
       )}
+
+      {/* ─── Import Excel Dialog ──────────────────────────────────────── */}
+      <ImportExcelDialog
+        open={importDialogOpen}
+        onOpenChange={setImportDialogOpen}
+        onSuccess={() => fetchData()}
+      />
 
       {/* ─── Add Item Modal ──────────────────────────────────────────── */}
       <AddItemModal
