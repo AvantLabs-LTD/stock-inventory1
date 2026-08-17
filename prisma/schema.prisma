@@ -10,33 +10,46 @@ datasource db {
 // ─── CORE MODELS ────────────────────────────────────────────────────────────
 
 model User {
-  id            String   @id @default(cuid())
-  email         String   @unique
-  password      String
-  name          String
-  role          String   @default("VIEWER")
-  status        String   @default("ACTIVE")
-  phone         String?
-  avatar        String?
-  departmentId  String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           String   @id @default(cuid())
+  email        String   @unique
+  password     String
+  name         String
+  role         String   @default("VIEWER")
+  status       String   @default("ACTIVE")
+  phone        String?
+  avatar       String?
+  departmentId String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  department        Department?          @relation(fields: [departmentId], references: [id])
-  issuedItems       InventoryIssue[]
-  requestedItems    InventoryRequest[]
-  receivedItems     GoodsReceived[]
-  adjustedItems     StockAdjustment[]
-  auditLogs         AuditLog[]
-  reservationsBy    ReservedInventory[]
-  releasedItems     ReservedInventory[] @relation("ReleasedBy")
-  returnedItems     InventoryReturn[]
-  createdStocks      OpeningStock[]
-  deletedStocks      OpeningStock[] @relation("DeletedBy")
-  ledgerEntries      StockLedger[]
-  importBatches     ImportBatch[]
-  createdRequisitions MaterialRequisition[]
-  approvedRequisitions MaterialRequisition[] @relation("ApprovedByUser")
+  department                  Department?                @relation(fields: [departmentId], references: [id])
+  issuedItems                 InventoryIssue[]
+  requestedItems              InventoryRequest[]
+  receivedItems               GoodsReceived[]
+  adjustedItems               StockAdjustment[]
+  auditLogs                   AuditLog[]
+  reservationsBy              ReservedInventory[]
+  releasedItems               ReservedInventory[]        @relation("ReleasedBy")
+  returnedItems               InventoryReturn[]
+  createdStocks               OpeningStock[]
+  deletedStocks               OpeningStock[]             @relation("DeletedBy")
+  ledgerEntries               StockLedger[]
+  importBatches               ImportBatch[]
+  createdRequisitions         MaterialRequisition[]
+  approvedRequisitions        MaterialRequisition[]      @relation("ApprovedByUser")
+  componentsCreated           Component[]                @relation("ComponentCreatedBy")
+  projectComponentsReconciled ProjectComponent[]         @relation("ProjectComponentReconciledBy")
+  reservationRequestsCreated  ReservationRequest[]       @relation("ReservationRequestCreatedBy")
+  reservationsConverted       Reservation[]              @relation("ReservationConvertedBy")
+  allocationEntriesCreated    InventoryAllocationEntry[] @relation("AllocationEntryCreatedBy")
+  canonicalLedgerEntries      InventoryLedgerEntry[]     @relation("InventoryLedgerActor")
+  stockIssuesPosted           StockIssue[]               @relation("StockIssuePostedBy")
+  purchaseRequestsCreated     PurchaseRequest[]          @relation("PurchaseRequestCreatedBy")
+  purchaseRequestsApproved    PurchaseRequest[]          @relation("PurchaseRequestApprovedBy")
+  goodsReceiptsPosted         GoodsReceipt[]             @relation("GoodsReceiptPostedBy")
+  stockReturnsPosted          StockReturn[]              @relation("StockReturnPostedBy")
+  inventoryAdjustmentsPosted  InventoryAdjustment[]      @relation("InventoryAdjustmentPostedBy")
+  attachmentsUploaded         Attachment[]               @relation("AttachmentUploadedBy")
 
   @@index([email])
   @@index([role])
@@ -54,35 +67,40 @@ model Department {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  users     User[]
-  projects  Project[]
-  issues    InventoryIssue[]
-  requests  InventoryRequest[]
-  returns   InventoryReturn[]
-  requisitions MaterialRequisition[]
+  users                        User[]
+  projects                     Project[]
+  issues                       InventoryIssue[]
+  requests                     InventoryRequest[]
+  returns                      InventoryReturn[]
+  requisitions                 MaterialRequisition[]
+  canonicalReservationRequests ReservationRequest[]
+  canonicalReservations        Reservation[]
 
   @@index([name])
 }
 
 model Project {
-  id            String   @id @default(cuid())
-  name          String
-  code          String   @unique
-  departmentId  String
-  description   String?
-  startDate     DateTime?
-  endDate       DateTime?
-  status        String   @default("ACTIVE")
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           String    @id @default(cuid())
+  name         String
+  code         String    @unique
+  departmentId String
+  description  String?
+  startDate    DateTime?
+  endDate      DateTime?
+  status       String    @default("ACTIVE")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
-  department   Department          @relation(fields: [departmentId], references: [id])
-  issues       InventoryIssue[]
-  requests     InventoryRequest[]
-  reservations ReservedInventory[]
-  returns      InventoryReturn[]
-  requisitions MaterialRequisition[]
-  bomItems    ProjectBomItem[]
+  department                   Department            @relation(fields: [departmentId], references: [id])
+  issues                       InventoryIssue[]
+  requests                     InventoryRequest[]
+  reservations                 ReservedInventory[]
+  returns                      InventoryReturn[]
+  requisitions                 MaterialRequisition[]
+  bomItems                     ProjectBomItem[]
+  canonicalComponents          ProjectComponent[]
+  canonicalReservationRequests ReservationRequest[]
+  canonicalReservations        Reservation[]
 
   @@index([departmentId])
   @@index([status])
@@ -155,22 +173,22 @@ model Product {
   unitCost        Float    @default(0)
   status          String   @default("ACTIVE")
   createdAt       DateTime @default(now())
-  updatedAt       DateTime  @updatedAt
+  updatedAt       DateTime @updatedAt
 
-  parent          Product?              @relation("ProductVariant", fields: [parentProductId], references: [id])
-  variants        Product[]              @relation("ProductVariant")
-  category        Category?              @relation(fields: [categoryId], references: [id])
-  supplier        Supplier?              @relation(fields: [supplierId], references: [id])
-  transactions   InventoryTransaction[]
-  issues         InventoryIssue[]
-  reservations   ReservedInventory[]
-  requests       InventoryRequest[]
-  goodsReceived  GoodsReceived[]
+  parent           Product?               @relation("ProductVariant", fields: [parentProductId], references: [id])
+  variants         Product[]              @relation("ProductVariant")
+  category         Category?              @relation(fields: [categoryId], references: [id])
+  supplier         Supplier?              @relation(fields: [supplierId], references: [id])
+  transactions     InventoryTransaction[]
+  issues           InventoryIssue[]
+  reservations     ReservedInventory[]
+  requests         InventoryRequest[]
+  goodsReceived    GoodsReceived[]
   requisitionItems RequisitionItem[]
-  returns        InventoryReturn[]
-  adjustments    StockAdjustment[]
-  openingStocks  OpeningStock[]
-  projectQtys   ProductProjectQty[]
+  returns          InventoryReturn[]
+  adjustments      StockAdjustment[]
+  openingStocks    OpeningStock[]
+  projectQtys      ProductProjectQty[]
 
   @@index([categoryId])
   @@index([supplierId])
@@ -185,7 +203,7 @@ model Product {
 model StockLedger {
   id              String   @id @default(cuid())
   openingStockId  String
-  transactionType String   // OPENING, GOODS_RECEIVED, ISSUED, RETURNED, TRANSFER_IN, TRANSFER_OUT, ADJUSTMENT_IN, ADJUSTMENT_OUT, DAMAGED, SCRAPPED, RESERVED, RELEASED
+  transactionType String // OPENING, GOODS_RECEIVED, ISSUED, RETURNED, TRANSFER_IN, TRANSFER_OUT, ADJUSTMENT_IN, ADJUSTMENT_OUT, DAMAGED, SCRAPPED, RESERVED, RELEASED
   quantity        Int
   oldStock        Int
   newStock        Int
@@ -196,8 +214,8 @@ model StockLedger {
   referenceId     String?
   createdAt       DateTime @default(now())
 
-  openingStock  OpeningStock @relation(fields: [openingStockId], references: [id], onDelete: Cascade)
-  user          User         @relation(fields: [userId], references: [id])
+  openingStock OpeningStock @relation(fields: [openingStockId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id])
 
   @@index([openingStockId])
   @@index([transactionType])
@@ -244,11 +262,11 @@ model OpeningStock {
   availableStock    Int       @default(0)
   lastTransactionAt DateTime?
 
-  product       Product               @relation(fields: [productId], references: [id])
-  supplier      Supplier?             @relation(fields: [supplierId], references: [id])
-  createdBy     User                  @relation(fields: [createdById], references: [id])
-  deletedByUser User?                 @relation("DeletedBy", fields: [deletedBy], references: [id])
-  importBatch   ImportBatch?          @relation(fields: [importBatchId], references: [id])
+  product       Product                   @relation(fields: [productId], references: [id])
+  supplier      Supplier?                 @relation(fields: [supplierId], references: [id])
+  createdBy     User                      @relation(fields: [createdById], references: [id])
+  deletedByUser User?                     @relation("DeletedBy", fields: [deletedBy], references: [id])
+  importBatch   ImportBatch?              @relation(fields: [importBatchId], references: [id])
   ledger        StockLedger[]
   customValues  OpeningStockCustomValue[]
 
@@ -263,21 +281,21 @@ model OpeningStock {
 // ─── IMPORT BATCH ──────────────────────────────────────────────────────────
 
 model ImportBatch {
-  id             String   @id @default(cuid())
-  fileName       String
-  sheetName      String?
-  totalRows      Int      @default(0)
-  imported       Int      @default(0)
-  updated        Int      @default(0)
-  skipped        Int      @default(0)
-  errorCount     Int      @default(0)
-  warningCount   Int      @default(0)
-  durationMs     Int      @default(0)
-  status         String   @default("COMPLETED")
-  columnMapping  String?
-  errorReport    String?
-  importedById   String
-  createdAt      DateTime @default(now())
+  id            String   @id @default(cuid())
+  fileName      String
+  sheetName     String?
+  totalRows     Int      @default(0)
+  imported      Int      @default(0)
+  updated       Int      @default(0)
+  skipped       Int      @default(0)
+  errorCount    Int      @default(0)
+  warningCount  Int      @default(0)
+  durationMs    Int      @default(0)
+  status        String   @default("COMPLETED")
+  columnMapping String?
+  errorReport   String?
+  importedById  String
+  createdAt     DateTime @default(now())
 
   importedBy    User           @relation(fields: [importedById], references: [id])
   openingStocks OpeningStock[]
@@ -302,10 +320,10 @@ model CustomField {
 }
 
 model OpeningStockCustomValue {
-  id              String @id @default(cuid())
-  openingStockId  String
-  customFieldId   String
-  value           String
+  id             String @id @default(cuid())
+  openingStockId String
+  customFieldId  String
+  value          String
 
   openingStock OpeningStock @relation(fields: [openingStockId], references: [id], onDelete: Cascade)
   customField  CustomField  @relation(fields: [customFieldId], references: [id], onDelete: Cascade)
@@ -327,18 +345,18 @@ model ProjectField {
 }
 
 model ProductProjectQty {
-  id              String @id @default(cuid())
-  productId       String
-  projectFieldId  String
-  requiredQty     Int    @default(0)
-  batchQty        Int    @default(0)
-  reservedQty     Int    @default(0)
-  consumedQty     Int    @default(0)
-  orderedQty      Int    @default(0)
-  toBeUsed        Int    @default(0)
-  remarks         String?
+  id             String  @id @default(cuid())
+  productId      String
+  projectFieldId String
+  requiredQty    Int     @default(0)
+  batchQty       Int     @default(0)
+  reservedQty    Int     @default(0)
+  consumedQty    Int     @default(0)
+  orderedQty     Int     @default(0)
+  toBeUsed       Int     @default(0)
+  remarks        String?
 
-  product     Product      @relation(fields: [productId], references: [id])
+  product      Product      @relation(fields: [productId], references: [id])
   projectField ProjectField @relation(fields: [projectFieldId], references: [id])
 
   @@unique([productId, projectFieldId])
@@ -392,22 +410,22 @@ model GoodsReceived {
 }
 
 model InventoryIssue {
-  id            String   @id @default(cuid())
-  productId     String
-  departmentId  String
-  projectId     String
-  issuedBy      String
-  employeeName  String
+  id             String   @id @default(cuid())
+  productId      String
+  departmentId   String
+  projectId      String
+  issuedBy       String
+  employeeName   String
   productionHall String?
-  quantity      Int
-  remarks       String?
-  date          DateTime @default(now())
-  createdAt     DateTime @default(now())
+  quantity       Int
+  remarks        String?
+  date           DateTime @default(now())
+  createdAt      DateTime @default(now())
 
-  product      Product    @relation(fields: [productId], references: [id])
-  department   Department @relation(fields: [departmentId], references: [id])
-  project      Project    @relation(fields: [projectId], references: [id])
-  issuedByUser User       @relation(fields: [issuedBy], references: [id])
+  product      Product           @relation(fields: [productId], references: [id])
+  department   Department        @relation(fields: [departmentId], references: [id])
+  project      Project           @relation(fields: [projectId], references: [id])
+  issuedByUser User              @relation(fields: [issuedBy], references: [id])
   returns      InventoryReturn[] @relation("IssueReturn")
 
   @@index([productId])
@@ -417,25 +435,25 @@ model InventoryIssue {
 }
 
 model InventoryReturn {
-  id            String   @id @default(cuid())
-  returnNumber  String   @unique
-  productId     String
-  departmentId  String
-  projectId     String
+  id             String   @id @default(cuid())
+  returnNumber   String   @unique
+  productId      String
+  departmentId   String
+  projectId      String
   relatedIssueId String?
-  returnedBy    String
-  employeeName  String
-  quantity      Int
-  reason        String?
-  remarks       String?
-  date          DateTime @default(now())
-  createdAt     DateTime @default(now())
+  returnedBy     String
+  employeeName   String
+  quantity       Int
+  reason         String?
+  remarks        String?
+  date           DateTime @default(now())
+  createdAt      DateTime @default(now())
 
-  product         Product          @relation(fields: [productId], references: [id])
-  department      Department       @relation(fields: [departmentId], references: [id])
-  project         Project          @relation(fields: [projectId], references: [id])
-  relatedIssue    InventoryIssue?  @relation("IssueReturn", fields: [relatedIssueId], references: [id])
-  returnedByUser  User             @relation(fields: [returnedBy], references: [id])
+  product        Product         @relation(fields: [productId], references: [id])
+  department     Department      @relation(fields: [departmentId], references: [id])
+  project        Project         @relation(fields: [projectId], references: [id])
+  relatedIssue   InventoryIssue? @relation("IssueReturn", fields: [relatedIssueId], references: [id])
+  returnedByUser User            @relation(fields: [returnedBy], references: [id])
 
   @@index([productId])
   @@index([departmentId])
@@ -458,10 +476,10 @@ model ReservedInventory {
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
-  product         Product           @relation(fields: [productId], references: [id])
-  project         Project           @relation(fields: [projectId], references: [id])
-  reservedByUser  User              @relation(fields: [reservedBy], references: [id])
-  releasedByUser  User?             @relation("ReleasedBy", fields: [releasedBy], references: [id])
+  product        Product @relation(fields: [productId], references: [id])
+  project        Project @relation(fields: [projectId], references: [id])
+  reservedByUser User    @relation(fields: [reservedBy], references: [id])
+  releasedByUser User?   @relation("ReleasedBy", fields: [releasedBy], references: [id])
 
   @@index([productId])
   @@index([projectId])
@@ -469,29 +487,29 @@ model ReservedInventory {
 }
 
 model InventoryRequest {
-  id            String   @id @default(cuid())
-  productId     String
-  departmentId  String
-  projectId     String
-  requestedBy   String
-  employeeName  String
-  quantity      Int
-  approvedQty   Int      @default(0)
-  priority      String   @default("MEDIUM")
-  reason        String?
-  status        String   @default("PENDING")
-  approvedBy    String?
-  approvedAt    DateTime?
-  completedBy   String?
-  completedAt   DateTime?
-  remarks       String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           String    @id @default(cuid())
+  productId    String
+  departmentId String
+  projectId    String
+  requestedBy  String
+  employeeName String
+  quantity     Int
+  approvedQty  Int       @default(0)
+  priority     String    @default("MEDIUM")
+  reason       String?
+  status       String    @default("PENDING")
+  approvedBy   String?
+  approvedAt   DateTime?
+  completedBy  String?
+  completedAt  DateTime?
+  remarks      String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
-  product          Product    @relation(fields: [productId], references: [id])
-  department       Department @relation(fields: [departmentId], references: [id])
-  project          Project    @relation(fields: [projectId], references: [id])
-  requestedByUser  User       @relation(fields: [requestedBy], references: [id])
+  product         Product    @relation(fields: [productId], references: [id])
+  department      Department @relation(fields: [departmentId], references: [id])
+  project         Project    @relation(fields: [projectId], references: [id])
+  requestedByUser User       @relation(fields: [requestedBy], references: [id])
 
   @@index([productId])
   @@index([departmentId])
@@ -503,29 +521,29 @@ model InventoryRequest {
 // ─── MATERIAL REQUISITION (Multi-item request form) ──────────────────────
 
 model MaterialRequisition {
-  id              String    @id @default(cuid())
-  requisitionNo   String    @unique
-  date            DateTime  @default(now())
-  departmentId    String
-  projectId       String
-  requestedBy     String
-  employeeName    String
-  issuedByName    String?
-  receivedByName  String?
-  approvedBy      String?
-  approvedAt      DateTime?
-  completedBy     String?
-  completedAt     DateTime?
-  status          String    @default("PENDING")
-  remarks         String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id             String    @id @default(cuid())
+  requisitionNo  String    @unique
+  date           DateTime  @default(now())
+  departmentId   String
+  projectId      String
+  requestedBy    String
+  employeeName   String
+  issuedByName   String?
+  receivedByName String?
+  approvedBy     String?
+  approvedAt     DateTime?
+  completedBy    String?
+  completedAt    DateTime?
+  status         String    @default("PENDING")
+  remarks        String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  department       Department        @relation(fields: [departmentId], references: [id])
-  project          Project           @relation(fields: [projectId], references: [id])
-  requestedByUser  User              @relation(fields: [requestedBy], references: [id])
-  approvedByUser   User?             @relation("ApprovedByUser", fields: [approvedBy], references: [id])
-  items            RequisitionItem[]
+  department      Department        @relation(fields: [departmentId], references: [id])
+  project         Project           @relation(fields: [projectId], references: [id])
+  requestedByUser User              @relation(fields: [requestedBy], references: [id])
+  approvedByUser  User?             @relation("ApprovedByUser", fields: [approvedBy], references: [id])
+  items           RequisitionItem[]
 
   @@index([departmentId])
   @@index([projectId])
@@ -552,18 +570,18 @@ model RequisitionItem {
 }
 
 model StockAdjustment {
-  id          String   @id @default(cuid())
-  productId   String
-  type        String
-  quantity    Int
-  reason      String?
-  remarks     String?
-  adjustedBy  String
-  date        DateTime @default(now())
-  createdAt   DateTime @default(now())
+  id         String   @id @default(cuid())
+  productId  String
+  type       String
+  quantity   Int
+  reason     String?
+  remarks    String?
+  adjustedBy String
+  date       DateTime @default(now())
+  createdAt  DateTime @default(now())
 
-  product         Product @relation(fields: [productId], references: [id])
-  adjustedByUser  User    @relation(fields: [adjustedBy], references: [id])
+  product        Product @relation(fields: [productId], references: [id])
+  adjustedByUser User    @relation(fields: [adjustedBy], references: [id])
 
   @@index([productId])
   @@index([type])
@@ -612,7 +630,7 @@ model InventoryItem {
   updatedAt     DateTime @updatedAt
 
   lastTransactionAt DateTime?
-  stockMovements  StockMovement[]
+  stockMovements    StockMovement[]
 
   @@unique([itemName, specification, warehouse])
   @@index([itemName])
@@ -624,13 +642,13 @@ model InventoryItem {
 // ─── PROJECT BOM (Bill of Materials) ───────────────────────────────
 
 model ProjectBomItem {
-  id          String   @id @default(cuid())
-  projectId   String
-  fileName    String
-  sheetName   String?
-  rowData     String   // JSON string of the entire row
-  sortOrder   Int      @default(0)
-  createdAt   DateTime @default(now())
+  id        String   @id @default(cuid())
+  projectId String
+  fileName  String
+  sheetName String?
+  rowData   String // JSON string of the entire row
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
@@ -643,8 +661,8 @@ model ProjectBomItem {
 model StockMovement {
   id              String   @id @default(cuid())
   inventoryItemId String
-  action          String   // ADD, SUBTRACT, ISSUE, RETURN, RECEIVE, RESERVE, RELEASE, DAMAGED, CORRECTION, OPENING
-  reason          String   // Purchase, Manual Adjustment, Damaged, Lost, Found, Correction, Goods Received, Issue, Return, Reservation, Release
+  action          String // ADD, SUBTRACT, ISSUE, RETURN, RECEIVE, RESERVE, RELEASE, DAMAGED, CORRECTION, OPENING
+  reason          String // Purchase, Manual Adjustment, Damaged, Lost, Found, Correction, Goods Received, Issue, Return, Reservation, Release
   quantity        Int
   previousStock   Int
   newStock        Int
@@ -659,4 +677,543 @@ model StockMovement {
   @@index([action])
   @@index([createdAt])
   @@index([userId])
+}
+
+// ─── CANONICAL STORE DOMAIN ────────────────────────────────────────────────
+// These models are intentionally additive while legacy workflows are migrated.
+
+enum ComponentDiscipline {
+  MECHANICAL
+  ELECTRONICS
+}
+
+enum CanonicalRecordStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum ProjectComponentReconciliationStatus {
+  PENDING
+  RECONCILED
+}
+
+enum ReservationRequestStatus {
+  SUBMITTED
+  CONVERTED
+  CANCELLED
+}
+
+enum CanonicalReservationStatus {
+  PENDING_STOCK
+  PARTIALLY_AVAILABLE
+  AVAILABLE
+  PARTIALLY_ISSUED
+  CLOSED
+  CANCELLED
+}
+
+enum AllocationEntryType {
+  ALLOCATE
+  RELEASE
+  CONSUME
+}
+
+enum InventoryLedgerEntryType {
+  OPENING
+  RECEIVE
+  ISSUE
+  RETURN
+  ADJUSTMENT_IN
+  ADJUSTMENT_OUT
+  ASSEMBLY_RECEIVE
+  ASSEMBLY_CONSUME
+}
+
+enum PurchaseRequestType {
+  FOREIGN_STANDARD
+  FOREIGN_MANUFACTURED
+  LOCAL_STANDARD
+  LOCAL_MANUFACTURED
+}
+
+enum PurchaseRequestStatus {
+  BACKLOG
+  PENDING_ORDER_APPROVAL
+  ORDERED
+  SHIPPED
+  RECEIVED_IN_STORE
+  CANCELLED
+}
+
+enum AttachmentKind {
+  RECEIPT
+  INVOICE
+  QUOTATION
+  SHIPPING_DOCUMENT
+  OTHER
+}
+
+model Component {
+  id              String                @id @default(cuid())
+  code            String                @unique
+  title           String
+  discipline      ComponentDiscipline
+  description     String
+  function        String?
+  link            String?
+  optionSelection String?
+  remarks         String?
+  unit            String                @default("pcs")
+  status          CanonicalRecordStatus @default(ACTIVE)
+  createdById     String?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  createdBy               User?                     @relation("ComponentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  balance                 ComponentBalance?
+  projectComponents       ProjectComponent[]
+  reservationRequestLines ReservationRequestLine[]
+  reservationLines        ReservationLine[]
+  ledgerEntries           InventoryLedgerEntry[]
+  purchaseRequestLines    PurchaseRequestLine[]
+  goodsReceiptLines       GoodsReceiptLine[]
+  stockIssueLines         StockIssueLine[]
+  stockReturnLines        StockReturnLine[]
+  adjustmentLines         InventoryAdjustmentLine[]
+
+  @@index([title])
+  @@index([discipline])
+  @@index([status])
+  @@map("components")
+}
+
+model ProjectComponent {
+  id                       String                               @id @default(cuid())
+  projectId                String
+  componentId              String?
+  parentProjectComponentId String?
+  sourceLineKey            String?
+  title                    String
+  discipline               ComponentDiscipline
+  description              String
+  function                 String?
+  link                     String?
+  optionSelection          String?
+  remarks                  String?
+  quantity                 Decimal                              @db.Decimal(18, 6)
+  reconciliationStatus     ProjectComponentReconciliationStatus @default(PENDING)
+  reconciledById           String?
+  reconciledAt             DateTime?
+  sortOrder                Int                                  @default(0)
+  createdAt                DateTime                             @default(now())
+  updatedAt                DateTime                             @updatedAt
+
+  project                 Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  component               Component?               @relation(fields: [componentId], references: [id], onDelete: Restrict)
+  parent                  ProjectComponent?        @relation("ProjectComponentTree", fields: [parentProjectComponentId], references: [id], onDelete: Restrict)
+  children                ProjectComponent[]       @relation("ProjectComponentTree")
+  reconciledBy            User?                    @relation("ProjectComponentReconciledBy", fields: [reconciledById], references: [id], onDelete: SetNull)
+  reservationRequestLines ReservationRequestLine[]
+  reservationLines        ReservationLine[]
+
+  @@unique([projectId, sourceLineKey])
+  @@index([projectId, parentProjectComponentId])
+  @@index([componentId])
+  @@index([reconciliationStatus])
+  @@map("project_components")
+}
+
+model ComponentBalance {
+  componentId String   @id
+  onHand      Decimal  @default(0) @db.Decimal(18, 6)
+  allocated   Decimal  @default(0) @db.Decimal(18, 6)
+  version     Int      @default(0)
+  updatedAt   DateTime @updatedAt
+
+  component Component @relation(fields: [componentId], references: [id], onDelete: Cascade)
+
+  @@map("component_balances")
+}
+
+model InventoryLedgerEntry {
+  id           String                   @id @default(cuid())
+  componentId  String
+  type         InventoryLedgerEntryType
+  quantity     Decimal                  @db.Decimal(18, 6)
+  onHandAfter  Decimal                  @db.Decimal(18, 6)
+  sourceType   String
+  sourceId     String
+  sourceLineId String
+  actorId      String
+  remarks      String?
+  occurredAt   DateTime                 @default(now())
+  createdAt    DateTime                 @default(now())
+
+  component Component @relation(fields: [componentId], references: [id], onDelete: Restrict)
+  actor     User      @relation("InventoryLedgerActor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@unique([sourceType, sourceLineId])
+  @@index([componentId, occurredAt])
+  @@index([sourceType, sourceId])
+  @@map("inventory_ledger_entries")
+}
+
+model ReservationRequest {
+  id            String                   @id @default(cuid())
+  requestNo     String                   @unique
+  projectId     String?
+  departmentId  String?
+  requestedById String
+  status        ReservationRequestStatus @default(SUBMITTED)
+  remarks       String?
+  createdAt     DateTime                 @default(now())
+  updatedAt     DateTime                 @updatedAt
+
+  project     Project?                 @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  department  Department?              @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  requestedBy User                     @relation("ReservationRequestCreatedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+  items       ReservationRequestLine[]
+  reservation Reservation?
+
+  @@index([projectId])
+  @@index([departmentId])
+  @@index([requestedById])
+  @@index([status])
+  @@map("reservation_requests")
+}
+
+model ReservationRequestLine {
+  id                 String              @id @default(cuid())
+  requestId          String
+  componentId        String?
+  projectComponentId String?
+  title              String
+  discipline         ComponentDiscipline
+  description        String
+  function           String?
+  link               String?
+  optionSelection    String?
+  remarks            String?
+  quantity           Decimal             @db.Decimal(18, 6)
+  sortOrder          Int                 @default(0)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  request          ReservationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  component        Component?         @relation(fields: [componentId], references: [id], onDelete: Restrict)
+  projectComponent ProjectComponent?  @relation(fields: [projectComponentId], references: [id], onDelete: Restrict)
+  reservationLine  ReservationLine?
+
+  @@index([requestId])
+  @@index([componentId])
+  @@index([projectComponentId])
+  @@map("reservation_request_lines")
+}
+
+model Reservation {
+  id            String                     @id @default(cuid())
+  reservationNo String                     @unique
+  requestId     String                     @unique
+  projectId     String?
+  departmentId  String?
+  convertedById String
+  status        CanonicalReservationStatus @default(PENDING_STOCK)
+  remarks       String?
+  convertedAt   DateTime                   @default(now())
+  closedAt      DateTime?
+  createdAt     DateTime                   @default(now())
+  updatedAt     DateTime                   @updatedAt
+
+  request     ReservationRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  project     Project?           @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  department  Department?        @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  convertedBy User               @relation("ReservationConvertedBy", fields: [convertedById], references: [id], onDelete: Restrict)
+  lines       ReservationLine[]
+  issues      StockIssue[]
+
+  @@index([projectId])
+  @@index([departmentId])
+  @@index([status])
+  @@map("reservations")
+}
+
+model ReservationLine {
+  id                 String   @id @default(cuid())
+  reservationId      String
+  requestLineId      String   @unique
+  componentId        String
+  projectComponentId String?
+  requestedQuantity  Decimal? @db.Decimal(18, 6)
+  cancelledQuantity  Decimal  @default(0) @db.Decimal(18, 6)
+  remarks            String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  reservation       Reservation                @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  requestLine       ReservationRequestLine     @relation(fields: [requestLineId], references: [id], onDelete: Restrict)
+  component         Component                  @relation(fields: [componentId], references: [id], onDelete: Restrict)
+  projectComponent  ProjectComponent?          @relation(fields: [projectComponentId], references: [id], onDelete: Restrict)
+  allocationEntries InventoryAllocationEntry[]
+  issueLines        StockIssueLine[]
+  purchaseLinks     PurchaseReservationLink[]
+
+  @@index([reservationId])
+  @@index([componentId])
+  @@index([projectComponentId])
+  @@map("reservation_lines")
+}
+
+model InventoryAllocationEntry {
+  id                      String              @id @default(cuid())
+  reservationLineId       String
+  type                    AllocationEntryType
+  quantity                Decimal             @db.Decimal(18, 6)
+  componentAllocatedAfter Decimal             @db.Decimal(18, 6)
+  sourceType              String
+  sourceId                String
+  createdById             String
+  remarks                 String?
+  createdAt               DateTime            @default(now())
+
+  reservationLine ReservationLine @relation(fields: [reservationLineId], references: [id], onDelete: Restrict)
+  createdBy       User            @relation("AllocationEntryCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@unique([sourceType, sourceId])
+  @@index([reservationLineId, createdAt])
+  @@map("inventory_allocation_entries")
+}
+
+model StockIssue {
+  id            String   @id @default(cuid())
+  issueNo       String   @unique
+  reservationId String
+  postedById    String
+  remarks       String?
+  postedAt      DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  reservation Reservation      @relation(fields: [reservationId], references: [id], onDelete: Restrict)
+  postedBy    User             @relation("StockIssuePostedBy", fields: [postedById], references: [id], onDelete: Restrict)
+  lines       StockIssueLine[]
+
+  @@index([reservationId])
+  @@index([postedAt])
+  @@map("stock_issues")
+}
+
+model StockIssueLine {
+  id                String   @id @default(cuid())
+  issueId           String
+  reservationLineId String
+  componentId       String
+  quantity          Decimal  @db.Decimal(18, 6)
+  remarks           String?
+  createdAt         DateTime @default(now())
+
+  issue           StockIssue        @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  reservationLine ReservationLine   @relation(fields: [reservationLineId], references: [id], onDelete: Restrict)
+  component       Component         @relation(fields: [componentId], references: [id], onDelete: Restrict)
+  returnLines     StockReturnLine[]
+
+  @@index([issueId])
+  @@index([reservationLineId])
+  @@index([componentId])
+  @@map("stock_issue_lines")
+}
+
+model PurchaseRequest {
+  id             String                @id @default(cuid())
+  requestNo      String                @unique
+  status         PurchaseRequestStatus @default(BACKLOG)
+  provider       String?
+  trackingNumber String?
+  boxNumber      String?
+  remarks        String?
+  createdById    String
+  approvedById   String?
+  submittedAt    DateTime?
+  approvedAt     DateTime?
+  orderedAt      DateTime?
+  shippedAt      DateTime?
+  receivedAt     DateTime?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  createdBy   User                  @relation("PurchaseRequestCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  approvedBy  User?                 @relation("PurchaseRequestApprovedBy", fields: [approvedById], references: [id], onDelete: Restrict)
+  lines       PurchaseRequestLine[]
+  receipts    GoodsReceipt[]
+  attachments Attachment[]
+
+  @@index([status])
+  @@index([createdById])
+  @@index([approvedById])
+  @@map("purchase_requests")
+}
+
+model PurchaseRequestLine {
+  id                String              @id @default(cuid())
+  purchaseRequestId String
+  componentId       String
+  type              PurchaseRequestType
+  quantity          Decimal             @db.Decimal(18, 6)
+  remarks           String?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  purchaseRequest  PurchaseRequest           @relation(fields: [purchaseRequestId], references: [id], onDelete: Cascade)
+  component        Component                 @relation(fields: [componentId], references: [id], onDelete: Restrict)
+  reservationLinks PurchaseReservationLink[]
+  receiptLines     GoodsReceiptLine[]
+
+  @@index([purchaseRequestId])
+  @@index([componentId])
+  @@index([type])
+  @@map("purchase_request_lines")
+}
+
+model PurchaseReservationLink {
+  id                    String   @id @default(cuid())
+  purchaseRequestLineId String
+  reservationLineId     String
+  quantity              Decimal  @db.Decimal(18, 6)
+  createdAt             DateTime @default(now())
+
+  purchaseRequestLine PurchaseRequestLine @relation(fields: [purchaseRequestLineId], references: [id], onDelete: Cascade)
+  reservationLine     ReservationLine     @relation(fields: [reservationLineId], references: [id], onDelete: Restrict)
+
+  @@unique([purchaseRequestLineId, reservationLineId])
+  @@index([reservationLineId])
+  @@map("purchase_reservation_links")
+}
+
+model GoodsReceipt {
+  id                String   @id @default(cuid())
+  receiptNo         String   @unique
+  purchaseRequestId String?
+  provider          String?
+  trackingNumber    String?
+  boxNumber         String?
+  postedById        String
+  remarks           String?
+  postedAt          DateTime @default(now())
+  createdAt         DateTime @default(now())
+
+  purchaseRequest PurchaseRequest?   @relation(fields: [purchaseRequestId], references: [id], onDelete: Restrict)
+  postedBy        User               @relation("GoodsReceiptPostedBy", fields: [postedById], references: [id], onDelete: Restrict)
+  lines           GoodsReceiptLine[]
+  attachments     Attachment[]
+
+  @@index([purchaseRequestId])
+  @@index([postedAt])
+  @@map("goods_receipts")
+}
+
+model GoodsReceiptLine {
+  id                    String   @id @default(cuid())
+  receiptId             String
+  purchaseRequestLineId String?
+  componentId           String
+  quantity              Decimal  @db.Decimal(18, 6)
+  unitCost              Decimal? @db.Decimal(18, 4)
+  remarks               String?
+  createdAt             DateTime @default(now())
+
+  receipt             GoodsReceipt         @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  purchaseRequestLine PurchaseRequestLine? @relation(fields: [purchaseRequestLineId], references: [id], onDelete: Restrict)
+  component           Component            @relation(fields: [componentId], references: [id], onDelete: Restrict)
+
+  @@index([receiptId])
+  @@index([purchaseRequestLineId])
+  @@index([componentId])
+  @@map("goods_receipt_lines")
+}
+
+model StockReturn {
+  id         String   @id @default(cuid())
+  returnNo   String   @unique
+  postedById String
+  reason     String?
+  remarks    String?
+  postedAt   DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  postedBy User              @relation("StockReturnPostedBy", fields: [postedById], references: [id], onDelete: Restrict)
+  lines    StockReturnLine[]
+
+  @@index([postedAt])
+  @@map("stock_returns")
+}
+
+model StockReturnLine {
+  id          String   @id @default(cuid())
+  returnId    String
+  issueLineId String
+  componentId String
+  quantity    Decimal  @db.Decimal(18, 6)
+  remarks     String?
+  createdAt   DateTime @default(now())
+
+  stockReturn StockReturn    @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  issueLine   StockIssueLine @relation(fields: [issueLineId], references: [id], onDelete: Restrict)
+  component   Component      @relation(fields: [componentId], references: [id], onDelete: Restrict)
+
+  @@index([returnId])
+  @@index([issueLineId])
+  @@index([componentId])
+  @@map("stock_return_lines")
+}
+
+model InventoryAdjustment {
+  id           String   @id @default(cuid())
+  adjustmentNo String   @unique
+  postedById   String
+  reason       String
+  remarks      String?
+  postedAt     DateTime @default(now())
+  createdAt    DateTime @default(now())
+
+  postedBy User                      @relation("InventoryAdjustmentPostedBy", fields: [postedById], references: [id], onDelete: Restrict)
+  lines    InventoryAdjustmentLine[]
+
+  @@index([postedAt])
+  @@map("inventory_adjustments")
+}
+
+model InventoryAdjustmentLine {
+  id           String   @id @default(cuid())
+  adjustmentId String
+  componentId  String
+  quantity     Decimal  @db.Decimal(18, 6)
+  remarks      String?
+  createdAt    DateTime @default(now())
+
+  adjustment InventoryAdjustment @relation(fields: [adjustmentId], references: [id], onDelete: Cascade)
+  component  Component           @relation(fields: [componentId], references: [id], onDelete: Restrict)
+
+  @@index([adjustmentId])
+  @@index([componentId])
+  @@map("inventory_adjustment_lines")
+}
+
+model Attachment {
+  id                String         @id @default(cuid())
+  purchaseRequestId String?
+  goodsReceiptId    String?
+  kind              AttachmentKind @default(OTHER)
+  fileName          String
+  contentType       String
+  sizeBytes         Int
+  data              Bytes
+  uploadedById      String
+  createdAt         DateTime       @default(now())
+
+  purchaseRequest PurchaseRequest? @relation(fields: [purchaseRequestId], references: [id], onDelete: Cascade)
+  goodsReceipt    GoodsReceipt?    @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
+  uploadedBy      User             @relation("AttachmentUploadedBy", fields: [uploadedById], references: [id], onDelete: Restrict)
+
+  @@index([purchaseRequestId])
+  @@index([goodsReceiptId])
+  @@map("attachments")
 }
