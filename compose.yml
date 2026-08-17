@@ -1,0 +1,106 @@
+name: store-management
+
+services:
+  init-secrets:
+    image: alpine:3.20
+    restart: "no"
+    environment:
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+    volumes:
+      - runtime-secrets:/run/app-secrets
+    command:
+      - /bin/sh
+      - -euc
+      - |
+        umask 077
+        generate_secret() {
+          od -An -N32 -tx1 /dev/urandom | tr -d ' \n'
+        }
+        if [ ! -s /run/app-secrets/postgres_password ]; then
+          generate_secret > /run/app-secrets/postgres_password
+        fi
+        if [ ! -s /run/app-secrets/jwt_secret ]; then
+          generate_secret > /run/app-secrets/jwt_secret
+        fi
+        if [ ! -s /run/app-secrets/bootstrap_admin_password ]; then
+          if [ -n "$${BOOTSTRAP_ADMIN_PASSWORD}" ]; then
+            printf '%s' "$${BOOTSTRAP_ADMIN_PASSWORD}" > /run/app-secrets/bootstrap_admin_password
+          else
+            generate_secret > /run/app-secrets/bootstrap_admin_password
+          fi
+        fi
+        chmod 0444 /run/app-secrets/*
+
+  database:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    depends_on:
+      init-secrets:
+        condition: service_completed_successfully
+    environment:
+      POSTGRES_DB: store_management
+      POSTGRES_USER: store_app
+      POSTGRES_PASSWORD_FILE: /run/app-secrets/postgres_password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - runtime-secrets:/run/app-secrets:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U store_app -d store_management"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  migrate:
+    build:
+      context: .
+      target: migrator
+    restart: "no"
+    depends_on:
+      init-secrets:
+        condition: service_completed_successfully
+      database:
+        condition: service_healthy
+    environment:
+      DATABASE_HOST: database
+      DATABASE_NAME: store_management
+      DATABASE_USER: store_app
+      DATABASE_PASSWORD_FILE: /run/app-secrets/postgres_password
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@localhost}
+      BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME:-Super Admin}
+      BOOTSTRAP_ADMIN_PASSWORD_FILE: /run/app-secrets/bootstrap_admin_password
+    volumes:
+      - runtime-secrets:/run/app-secrets:ro
+
+  app:
+    build:
+      context: .
+      target: runner
+    restart: unless-stopped
+    init: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_HOST: database
+      DATABASE_NAME: store_management
+      DATABASE_USER: store_app
+      DATABASE_PASSWORD_FILE: /run/app-secrets/postgres_password
+      JWT_SECRET_FILE: /run/app-secrets/jwt_secret
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+    volumes:
+      - runtime-secrets:/run/app-secrets:ro
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+volumes:
+  postgres-data:
+  runtime-secrets:
