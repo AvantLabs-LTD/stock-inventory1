@@ -14,7 +14,7 @@ model User {
   email        String   @unique
   password     String
   name         String
-  role         String   @default("VIEWER")
+  role         String   @default("USER")
   status       String   @default("ACTIVE")
   phone        String?
   avatar       String?
@@ -50,6 +50,8 @@ model User {
   stockReturnsPosted          StockReturn[]              @relation("StockReturnPostedBy")
   inventoryAdjustmentsPosted  InventoryAdjustment[]      @relation("InventoryAdjustmentPostedBy")
   attachmentsUploaded         Attachment[]               @relation("AttachmentUploadedBy")
+  bomUploadsCreated           ProjectBomUpload[]         @relation("ProjectBomUploadedBy")
+  bomUploadsAccepted          ProjectBomUpload[]         @relation("ProjectBomAcceptedBy")
 
   @@index([email])
   @@index([role])
@@ -101,6 +103,7 @@ model Project {
   canonicalComponents          ProjectComponent[]
   canonicalReservationRequests ReservationRequest[]
   canonicalReservations        Reservation[]
+  canonicalBomUploads          ProjectBomUpload[]
 
   @@index([departmentId])
   @@index([status])
@@ -698,6 +701,13 @@ enum ProjectComponentReconciliationStatus {
   RECONCILED
 }
 
+enum ProjectBomUploadStatus {
+  PENDING_RECONCILIATION
+  ACCEPTED
+  SUPERSEDED
+  REJECTED
+}
+
 enum ReservationRequestStatus {
   SUBMITTED
   CONVERTED
@@ -791,6 +801,7 @@ model Component {
 model ProjectComponent {
   id                       String                               @id @default(cuid())
   projectId                String
+  bomUploadId              String?
   componentId              String?
   parentProjectComponentId String?
   sourceLineKey            String?
@@ -810,6 +821,7 @@ model ProjectComponent {
   updatedAt                DateTime                             @updatedAt
 
   project                 Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  bomUpload               ProjectBomUpload?        @relation(fields: [bomUploadId], references: [id], onDelete: Cascade)
   component               Component?               @relation(fields: [componentId], references: [id], onDelete: Restrict)
   parent                  ProjectComponent?        @relation("ProjectComponentTree", fields: [parentProjectComponentId], references: [id], onDelete: Restrict)
   children                ProjectComponent[]       @relation("ProjectComponentTree")
@@ -817,11 +829,34 @@ model ProjectComponent {
   reservationRequestLines ReservationRequestLine[]
   reservationLines        ReservationLine[]
 
-  @@unique([projectId, sourceLineKey])
+  @@unique([bomUploadId, sourceLineKey])
   @@index([projectId, parentProjectComponentId])
+  @@index([bomUploadId])
   @@index([componentId])
   @@index([reconciliationStatus])
   @@map("project_components")
+}
+
+model ProjectBomUpload {
+  id           String                 @id @default(cuid())
+  projectId    String
+  fileName     String
+  sheetName    String?
+  status       ProjectBomUploadStatus @default(PENDING_RECONCILIATION)
+  uploadedById String
+  acceptedById String?
+  acceptedAt   DateTime?
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+
+  project    Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  uploadedBy User               @relation("ProjectBomUploadedBy", fields: [uploadedById], references: [id], onDelete: Restrict)
+  acceptedBy User?              @relation("ProjectBomAcceptedBy", fields: [acceptedById], references: [id], onDelete: Restrict)
+  lines      ProjectComponent[]
+
+  @@index([projectId, status])
+  @@index([uploadedById])
+  @@map("project_bom_uploads")
 }
 
 model ComponentBalance {

@@ -2,6 +2,10 @@
 
 export const ROLES = {
   SUPER_ADMIN: 'SUPER_ADMIN',
+  INVENTORY_MANAGER: 'INVENTORY_MANAGER',
+  PURCHASE_APPROVER: 'PURCHASE_APPROVER',
+  USER: 'USER',
+  // Legacy values remain readable during the migration window.
   INVENTORY_ADMIN: 'INVENTORY_ADMIN',
   STORE_KEEPER: 'STORE_KEEPER',
   DEPARTMENT_USER: 'DEPARTMENT_USER',
@@ -31,11 +35,18 @@ export type Module =
   | 'reports'
   | 'audit_logs'
   | 'user_management'
+  | 'components'
+  | 'project_bom'
+  | 'reservations'
+  | 'purchase_requests'
 
 // ─── ROLE HIERARCHY (higher number = more permissions) ─────────────────────
 
 const ROLE_LEVEL: Record<string, number> = {
   [ROLES.SUPER_ADMIN]: 100,
+  [ROLES.INVENTORY_MANAGER]: 80,
+  [ROLES.PURCHASE_APPROVER]: 50,
+  [ROLES.USER]: 20,
   [ROLES.INVENTORY_ADMIN]: 80,
   [ROLES.STORE_KEEPER]: 60,
   [ROLES.DEPARTMENT_USER]: 40,
@@ -50,8 +61,8 @@ type ModulePermissions = Record<Action, Role[]>
 
 type PermissionMap = Record<Module, ModulePermissions>
 
-const fullAccess: Role[] = [ROLES.SUPER_ADMIN, ROLES.INVENTORY_ADMIN, ROLES.STORE_KEEPER]
-const adminOnly: Role[] = [ROLES.SUPER_ADMIN, ROLES.INVENTORY_ADMIN]
+const fullAccess: Role[] = [ROLES.SUPER_ADMIN, ROLES.INVENTORY_MANAGER, ROLES.INVENTORY_ADMIN, ROLES.STORE_KEEPER]
+const adminOnly: Role[] = [ROLES.SUPER_ADMIN, ROLES.INVENTORY_MANAGER, ROLES.INVENTORY_ADMIN]
 const superAdminOnly: Role[] = [ROLES.SUPER_ADMIN]
 const allRoles: Role[] = Object.values(ROLES) as Role[]
 const allRolesExceptViewer: Role[] = allRoles.filter((r) => r !== ROLES.VIEWER)
@@ -74,7 +85,7 @@ const permissions: PermissionMap = {
   },
 
   products: {
-    view: [...fullAccess, ROLES.VIEWER],
+    view: allRoles,
     create: fullAccess,
     edit: fullAccess,
     delete: adminOnly,
@@ -90,7 +101,7 @@ const permissions: PermissionMap = {
   },
 
   categories: {
-    view: [...fullAccess, ROLES.VIEWER],
+    view: allRoles,
     create: adminOnly,
     edit: adminOnly,
     delete: superAdminOnly,
@@ -106,7 +117,7 @@ const permissions: PermissionMap = {
   },
 
   suppliers: {
-    view: [...fullAccess, ROLES.VIEWER],
+    view: allRoles,
     create: adminOnly,
     edit: adminOnly,
     delete: superAdminOnly,
@@ -122,7 +133,7 @@ const permissions: PermissionMap = {
   },
 
   stock: {
-    view: [...fullAccess, ROLES.VIEWER],
+    view: allRoles,
     create: [],
     edit: [],
     delete: [],
@@ -138,7 +149,7 @@ const permissions: PermissionMap = {
   },
 
   departments: {
-    view: [...adminOnly, ROLES.VIEWER],
+    view: allRoles,
     create: adminOnly,
     edit: adminOnly,
     delete: superAdminOnly,
@@ -154,7 +165,7 @@ const permissions: PermissionMap = {
   },
 
   projects: {
-    view: [...adminOnly, ROLES.DEPARTMENT_USER, ROLES.VIEWER],
+    view: allRoles,
     create: adminOnly,
     edit: adminOnly,
     delete: superAdminOnly,
@@ -170,7 +181,7 @@ const permissions: PermissionMap = {
   },
 
   issue_inventory: {
-    view: [...fullAccess, ROLES.DEPARTMENT_USER, ROLES.VIEWER],
+    view: allRoles,
     create: fullAccess,
     edit: adminOnly,
     delete: superAdminOnly,
@@ -186,7 +197,7 @@ const permissions: PermissionMap = {
   },
 
   reserved_inventory: {
-    view: [...adminOnly, ROLES.VIEWER],
+    view: allRoles,
     create: adminOnly,
     edit: adminOnly,
     delete: superAdminOnly,
@@ -218,7 +229,7 @@ const permissions: PermissionMap = {
   },
 
   returns: {
-    view: [...fullAccess, ROLES.VIEWER],
+    view: allRoles,
     create: fullAccess,
     edit: adminOnly,
     delete: superAdminOnly,
@@ -234,7 +245,7 @@ const permissions: PermissionMap = {
   },
 
   reports: {
-    view: [...fullAccess, ROLES.VIEWER],
+    view: allRoles,
     create: adminOnly,
     edit: [],
     delete: [],
@@ -279,6 +290,70 @@ const permissions: PermissionMap = {
     reserve: [],
     release: [],
     manage: superAdminOnly,
+  },
+
+  components: {
+    view: allRoles,
+    create: adminOnly,
+    edit: adminOnly,
+    delete: superAdminOnly,
+    approve: [],
+    reject: [],
+    issue: [],
+    receive: [],
+    return: [],
+    adjust: [],
+    reserve: [],
+    release: [],
+    manage: adminOnly,
+  },
+
+  project_bom: {
+    view: allRoles,
+    create: adminOnly,
+    edit: adminOnly,
+    delete: superAdminOnly,
+    approve: adminOnly,
+    reject: adminOnly,
+    issue: [],
+    receive: [],
+    return: [],
+    adjust: [],
+    reserve: [],
+    release: [],
+    manage: adminOnly,
+  },
+
+  reservations: {
+    view: allRoles,
+    create: allRoles,
+    edit: adminOnly,
+    delete: superAdminOnly,
+    approve: adminOnly,
+    reject: adminOnly,
+    issue: adminOnly,
+    receive: [],
+    return: adminOnly,
+    adjust: [],
+    reserve: adminOnly,
+    release: adminOnly,
+    manage: adminOnly,
+  },
+
+  purchase_requests: {
+    view: allRoles,
+    create: adminOnly,
+    edit: adminOnly,
+    delete: superAdminOnly,
+    approve: [ROLES.SUPER_ADMIN, ROLES.PURCHASE_APPROVER],
+    reject: [ROLES.SUPER_ADMIN, ROLES.PURCHASE_APPROVER],
+    issue: [],
+    receive: adminOnly,
+    return: [],
+    adjust: [],
+    reserve: [],
+    release: [],
+    manage: adminOnly,
   },
 }
 

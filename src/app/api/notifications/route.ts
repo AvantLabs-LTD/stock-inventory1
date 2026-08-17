@@ -20,7 +20,11 @@ export async function GET(request: NextRequest) {
     const { user } = session
 
     // Admin notifications: pending requests count, low stock count, out of stock count
-    if (user.role === ROLES.SUPER_ADMIN || user.role === ROLES.INVENTORY_ADMIN) {
+    if (
+      user.role === ROLES.SUPER_ADMIN
+      || user.role === ROLES.INVENTORY_MANAGER
+      || user.role === ROLES.INVENTORY_ADMIN
+    ) {
       // Pending requests
       const pendingCount = await db.inventoryRequest.count({
         where: { status: 'PENDING' },
@@ -104,7 +108,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Department user notifications: their approved/rejected requests
-    if (user.role === ROLES.DEPARTMENT_USER) {
+    if (user.role === ROLES.USER || user.role === ROLES.DEPARTMENT_USER) {
       const recentRequests = await db.inventoryRequest.findMany({
         where: {
           requestedBy: user.id,

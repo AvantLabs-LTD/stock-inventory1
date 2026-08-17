@@ -29,7 +29,7 @@ export async function getProjectComponentRequirements(projectId: string) {
       "coveredQuantity",
       "uncoveredQuantity",
       "isBlocker"
-    FROM "project_component_requirements"
+    FROM "active_project_component_requirements"
     WHERE "projectId" = ${projectId}
     ORDER BY "depth", "projectComponentId"
   `
