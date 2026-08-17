@@ -38,10 +38,10 @@ const productSchema = z.object({
   sku: z.string().min(1, 'SKU is required'),
   size: z.string().optional(),
   categoryId: z.string().optional(),
-  unit: z.string().default('pcs'),
-  minimumStock: z.coerce.number().int().min(0).default(0),
-  unitCost: z.coerce.number().min(0).default(0),
-  status: z.string().default('ACTIVE'),
+  unit: z.string(),
+  minimumStock: z.coerce.number().int().min(0),
+  unitCost: z.coerce.number().min(0),
+  status: z.string(),
 })
 
 type ProductFormValues = z.infer<typeof productSchema>

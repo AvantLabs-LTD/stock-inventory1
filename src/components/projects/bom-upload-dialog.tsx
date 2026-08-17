@@ -3,6 +3,7 @@
 import { useState, useRef } from 'react'
 import { Upload, FileSpreadsheet, X, Loader2, CheckCircle } from 'lucide-react'
 import { toast } from 'sonner'
+import { isUploadTooLarge, MAX_UPLOAD_LABEL } from '@/lib/upload-limits'
 import {
   Dialog,
   DialogContent,
@@ -53,6 +54,13 @@ export function BomUploadDialog({
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const selected = e.target.files?.[0] ?? null
+    if (selected && isUploadTooLarge(selected)) {
+      toast.error(`File too large (max ${MAX_UPLOAD_LABEL})`)
+      e.target.value = ''
+      setFile(null)
+      setBomData(null)
+      return
+    }
     setFile(selected)
     setBomData(null)
   }

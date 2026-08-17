@@ -37,7 +37,7 @@ const departmentSchema = z.object({
   description: z.string().optional(),
   headName: z.string().optional(),
   phone: z.string().optional(),
-  status: z.string().default('ACTIVE'),
+  status: z.string(),
 })
 
 type DepartmentFormValues = z.infer<typeof departmentSchema>

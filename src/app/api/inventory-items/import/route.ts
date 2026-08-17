@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server'
 import ExcelJS from 'exceljs'
+import { isUploadTooLarge, MAX_UPLOAD_LABEL } from '@/lib/upload-limits'
 import { db } from '@/lib/db'
 import { getSession, unauthorizedResponse, forbiddenResponse } from '@/lib/auth-middleware'
 import { hasPermission } from '@/lib/permissions'
@@ -140,6 +141,10 @@ export async function POST(request: NextRequest) {
 
     if (!file) {
       return Response.json({ error: 'No file provided' }, { status: 400 })
+    }
+
+    if (isUploadTooLarge(file)) {
+      return Response.json({ error: `File is too large. Maximum upload size is ${MAX_UPLOAD_LABEL}.` }, { status: 413 })
     }
 
     if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls') && !file.name.endsWith('.csv')) {

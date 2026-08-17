@@ -43,7 +43,7 @@ const projectSchema = z.object({
   description: z.string().optional(),
   startDate: z.string().optional(),
   endDate: z.string().optional(),
-  status: z.string().default('ACTIVE'),
+  status: z.string(),
 })
 
 type ProjectFormValues = z.infer<typeof projectSchema>

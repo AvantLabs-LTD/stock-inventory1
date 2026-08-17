@@ -25,6 +25,7 @@ export async function PUT(
     const requisition = await db.materialRequisition.findUnique({
       where: { id },
       include: {
+        project: { select: { name: true } },
         items: {
           include: {
             product: { select: { id: true, name: true, unit: true, variantName: true, parentProductId: true } },

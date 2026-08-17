@@ -36,7 +36,7 @@ const categorySchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters'),
   description: z.string().optional(),
   parentId: z.string().optional(),
-  status: z.string().default('ACTIVE'),
+  status: z.string(),
 })
 
 type CategoryFormValues = z.infer<typeof categorySchema>

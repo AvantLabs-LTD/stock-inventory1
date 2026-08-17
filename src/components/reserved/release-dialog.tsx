@@ -39,6 +39,7 @@ export function ReleaseDialog({
   if (!reservation) return null
 
   async function handleRelease() {
+    if (!reservation) return
     setLoading(true)
     try {
       const res = await fetch(`/api/reserved/${reservation.id}/release`, {

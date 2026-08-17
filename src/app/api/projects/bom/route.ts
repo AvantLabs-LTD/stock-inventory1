@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs'
 import { db } from '@/lib/db'
 import { getSession, unauthorizedResponse, forbiddenResponse } from '@/lib/auth-middleware'
 import { hasPermission } from '@/lib/permissions'
+import { isUploadTooLarge, MAX_UPLOAD_LABEL } from '@/lib/upload-limits'
 
 // POST /api/projects/bom — Upload and parse BOM Excel file
 export async function POST(request: NextRequest) {
@@ -21,6 +22,12 @@ export async function POST(request: NextRequest) {
     if (!file) {
       return Response.json({ error: 'No file uploaded' }, { status: 400 })
     }
+    if (isUploadTooLarge(file)) {
+      return Response.json({ error: `File is too large. Maximum upload size is ${MAX_UPLOAD_LABEL}.` }, { status: 413 })
+    }
+    if (!file.name.toLowerCase().endsWith('.xlsx')) {
+      return Response.json({ error: 'Invalid file type. Project BOMs must use the .xlsx format.' }, { status: 400 })
+    }
     if (!projectId) {
       return Response.json({ error: 'projectId is required' }, { status: 400 })
     }
@@ -37,7 +44,8 @@ export async function POST(request: NextRequest) {
     // Parse Excel file
     const buffer = Buffer.from(await file.arrayBuffer())
     const workbook = new ExcelJS.Workbook()
-    await workbook.xlsx.load(buffer)
+    const excelBuffer = buffer as unknown as Parameters<typeof workbook.xlsx.load>[0]
+    await workbook.xlsx.load(excelBuffer)
 
     const sheet = workbook.worksheets[0]
     if (!sheet) {
