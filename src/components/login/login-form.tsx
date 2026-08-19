@@ -106,7 +106,7 @@ export function LoginForm() {
                 <Input
                   id="email"
                   type="email"
-                  placeholder="admin@inventorypro.com"
+                  placeholder="name@company.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
@@ -140,17 +140,6 @@ export function LoginForm() {
               </Button>
             </form>
 
-            <div className="mt-6 rounded-lg border bg-muted/50 p-3">
-              <p className="text-xs font-medium text-muted-foreground mb-2">Demo Accounts:</p>
-              <div className="space-y-1 text-xs text-muted-foreground">
-                <p><span className="font-medium">Super Admin:</span> admin@inventorypro.com</p>
-                <p><span className="font-medium">Inv. Admin:</span> inv.admin@inventorypro.com</p>
-                <p><span className="font-medium">Store Keeper:</span> storekeeper@inventorypro.com</p>
-                <p><span className="font-medium">Dept. User:</span> dept.user@inventorypro.com</p>
-                <p><span className="font-medium">Viewer:</span> viewer@inventorypro.com</p>
-                <p className="mt-1 font-medium text-foreground">Password: Admin@123</p>
-              </div>
-            </div>
           </CardContent>
         </Card>
 

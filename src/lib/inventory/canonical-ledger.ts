@@ -203,6 +203,7 @@ async function refreshReservationStatus(tx: Prisma.TransactionClient, reservatio
 }
 
 export async function allocateReservationLine(input: {
+  reservationId?: string
   reservationLineId: string
   quantity: QuantityInput
   actorId: string
@@ -214,6 +215,9 @@ export async function allocateReservationLine(input: {
   return db.$transaction(async (tx) => {
     const line = await tx.reservationLine.findUnique({ where: { id: input.reservationLineId } })
     if (!line) throw new InventoryDomainError('Reservation line was not found', 'NOT_FOUND')
+    if (input.reservationId && line.reservationId !== input.reservationId) {
+      throw new InventoryDomainError('Reservation line does not belong to this reservation', 'INVALID_STATE')
+    }
 
     const totals = await reservationLineTotals(tx, line.id)
     const target = (await reservationLineTarget(tx, line)).minus(line.cancelledQuantity)
@@ -390,6 +394,24 @@ export async function postGoodsReceipt(input: {
 
     for (const requestedLine of input.lines) {
       const quantity = positive(requestedLine.quantity)
+      if (input.purchaseRequestId) {
+        if (!requestedLine.purchaseRequestLineId) {
+          throw new InventoryDomainError('A purchase request receipt must identify each purchase line', 'INVALID_STATE')
+        }
+        const purchaseLine = await tx.purchaseRequestLine.findFirst({
+          where: { id: requestedLine.purchaseRequestLineId, purchaseRequestId: input.purchaseRequestId },
+        })
+        if (!purchaseLine || purchaseLine.componentId !== requestedLine.componentId) {
+          throw new InventoryDomainError('Receipt line does not match the purchase request', 'INVALID_STATE')
+        }
+        const alreadyReceived = await tx.goodsReceiptLine.aggregate({
+          where: { purchaseRequestLineId: purchaseLine.id },
+          _sum: { quantity: true },
+        })
+        if ((alreadyReceived._sum.quantity ?? ZERO).plus(quantity).greaterThan(purchaseLine.quantity)) {
+          throw new InventoryDomainError('Receipt quantity exceeds the purchase request line', 'OVER_FULFILLMENT')
+        }
+      }
       const line = await tx.goodsReceiptLine.create({
         data: {
           receiptId: receipt.id,
@@ -410,6 +432,22 @@ export async function postGoodsReceipt(input: {
         actorId: input.actorId,
         remarks: requestedLine.remarks,
       })
+    }
+
+    if (input.purchaseRequestId) {
+      const lines = await tx.purchaseRequestLine.findMany({
+        where: { purchaseRequestId: input.purchaseRequestId },
+        include: { receiptLines: { select: { quantity: true } } },
+      })
+      const fullyReceived = lines.length > 0 && lines.every((line) =>
+        line.receiptLines.reduce((sum, receiptLine) => sum.plus(receiptLine.quantity), ZERO).greaterThanOrEqualTo(line.quantity)
+      )
+      if (fullyReceived) {
+        await tx.purchaseRequest.update({
+          where: { id: input.purchaseRequestId },
+          data: { status: 'RECEIVED_IN_STORE', receivedAt: new Date() },
+        })
+      }
     }
 
     return tx.goodsReceipt.findUnique({ where: { id: receipt.id }, include: { lines: true } })

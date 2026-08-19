@@ -6,8 +6,11 @@ const prisma = new PrismaClient()
 async function main() {
   console.log('🌱 Seeding database...')
 
-  // Hash the default password
-  const hashedPassword = await bcrypt.hash('Admin@123', 12)
+  const seedUserPassword = process.env.SEED_USER_PASSWORD
+  if (!seedUserPassword || seedUserPassword.length < 12) {
+    throw new Error('SEED_USER_PASSWORD must be configured with at least 12 characters before running the sample-data seed')
+  }
+  const hashedPassword = await bcrypt.hash(seedUserPassword, 12)
 
   // Create Departments
   const itDept = await prisma.department.upsert({

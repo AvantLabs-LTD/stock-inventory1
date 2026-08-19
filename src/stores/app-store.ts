@@ -23,6 +23,9 @@ export type AppPage =
   | 'reports'
   | 'report-view'
   | 'audit-logs'
+  | 'components'
+  | 'reservations'
+  | 'purchase-requests'
 
 interface AppState {
   currentPage: AppPage
@@ -49,6 +52,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     else if (currentPage === 'report-view') set({ currentPage: 'reports', selectedProductId: null })
     else if (currentPage === 'reports') set({ currentPage: 'dashboard', selectedProductId: null })
     else if (currentPage === 'audit-logs') set({ currentPage: 'dashboard', selectedProductId: null })
+    else if (currentPage === 'components' || currentPage === 'reservations' || currentPage === 'purchase-requests') set({ currentPage: 'dashboard', selectedProductId: null })
     else set({ currentPage: 'dashboard', selectedProductId: null })
   },
 }))

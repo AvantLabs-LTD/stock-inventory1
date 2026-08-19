@@ -18,6 +18,9 @@ import {
   PackageCheck,
   History,
   Timer,
+  Boxes,
+  ClipboardCheck,
+  ShoppingCart,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { hasPermission } from "@/lib/permissions"
@@ -53,6 +56,13 @@ const navItems: NavItem[] = [
     icon: LayoutDashboard,
     page: "dashboard",
     module: "dashboard",
+    action: "view",
+  },
+  {
+    title: "Components",
+    icon: Boxes,
+    page: "components",
+    module: "components",
     action: "view",
   },
   {
@@ -128,6 +138,20 @@ const orgItems: NavItem[] = [
 ]
 
 const workflowItems: NavItem[] = [
+  {
+    title: "Reservations",
+    icon: ClipboardCheck,
+    page: "reservations",
+    module: "reservations",
+    action: "view",
+  },
+  {
+    title: "Purchase Requests",
+    icon: ShoppingCart,
+    page: "purchase-requests",
+    module: "purchase_requests",
+    action: "view",
+  },
   {
     title: "Inventory Requests",
     icon: ClipboardList,

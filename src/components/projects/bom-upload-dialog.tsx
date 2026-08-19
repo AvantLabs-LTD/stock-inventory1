@@ -1,244 +1,69 @@
 'use client'
 
-import { useState, useRef } from 'react'
-import { Upload, FileSpreadsheet, X, Loader2, CheckCircle } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { CheckCircle, Download, FileSpreadsheet, Loader2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { isUploadTooLarge, MAX_UPLOAD_LABEL } from '@/lib/upload-limits'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 
-interface BomUploadDialogProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  projectId: string | null
-  projectName: string
-  onSuccess: () => void
-}
+interface BomUploadDialogProps { open: boolean; onOpenChange: (open: boolean) => void; projectId: string | null; projectName: string; onSuccess: () => void }
+type ComponentOption = { id: string; code: string; title: string }
+type BomLine = { id: string; sourceLineKey: string; parentProjectComponentId: string | null; title: string; quantity: string; reconciliationStatus: string; component?: ComponentOption | null }
+type UploadData = { id: string; fileName: string; status: string; lines: BomLine[] }
 
-interface BomData {
-  projectId: string
-  fileName: string
-  sheetName: string
-  columns: string[]
-  rowCount: number
-  rows: Record<string, unknown>[]
-}
-
-export function BomUploadDialog({
-  open,
-  onOpenChange,
-  projectId,
-  projectName,
-  onSuccess,
-}: BomUploadDialogProps) {
+export function BomUploadDialog({ open, onOpenChange, projectId, projectName, onSuccess }: BomUploadDialogProps) {
   const [file, setFile] = useState<File | null>(null)
   const [loading, setLoading] = useState(false)
-  const [bomData, setBomData] = useState<BomData | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [upload, setUpload] = useState<UploadData | null>(null)
+  const [components, setComponents] = useState<ComponentOption[]>([])
+  const [choices, setChoices] = useState<Record<string, string>>({})
+  const inputRef = useRef<HTMLInputElement>(null)
 
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const selected = e.target.files?.[0] ?? null
-    if (selected && isUploadTooLarge(selected)) {
-      toast.error(`File too large (max ${MAX_UPLOAD_LABEL})`)
-      e.target.value = ''
-      setFile(null)
-      setBomData(null)
-      return
-    }
-    setFile(selected)
-    setBomData(null)
+  useEffect(() => {
+    if (!open) return
+    fetch('/api/v1/components?limit=100').then((response) => response.json()).then((body) => setComponents(body.data ?? [])).catch(() => {})
+  }, [open])
+
+  function chooseFile(selected: File | null) {
+    if (selected && isUploadTooLarge(selected)) return toast.error(`File too large (max ${MAX_UPLOAD_LABEL})`)
+    if (selected && !selected.name.toLowerCase().endsWith('.xlsx')) return toast.error('Use the fixed .xlsx BOM template')
+    setFile(selected); setUpload(null)
   }
 
-  function handleRemoveFile() {
-    setFile(null)
-    setBomData(null)
-    if (fileInputRef.current) {
-      fileInputRef.current.value = ''
-    }
-  }
-
-  async function handleUpload() {
+  async function stage() {
     if (!file || !projectId) return
+    const form = new FormData(); form.set('file', file); setLoading(true)
+    const response = await fetch(`/api/v1/projects/${projectId}/bom/uploads`, { method: 'POST', body: form })
+    const body = await response.json().catch(() => ({})); setLoading(false)
+    if (!response.ok) return toast.error(body.row ? `${body.error} (row ${body.row})` : body.error ?? 'Upload failed')
+    setUpload(body.data); toast.success('BOM staged for reconciliation')
+  }
 
+  async function reconcile(line: BomLine, create: boolean) {
     setLoading(true)
-    try {
-      const formData = new FormData()
-      formData.append('file', file)
-      formData.append('projectId', projectId)
-
-      const res = await fetch('/api/projects/bom', {
-        method: 'POST',
-        body: formData,
-      })
-
-      if (!res.ok) {
-        const data = await res.json()
-        throw new Error(data.error || 'Upload failed')
-      }
-
-      const result = await res.json()
-      setBomData(result.data)
-      toast.success('BOM uploaded successfully')
-      onSuccess()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to upload BOM')
-    } finally {
-      setLoading(false)
-    }
+    const response = await fetch(`/api/v1/projects/${projectId}/bom/uploads/${upload!.id}/lines/${line.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(create ? { createComponent: {} } : { componentId: choices[line.id] }) })
+    const body = await response.json().catch(() => ({})); setLoading(false)
+    if (!response.ok) return toast.error(body.error ?? 'Reconciliation failed')
+    setUpload({ ...upload!, lines: upload!.lines.map((item) => item.id === line.id ? body.data : item) }); toast.success(create ? 'New component created' : 'Component matched')
   }
 
-  function handleClose() {
-    setFile(null)
-    setBomData(null)
-    if (fileInputRef.current) {
-      fileInputRef.current.value = ''
-    }
-    onOpenChange(false)
+  async function accept() {
+    setLoading(true)
+    const response = await fetch(`/api/v1/projects/${projectId}/bom/uploads/${upload!.id}/accept`, { method: 'POST' })
+    const body = await response.json().catch(() => ({})); setLoading(false)
+    if (!response.ok) return toast.error(body.error ?? 'BOM could not be accepted')
+    setUpload(body.data); toast.success('BOM accepted as the active project definition'); onSuccess()
   }
 
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(value) => {
-        if (!value) handleClose()
-        else onOpenChange(value)
-      }}
-    >
-      <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
-        <DialogHeader>
-          <DialogTitle>Upload BOM</DialogTitle>
-          <DialogDescription>
-            Upload an Excel file (.xlsx, .xls) containing the Bill of Materials
-            for <span className="font-medium text-foreground">{projectName}</span>.
-          </DialogDescription>
-        </DialogHeader>
+  function close() { setFile(null); setUpload(null); setChoices({}); onOpenChange(false) }
+  const reconciled = upload?.lines.every((line) => line.component && line.reconciliationStatus === 'RECONCILED') ?? false
 
-        <div className="flex-1 overflow-y-auto space-y-4">
-          {!bomData && (
-            <div
-              className="border-2 border-dashed rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 hover:bg-muted/50 transition-colors"
-              onClick={() => fileInputRef.current?.click()}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault()
-                const dropped = e.dataTransfer.files?.[0] ?? null
-                if (dropped && (dropped.name.endsWith('.xlsx') || dropped.name.endsWith('.xls'))) {
-                  setFile(dropped)
-                }
-              }}
-            >
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".xlsx,.xls"
-                className="hidden"
-                onChange={handleFileChange}
-              />
-              <Upload className="mx-auto h-8 w-8 text-muted-foreground" />
-              <p className="mt-2 text-sm text-muted-foreground">
-                {file ? (
-                  <span className="text-foreground font-medium">{file.name}</span>
-                ) : (
-                  <>
-                    Click or drag and drop to upload
-                    <br />
-                    <span className="text-xs">.xlsx, .xls files only</span>
-                  </>
-                )}
-              </p>
-            </div>
-          )}
-
-          {file && !bomData && (
-            <div className="flex items-center justify-between rounded-md border bg-muted/30 px-4 py-3">
-              <div className="flex items-center gap-3 min-w-0">
-                <FileSpreadsheet className="h-5 w-5 shrink-0 text-emerald-600" />
-                <span className="text-sm font-medium truncate">{file.name}</span>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="shrink-0 h-8 w-8"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  handleRemoveFile()
-                }}
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-          )}
-
-          {bomData && (
-            <div className="space-y-4">
-              <div className="flex items-center gap-2 text-sm">
-                <CheckCircle className="h-4 w-4 text-emerald-600" />
-                <span className="font-medium">{bomData.fileName}</span>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <Badge variant="secondary">Sheet: {bomData.sheetName}</Badge>
-                <Badge variant="secondary">{bomData.columns.length} Columns</Badge>
-                <Badge variant="secondary">{bomData.rowCount} Rows</Badge>
-              </div>
-
-              <div className="max-h-[400px] overflow-auto rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-12 text-center">#</TableHead>
-                      {bomData.columns.map((col) => (
-                        <TableHead key={col}>{col}</TableHead>
-                      ))}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {bomData.rows.map((row, idx) => (
-                      <TableRow key={idx}>
-                        <TableCell className="text-center text-muted-foreground text-xs">
-                          {idx + 1}
-                        </TableCell>
-                        {bomData.columns.map((col) => (
-                          <TableCell key={col} className="whitespace-nowrap">
-                            {String(row[col] ?? '')}
-                          </TableCell>
-                        ))}
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={handleClose}>Close</Button>
-          {!bomData && (
-            <Button disabled={!file || loading} onClick={handleUpload}>
-              {loading && <Loader2 className="mr-2 size-4 animate-spin" />}
-              <Upload className="mr-2 size-4" />
-              Upload
-            </Button>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
+  return <Dialog open={open} onOpenChange={(value) => value ? onOpenChange(true) : close()}><DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-5xl"><DialogHeader><DialogTitle>Project BOM · {projectName}</DialogTitle><DialogDescription>Use the fixed hierarchical template. Uploads remain pending until every line is reconciled and an inventory manager accepts them.</DialogDescription></DialogHeader>
+    {!upload ? <div className="space-y-4"><a href="/api/v1/projects/bom/template" className="inline-flex items-center text-sm text-primary hover:underline"><Download className="mr-2 size-4" />Download fixed Excel template</a><div className="cursor-pointer rounded-lg border-2 border-dashed p-8 text-center hover:bg-muted/40" onClick={() => inputRef.current?.click()}><input ref={inputRef} type="file" accept=".xlsx" className="hidden" onChange={(event) => chooseFile(event.target.files?.[0] ?? null)} /><FileSpreadsheet className="mx-auto size-8 text-muted-foreground" /><p className="mt-2 text-sm">{file?.name ?? 'Choose an .xlsx BOM file'}</p><p className="text-xs text-muted-foreground">Maximum {MAX_UPLOAD_LABEL}</p></div></div> : <div className="space-y-4"><div className="flex items-center gap-2"><Badge>{upload.status.replaceAll('_', ' ')}</Badge><span className="text-sm">{upload.fileName}</span></div><div className="overflow-x-auto rounded-lg border"><Table><TableHeader><TableRow><TableHead>Line</TableHead><TableHead>Parent</TableHead><TableHead>Component description</TableHead><TableHead>Qty/set</TableHead><TableHead>Reconciliation</TableHead></TableRow></TableHeader><TableBody>{upload.lines.map((line) => <TableRow key={line.id}><TableCell>{line.sourceLineKey}</TableCell><TableCell>{upload.lines.find((parent) => parent.id === line.parentProjectComponentId)?.sourceLineKey ?? 'Project'}</TableCell><TableCell>{line.title}</TableCell><TableCell>{line.quantity}</TableCell><TableCell>{line.component ? <div className="flex items-center gap-2 text-sm"><CheckCircle className="size-4 text-emerald-600" />{line.component.code} — {line.component.title}</div> : <div className="flex min-w-[360px] gap-2"><Select value={choices[line.id] ?? ''} onValueChange={(value) => setChoices({ ...choices, [line.id]: value })}><SelectTrigger><SelectValue placeholder="Match store component" /></SelectTrigger><SelectContent>{components.map((component) => <SelectItem key={component.id} value={component.id}>{component.code} — {component.title}</SelectItem>)}</SelectContent></Select><Button size="sm" variant="outline" disabled={!choices[line.id] || loading} onClick={() => void reconcile(line, false)}>Match</Button><Button size="sm" disabled={loading} onClick={() => void reconcile(line, true)}>Create</Button></div>}</TableCell></TableRow>)}</TableBody></Table></div></div>}
+    <DialogFooter><Button variant="outline" onClick={close}>Close</Button>{!upload && <Button disabled={!file || loading} onClick={() => void stage()}>{loading && <Loader2 className="mr-2 size-4 animate-spin" />}<Upload className="mr-2 size-4" />Stage upload</Button>}{upload && upload.status === 'PENDING_RECONCILIATION' && <Button disabled={!reconciled || loading} onClick={() => void accept()}>{loading && <Loader2 className="mr-2 size-4 animate-spin" />}Accept BOM</Button>}</DialogFooter>
+  </DialogContent></Dialog>
 }

@@ -29,6 +29,9 @@ import { ProductHistoryPage } from '@/components/history/product-history-page'
 import { ReportsPage } from '@/components/reports/reports-page'
 import { ReportView } from '@/components/reports/report-view'
 import { AuditLogsPage } from '@/components/audit/audit-logs-page'
+import { ComponentsPage } from '@/components/canonical/components-page'
+import { ReservationsPage } from '@/components/canonical/reservations-page'
+import { PurchaseRequestsPage } from '@/components/canonical/purchase-requests-page'
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Toaster } from "@/components/ui/sonner"
@@ -94,6 +97,12 @@ function PageContent() {
       return <ReportView />
     case 'audit-logs':
       return <AuditLogsPage />
+    case 'components':
+      return <ComponentsPage />
+    case 'reservations':
+      return <ReservationsPage />
+    case 'purchase-requests':
+      return <PurchaseRequestsPage />
     case 'dashboard':
     default:
       return <DashboardPage />
