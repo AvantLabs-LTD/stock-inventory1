@@ -56,6 +56,8 @@ interface Supplier {
   contactPerson: string | null
   phone: string | null
   email: string | null
+  address: string | null
+  notes: string | null
   status: string
   _count: { products: number }
 }

@@ -70,11 +70,11 @@ interface VariantData {
   name: string
   variantName: string | null
   sku: string
+  size: string | null
   unit: string
   minimumStock: number
   unitCost: number
   status: string
-  size: string | null
 }
 
 interface ParentProduct {
@@ -82,6 +82,7 @@ interface ParentProduct {
   code: string
   name: string
   sku: string
+  size: string | null
   unit: string
   minimumStock: number
   unitCost: number

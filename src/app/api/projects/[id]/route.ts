@@ -24,12 +24,12 @@ export async function GET(
         department: { select: { id: true, name: true, code: true, headName: true, phone: true } },
         _count: { select: { issues: true, requests: true, reservations: true, returns: true } },
         issues: {
-          select: { id: true, date: true, quantity, employeeName, remarks: true },
+          select: { id: true, date: true, quantity: true, employeeName: true, remarks: true },
           orderBy: { date: 'desc' },
           take: 5,
         },
         requests: {
-          select: { id: true, createdAt: true, quantity, approvedQty, employeeName, status: true },
+          select: { id: true, createdAt: true, quantity: true, approvedQty: true, employeeName: true, status: true },
           orderBy: { createdAt: 'desc' },
           take: 5,
         },

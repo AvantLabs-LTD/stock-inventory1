@@ -53,8 +53,10 @@ export function ProductDetail() {
     if (selectedProductId !== prevIdRef[0]) {
       prevIdRef[1](selectedProductId)
       setProduct(null)
-      setLoading(true)
-      fetchProduct(selectedProductId)
+      if (selectedProductId) {
+        setLoading(true)
+        fetchProduct(selectedProductId)
+      }
     }
   }, [selectedProductId, fetchProduct, prevIdRef])
 

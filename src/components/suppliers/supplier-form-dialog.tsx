@@ -39,7 +39,7 @@ const supplierSchema = z.object({
   email: z.string().email('Invalid email').optional().or(z.literal('')),
   address: z.string().optional(),
   notes: z.string().optional(),
-  status: z.string().default('ACTIVE'),
+  status: z.string(),
 })
 
 type SupplierFormValues = z.infer<typeof supplierSchema>

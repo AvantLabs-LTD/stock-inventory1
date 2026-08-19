@@ -38,20 +38,8 @@ export async function GET(
 
     // Fetch stock availability for each item's product
     const productIds = requisition.items.map((item) => item.productId)
-    const inventoryItems = await db.inventoryItem.findMany({
-      where: {
-        OR: [
-          // Match by product variantName → itemName + specification
-          ...productIds.map((pid) => ({
-            product: {
-              id: pid,
-            },
-          })),
-        ],
-      },
-    })
-
-    // Simpler approach: fetch all InventoryItems and group by name+spec
+    // InventoryItem is a legacy name/spec register without a Product relation,
+    // so build the lookup explicitly until it is replaced by Component.
     const allInventory = await db.inventoryItem.findMany({
       where: { status: 'ACTIVE' },
     })

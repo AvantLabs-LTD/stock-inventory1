@@ -26,6 +26,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { toast } from 'sonner'
+import { isUploadTooLarge, MAX_UPLOAD_LABEL } from '@/lib/upload-limits'
 
 // ─── Column Aliases (mirrors server-side) ────────────────────────────────────
 
@@ -255,7 +256,7 @@ export function ImportExcelDialog({ open, onOpenChange, onSuccess }: Props) {
       return
     }
     if (f.size === 0) { toast.error('File is empty'); return }
-    if (f.size > 50 * 1024 * 1024) { toast.error('File too large (max 50 MB)'); return }
+    if (isUploadTooLarge(f)) { toast.error(`File too large (max ${MAX_UPLOAD_LABEL})`); return }
     setFile(f)
     parseFile(f)
   }
@@ -271,7 +272,8 @@ export function ImportExcelDialog({ open, onOpenChange, onSuccess }: Props) {
   function toggleGroup(name: string) {
     setExpanded((prev) => {
       const n = new Set(prev)
-      n.has(name) ? n.delete(name) : n.add(name)
+      if (n.has(name)) n.delete(name)
+      else n.add(name)
       return n
     })
   }

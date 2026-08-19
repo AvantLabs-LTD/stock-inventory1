@@ -251,6 +251,9 @@ export function DashboardPage() {
 
   const roleColorMap: Record<string, string> = {
     SUPER_ADMIN: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+    INVENTORY_MANAGER: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
+    PURCHASE_APPROVER: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400",
+    USER: "bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400",
     INVENTORY_ADMIN: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
     STORE_KEEPER: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
     DEPARTMENT_USER: "bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400",

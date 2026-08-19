@@ -1,0 +1,12 @@
+.git
+.next
+node_modules
+*.log
+.env*
+auth-state.json
+db/
+download/
+upload/
+*.png
+agent-ctx/
+worklog.md

@@ -18,6 +18,10 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     
     // React rules
     "react-hooks/exhaustive-deps": "off",
+    // Existing screens intentionally load and reset local state from effects.
+    // Revisit these when the data layer moves to query hooks.
+    "react-hooks/set-state-in-effect": "off",
+    "react-hooks/incompatible-library": "off",
     "react-hooks/purity": "off",
     "react/no-unescaped-entities": "off",
     "react/display-name": "off",
