@@ -1,29 +1,21 @@
-import { NextRequest } from 'next/server'
-import { getSession, forbiddenResponse, unauthorizedResponse } from '@/lib/auth-middleware'
-import { PurchaseRequestDomainError, transitionPurchaseRequest } from '@/lib/inventory/purchase-request-service'
-import { hasPermission } from '@/lib/permissions'
-import { purchaseRequestTransitionSchema } from '@/lib/validation/purchase-request'
+import { NextRequest } from "next/server"
+import { db } from "@/lib/db"
+import { getSession, unauthorizedResponse } from "@/lib/auth-middleware"
+import { apiError, DomainError } from "@/lib/inventory-service"
 
-export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const session = await getSession(request)
-  if (!session) return unauthorizedResponse()
-  if (!hasPermission(session.user.role, 'purchase_requests', 'view')) return forbiddenResponse()
-  const parsed = purchaseRequestTransitionSchema.safeParse(await request.json())
-  if (!parsed.success) return Response.json({ error: 'Invalid lifecycle transition', details: parsed.error.flatten() }, { status: 400 })
+const next: Record<string, string> = { BACKLOG: "PENDING_APPROVAL", PENDING_APPROVAL: "ORDERED", ORDERED: "SHIPPED" }
+export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
+  const session = await getSession(request); if (!session) return unauthorizedResponse()
   try {
-    const data = await transitionPurchaseRequest({
-      id: (await params).id,
-      target: parsed.data.status,
-      actorId: session.user.id,
-      actorMayOrder: hasPermission(session.user.role, 'purchase_requests', 'approve'),
-      actorMayManage: hasPermission(session.user.role, 'purchase_requests', 'manage'),
-    })
-    return Response.json({ data })
-  } catch (error) {
-    if (error instanceof PurchaseRequestDomainError) {
-      const status = error.code === 'NOT_FOUND' ? 404 : error.code === 'FORBIDDEN' ? 403 : 409
-      return Response.json({ error: error.message }, { status })
-    }
-    throw error
-  }
+    const { id } = await context.params; const body = await request.json()
+    const current = await db.purchaseRequest.findUnique({ where: { id } })
+    if (!current) throw new DomainError("PURCHASE_NOT_FOUND", "Purchase request not found", 404)
+    if (next[current.status] !== body.status) throw new DomainError("INVALID_TRANSITION", "Only the next forward purchase stage is allowed")
+    const now = new Date()
+    const requestRecord = await db.purchaseRequest.update({ where: { id }, data: {
+      status: body.status, submittedAt: body.status === "PENDING_APPROVAL" ? now : undefined,
+      orderedAt: body.status === "ORDERED" ? now : undefined, shippedAt: body.status === "SHIPPED" ? now : undefined,
+    } })
+    return Response.json({ request: requestRecord })
+  } catch (e) { return apiError(e) }
 }

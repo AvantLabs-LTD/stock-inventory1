@@ -1,54 +1,49 @@
-import { Prisma, PurchaseRequestStatus } from '@prisma/client'
-import { NextRequest } from 'next/server'
-import { getSession, forbiddenResponse, unauthorizedResponse } from '@/lib/auth-middleware'
-import { db } from '@/lib/db'
-import { createPurchaseRequest, PurchaseRequestDomainError } from '@/lib/inventory/purchase-request-service'
-import { hasPermission } from '@/lib/permissions'
-import { purchaseRequestCreateSchema } from '@/lib/validation/purchase-request'
+import { NextRequest } from "next/server"
+import { Prisma } from "@prisma/client"
+import { db } from "@/lib/db"
+import { getSession, unauthorizedResponse } from "@/lib/auth-middleware"
+import { apiError, DomainError, normalizeName } from "@/lib/inventory-service"
 
 export async function GET(request: NextRequest) {
-  const session = await getSession(request)
-  if (!session) return unauthorizedResponse()
-  if (!hasPermission(session.user.role, 'purchase_requests', 'view')) return forbiddenResponse()
-  const { searchParams } = new URL(request.url)
-  const status = searchParams.get('status')
-  if (status && !Object.values(PurchaseRequestStatus).includes(status as PurchaseRequestStatus)) {
-    return Response.json({ error: 'Invalid purchase request status' }, { status: 400 })
-  }
-  const page = Math.max(1, Number.parseInt(searchParams.get('page') ?? '1', 10) || 1)
-  const limit = Math.min(100, Math.max(1, Number.parseInt(searchParams.get('limit') ?? '25', 10) || 25))
-  const where: Prisma.PurchaseRequestWhereInput = status ? { status: status as PurchaseRequestStatus } : {}
-  const [items, total] = await Promise.all([
-    db.purchaseRequest.findMany({
-      where,
-      include: {
-        createdBy: { select: { id: true, name: true } },
-        approvedBy: { select: { id: true, name: true } },
-        lines: { include: { component: true, reservationLinks: true, receiptLines: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-      skip: (page - 1) * limit,
-      take: limit,
-    }),
-    db.purchaseRequest.count({ where }),
-  ])
-  return Response.json({ data: items, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } })
+  if (!await getSession(request)) return unauthorizedResponse()
+  const requests = await db.purchaseRequest.findMany({ include: {
+    vendor: true, createdBy: { select: { id: true, name: true } },
+    lines: { include: { item: true, classification: true, demandLinks: true, receiptLines: true } },
+  }, orderBy: { createdAt: "desc" }, take: 200 })
+  return Response.json({ requests })
 }
 
 export async function POST(request: NextRequest) {
-  const session = await getSession(request)
-  if (!session) return unauthorizedResponse()
-  if (!hasPermission(session.user.role, 'purchase_requests', 'create')) return forbiddenResponse()
-  const parsed = purchaseRequestCreateSchema.safeParse(await request.json())
-  if (!parsed.success) return Response.json({ error: 'Invalid purchase request', details: parsed.error.flatten() }, { status: 400 })
+  const session = await getSession(request); if (!session) return unauthorizedResponse()
   try {
-    const created = await createPurchaseRequest({ actorId: session.user.id, idempotencyKey: request.headers.get('idempotency-key') ?? undefined, ...parsed.data })
-    return Response.json({ data: created }, { status: 201 })
-  } catch (error) {
-    if (error instanceof PurchaseRequestDomainError) {
-      return Response.json({ error: error.message }, { status: error.code === 'NOT_FOUND' ? 404 : 400 })
-    }
-    console.error('POST purchase request error:', error)
-    return Response.json({ error: 'Failed to create purchase request' }, { status: 500 })
-  }
+    const body = await request.json()
+    if (!body.lines?.length) throw new DomainError("PURCHASE_LINES_REQUIRED", "At least one purchase row is required")
+    const result = await db.$transaction(async tx => {
+      let vendorId = body.vendorId || null
+      if (!vendorId && body.vendorName?.trim()) {
+        const name = body.vendorName.trim()
+        vendorId = (await tx.vendor.upsert({ where: { normalizedName: normalizeName(name) }, update: {}, create: { name, normalizedName: normalizeName(name) } })).id
+      }
+      const header = await tx.purchaseRequest.create({ data: {
+        requestNo: "PUR-" + Date.now() + "-" + Math.floor(Math.random()*1000),
+        vendorId, createdById: session.user.id, remarks: body.remarks,
+        trackingNumber: body.trackingNumber, boxNumber: body.boxNumber, shippingDetails: body.shippingDetails,
+      } })
+      for (const row of body.lines as Array<{ itemId: string; classificationId: string; quantity: Prisma.Decimal.Value; remarks?: string; demandLinks?: Array<{ demandLineId: string; quantity: Prisma.Decimal.Value }> }>) {
+        const quantity = new Prisma.Decimal(row.quantity)
+        if (quantity.lte(0)) throw new DomainError("INVALID_QUANTITY", "Purchase quantities must be positive")
+        const line = await tx.purchaseRequestLine.create({ data: { purchaseRequestId: header.id, itemId: row.itemId, classificationId: row.classificationId, quantity, remarks: row.remarks } })
+        let linked = new Prisma.Decimal(0)
+        for (const link of row.demandLinks || []) {
+          const q = new Prisma.Decimal(link.quantity); linked = linked.plus(q)
+          const demandLine = await tx.demandLine.findUnique({ where: { id: link.demandLineId } })
+          if (!demandLine || demandLine.itemId !== row.itemId || q.lte(0)) throw new DomainError("INVALID_DEMAND_LINK", "Purchase link must target a demand row for the same item")
+          await tx.demandPurchaseLink.create({ data: { purchaseRequestLineId: line.id, demandLineId: link.demandLineId, quantity: q } })
+        }
+        if (linked.gt(quantity)) throw new DomainError("OVER_LINKED_PURCHASE", "Linked demand quantity exceeds purchase quantity")
+      }
+      return tx.purchaseRequest.findUnique({ where: { id: header.id }, include: { vendor: true, lines: { include: { item: true, classification: true, demandLinks: true } } } })
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+    return Response.json({ request: result }, { status: 201 })
+  } catch (e) { return apiError(e) }
 }

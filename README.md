@@ -1,6 +1,8 @@
 # Store Management and Purchase Portal
 
-This repository is a PostgreSQL-backed store-management and purchasing portal built around one component catalogue, one inventory ledger, cycle-scoped demand, and linked purchasing.
+This repository is a PostgreSQL-backed store-management and purchasing portal built around one item catalogue, one inventory ledger, row-based demands, and linked purchasing.
+
+A department optionally tags a demand; a project optionally tags an individual demand row. There are no project, BOM, manufacturing-cycle, reservation-request, or issue domains. Reserving protects stock, while allocating is the final handover and the only stock-out event. Operational quantities and deficits are derived from immutable facts.
 
 ## Run the complete stack
 
@@ -21,7 +23,7 @@ The application is available at <http://localhost:3000>. On first startup, the s
 2. Stores those values in a private persistent Docker volume.
 3. Creates the PostgreSQL database.
 4. Applies all committed Prisma migrations.
-5. Creates the initial administrator if it does not already exist.
+5. Creates the initial authenticated user if it does not already exist.
 6. Starts the application only after migration and bootstrap succeed.
 
 The default administrator email is `admin@localhost`. Retrieve its generated password with:
@@ -95,7 +97,7 @@ Never run `docker compose down -v` unless permanent deletion of the database and
 - The application container runs as an unprivileged user.
 - Authentication secrets must contain at least 32 characters.
 - The stack health check verifies both the web server and its database connection.
-- Upload endpoints enforce the agreed 5 MB limit and validate supported file signatures.
+- Upload endpoints enforce the agreed 5 MB limit and a restricted content-type list.
 
 ## Development commands
 

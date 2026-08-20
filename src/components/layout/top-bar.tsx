@@ -35,7 +35,7 @@ export function TopBar({ onChangePassword }: TopBarProps) {
       <SidebarTrigger className="-ml-1" />
       <Separator orientation="vertical" className="mr-2 h-4" />
       <div className="flex-1 text-sm font-medium text-muted-foreground">
-        {user.departmentName ?? 'Store Management'}
+        Store Management
       </div>
       {mounted && (
         <Button variant="ghost" size="icon" className="size-8" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
@@ -51,7 +51,7 @@ export function TopBar({ onChangePassword }: TopBarProps) {
         </DropdownMenuTrigger>
         <DropdownMenuContent className="w-56" align="end">
           <DropdownMenuLabel>
-            <div className="flex flex-col gap-1"><span>{user.name}</span><span className="text-xs font-normal text-muted-foreground">{user.role.replaceAll('_', ' ')}</span></div>
+            <div className="flex flex-col gap-1"><span>{user.name}</span><span className="text-xs font-normal text-muted-foreground">Authenticated user</span></div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuGroup>

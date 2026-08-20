@@ -17,7 +17,6 @@ function getSecret(): Uint8Array {
 export interface SessionPayload {
   userId: string
   email: string
-  role: string
 }
 
 export async function hashPassword(password: string): Promise<string> {
@@ -44,7 +43,6 @@ export async function verifySessionToken(token: string): Promise<SessionPayload 
     return {
       userId: payload.userId as string,
       email: payload.email as string,
-      role: payload.role as string,
     }
   } catch {
     return null

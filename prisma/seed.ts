@@ -14,12 +14,11 @@ async function main() {
 
   await prisma.user.upsert({
     where: { email },
-    update: { name, role: 'SUPER_ADMIN', status: 'ACTIVE' },
+    update: { name, status: 'ACTIVE' },
     create: {
       email,
       name,
       password: await bcrypt.hash(password, 12),
-      role: 'SUPER_ADMIN',
       status: 'ACTIVE',
     },
   })

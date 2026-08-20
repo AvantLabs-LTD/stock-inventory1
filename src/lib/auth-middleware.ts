@@ -8,9 +8,6 @@ export interface AuthSession {
     id: string
     email: string
     name: string
-    role: string
-    departmentId: string | null
-    departmentName: string | null
     status: string
   }
 }
@@ -46,14 +43,7 @@ export async function getSession(request?: NextRequest): Promise<AuthSession | n
         id: true,
         email: true,
         name: true,
-        role: true,
         status: true,
-        departmentId: true,
-        department: {
-          select: {
-            name: true,
-          },
-        },
       },
     })
 
@@ -64,9 +54,6 @@ export async function getSession(request?: NextRequest): Promise<AuthSession | n
         id: user.id,
         email: user.email,
         name: user.name,
-        role: user.role,
-        departmentId: user.departmentId,
-        departmentName: user.department?.name ?? null,
         status: user.status,
       },
     }
@@ -80,11 +67,4 @@ export async function getSession(request?: NextRequest): Promise<AuthSession | n
  */
 export function unauthorizedResponse(message = 'Unauthorized') {
   return Response.json({ error: message }, { status: 401 })
-}
-
-/**
- * Helper to create a JSON 403 response.
- */
-export function forbiddenResponse(message = 'Forbidden') {
-  return Response.json({ error: message }, { status: 403 })
 }

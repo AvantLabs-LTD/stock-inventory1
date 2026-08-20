@@ -7,15 +7,7 @@ import { AppSidebar } from "@/components/layout/app-sidebar"
 import { TopBar } from "@/components/layout/top-bar"
 import { ChangePasswordDialog } from "@/components/change-password/change-password-dialog"
 import { LoginForm } from "@/components/login/login-form"
-import { CanonicalOverviewPage } from '@/components/canonical/overview-page'
-import { DepartmentPage } from "@/components/departments/department-page"
-import { DepartmentDetail } from "@/components/departments/department-detail"
-import { AuditLogsPage } from '@/components/audit/audit-logs-page'
-import { ComponentsPage } from '@/components/canonical/components-page'
-import { ReservationsPage } from '@/components/canonical/reservations-page'
-import { PurchaseRequestsPage } from '@/components/canonical/purchase-requests-page'
-import { InventoryPage } from '@/components/canonical/inventory-page'
-import { CanonicalProjectsPage } from '@/components/canonical/projects-page'
+import { DemandsPage, InventoryPage, ItemsPage, OverviewPage, PurchasingPage, ReferenceDataPage } from "@/components/streamlined/pages"
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Toaster } from "@/components/ui/sonner"
@@ -39,25 +31,19 @@ function PageContent() {
   const currentPage = useAppStore((s) => s.currentPage)
 
   switch (currentPage) {
-    case 'departments':
-      return <DepartmentPage />
-    case 'department-detail':
-      return <DepartmentDetail />
-    case 'projects':
-      return <CanonicalProjectsPage />
-    case 'audit-logs':
-      return <AuditLogsPage />
-    case 'components':
-      return <ComponentsPage />
-    case 'reservations':
-      return <ReservationsPage />
-    case 'purchase-requests':
-      return <PurchaseRequestsPage />
+    case 'items':
+      return <ItemsPage />
+    case 'demands':
+      return <DemandsPage />
+    case 'purchasing':
+      return <PurchasingPage />
     case 'inventory':
       return <InventoryPage />
+    case 'reference-data':
+      return <ReferenceDataPage />
     case 'dashboard':
     default:
-      return <CanonicalOverviewPage />
+      return <OverviewPage />
   }
 }
 

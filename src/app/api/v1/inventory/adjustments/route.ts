@@ -1,45 +1,25 @@
-import { randomUUID } from 'node:crypto'
-import { NextRequest } from 'next/server'
-import { z } from 'zod'
-import { getSession, forbiddenResponse, unauthorizedResponse } from '@/lib/auth-middleware'
-import { InventoryDomainError, postInventoryAdjustment } from '@/lib/inventory/canonical-ledger'
-import { hasPermission } from '@/lib/permissions'
-
-const decimal = z.union([z.number(), z.string().trim().regex(/^-?\d+(\.\d+)?$/)])
-const schema = z.object({
-  kind: z.enum(['OPENING', 'ADJUSTMENT']).default('ADJUSTMENT'),
-  adjustmentNo: z.string().trim().min(1).max(80).optional(),
-  reason: z.string().trim().min(1).max(500),
-  remarks: z.string().trim().max(4000).optional().nullable(),
-  lines: z.array(z.object({
-    componentId: z.string().min(1),
-    quantity: decimal,
-    remarks: z.string().trim().max(4000).optional().nullable(),
-  })).min(1).max(500),
-})
-
+import { NextRequest } from "next/server"
+import { Prisma } from "@prisma/client"
+import { db } from "@/lib/db"
+import { getSession, unauthorizedResponse } from "@/lib/auth-middleware"
+import { apiError, DomainError } from "@/lib/inventory-service"
 export async function POST(request: NextRequest) {
-  const session = await getSession(request)
-  if (!session) return unauthorizedResponse()
-  if (!hasPermission(session.user.role, 'stock', 'adjust')) return forbiddenResponse()
-  const parsed = schema.safeParse(await request.json())
-  if (!parsed.success) return Response.json({ error: 'Invalid inventory adjustment', details: parsed.error.flatten() }, { status: 400 })
-  try {
-    const adjustment = await postInventoryAdjustment({
-      adjustmentNo: parsed.data.adjustmentNo ?? `ADJ-${randomUUID().slice(0, 8).toUpperCase()}`,
-      idempotencyKey: request.headers.get('idempotency-key') ?? undefined,
-      kind: parsed.data.kind,
-      actorId: session.user.id,
-      reason: parsed.data.reason,
-      remarks: parsed.data.remarks ?? undefined,
-      lines: parsed.data.lines.map((line) => ({ ...line, remarks: line.remarks ?? undefined })),
-    })
-    return Response.json({ data: adjustment }, { status: 201 })
-  } catch (error) {
-    if (error instanceof InventoryDomainError) {
-      return Response.json({ error: error.message, code: error.code }, { status: error.code === 'NOT_FOUND' ? 404 : 409 })
-    }
-    console.error('POST canonical adjustment error:', error)
-    return Response.json({ error: 'Failed to post inventory adjustment' }, { status: 500 })
-  }
+  const session = await getSession(request); if (!session) return unauthorizedResponse()
+  try { const body = await request.json()
+    const adjustment = await db.$transaction(async tx => {
+      const header = await tx.inventoryAdjustment.create({ data: { adjustmentNo: "ADJ-" + Date.now(), postedById: session.user.id, idempotencyKey: body.idempotencyKey, reason: body.reason || "Stock adjustment", remarks: body.remarks } })
+      for (const row of body.lines || []) {
+        const amount = new Prisma.Decimal(row.quantity)
+        if (amount.eq(0)) throw new DomainError("INVALID_QUANTITY", "Adjustment cannot be zero")
+        const stock = await tx.itemBalance.upsert({ where: { itemId: row.itemId }, update: {}, create: { itemId: row.itemId } })
+        const after = stock.onHand.plus(amount)
+        if (after.lt(stock.reserved) || after.lt(0)) throw new DomainError("ADJUSTMENT_BELOW_COMMITTED", "Adjustment would make stock negative or below reserved stock")
+        const line = await tx.inventoryAdjustmentLine.create({ data: { adjustmentId: header.id, itemId: row.itemId, quantity: amount, remarks: row.remarks } })
+        await tx.itemBalance.update({ where: { itemId: row.itemId }, data: { onHand: after, version: { increment: 1 } } })
+        await tx.inventoryLedgerEntry.create({ data: { itemId: row.itemId, type: amount.gt(0) ? "ADJUSTMENT_IN" : "ADJUSTMENT_OUT", quantity: amount, onHandAfter: after, sourceType: "INVENTORY_ADJUSTMENT", sourceId: header.id, sourceLineId: line.id, actorId: session.user.id, remarks: row.remarks } })
+      }
+      return tx.inventoryAdjustment.findUnique({ where: { id: header.id }, include: { lines: true } })
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+    return Response.json({ adjustment }, { status: 201 })
+  } catch (e) { return apiError(e) }
 }

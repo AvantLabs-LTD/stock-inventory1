@@ -25,7 +25,6 @@ try {
         email,
         name,
         password: await bcrypt.hash(password, 12),
-        role: 'SUPER_ADMIN',
         status: 'ACTIVE',
       },
     })

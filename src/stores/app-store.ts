@@ -2,14 +2,11 @@ import { create } from 'zustand'
 
 export type AppPage =
   | 'dashboard'
-  | 'departments'
-  | 'department-detail'
-  | 'projects'
-  | 'audit-logs'
-  | 'components'
-  | 'reservations'
-  | 'purchase-requests'
+  | 'items'
+  | 'demands'
+  | 'purchasing'
   | 'inventory'
+  | 'reference-data'
 
 interface AppState {
   currentPage: AppPage
@@ -24,8 +21,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   navigate: (page, entityId) =>
     set({ currentPage: page, selectedEntityId: entityId ?? null }),
   goBack: () => {
-    const { currentPage } = get()
-    if (currentPage === 'department-detail') set({ currentPage: 'departments', selectedEntityId: null })
-    else set({ currentPage: 'dashboard', selectedEntityId: null })
+    void get()
+    set({ currentPage: 'dashboard', selectedEntityId: null })
   },
 }))
