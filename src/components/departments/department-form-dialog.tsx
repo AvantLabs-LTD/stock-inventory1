@@ -104,7 +104,7 @@ export function DepartmentFormDialog({
   async function onSubmit(values: DepartmentFormValues) {
     setLoading(true)
     try {
-      const url = department ? `/api/departments/${department.id}` : '/api/departments'
+      const url = department ? `/api/v1/departments/${department.id}` : '/api/v1/departments'
       const method = department ? 'PUT' : 'POST'
       const res = await fetch(url, {
         method,

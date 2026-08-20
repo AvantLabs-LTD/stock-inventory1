@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { after, before, test } from 'node:test'
-import { CanonicalReservationStatus, ComponentDiscipline } from '@prisma/client'
+import { ReservationStatus, ComponentDiscipline } from '@prisma/client'
 import { db } from '../../src/lib/db'
 import {
   allocateReservationLine,
@@ -136,7 +136,7 @@ run('reconciles, converts, allocates, and repeatedly issues partial quantities',
 
   const initial = await getReservationDetail(reservationId)
   assert.equal(initial.lines[0].targetQuantity.toString(), '6')
-  assert.equal(initial.lines[0].deficitQuantity.toString(), '6')
+  assert.equal(initial.lines[0].physicalStockDeficit.toString(), '0')
   assert.equal(initial.lines[0].readyToAllocate, true)
   assert.equal(initial.managerActions.hasAllocatableStock, true)
 
@@ -161,10 +161,11 @@ run('reconciles, converts, allocates, and repeatedly issues partial quantities',
   })
 
   const final = await getReservationDetail(reservationId)
-  assert.equal(final.status, CanonicalReservationStatus.PARTIALLY_ISSUED)
+  assert.equal(final.status, ReservationStatus.IN_PROGRESS)
   assert.equal(final.lines[0].issuedQuantity.toString(), '3')
   assert.equal(final.lines[0].allocatedQuantity.toString(), '1')
   assert.equal(final.lines[0].remainingQuantity.toString(), '3')
-  assert.equal(final.lines[0].deficitQuantity.toString(), '2')
+  assert.equal(final.lines[0].unallocatedDemand.toString(), '2')
+  assert.equal(final.lines[0].physicalStockDeficit.toString(), '0')
   assert.equal(final.issues.length, 2)
 })

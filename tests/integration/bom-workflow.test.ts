@@ -5,7 +5,6 @@ import { ComponentDiscipline, Prisma, ProjectBomUploadStatus } from '@prisma/cli
 import { db } from '../../src/lib/db'
 import { validateBomHierarchy, type BomImportRow } from '../../src/lib/inventory/bom-import'
 import { acceptBomUpload, BomDomainError, createBomUpload, reconcileBomLine } from '../../src/lib/inventory/bom-service'
-import { getProjectComponentRequirements } from '../../src/lib/inventory/project-requirements'
 import { hasPermission, ROLES } from '../../src/lib/permissions'
 
 const enabled = process.env.RUN_INTEGRATION_TESTS === '1'
@@ -140,9 +139,9 @@ run('stages, reconciles, and atomically accepts hierarchical BOMs', async () => 
   createdComponentIds.push(reconciledChild.componentId!)
   await acceptBomUpload({ projectId, uploadId: upload!.id, actorId: userId })
 
-  const requirements = await getProjectComponentRequirements(projectId)
-  assert.equal(requirements.find((item) => item.projectComponentId === parent.id)?.grossRequired.toString(), '10')
-  assert.equal(requirements.find((item) => item.projectComponentId === child.id)?.grossRequired.toString(), '20')
+  const acceptedLines = await db.projectComponent.findMany({ where: { bomUpload: { status: ProjectBomUploadStatus.ACCEPTED } } })
+  assert.equal(acceptedLines.find((item) => item.id === parent.id)?.quantity.toString(), '10')
+  assert.equal(acceptedLines.find((item) => item.id === child.id)?.quantity.toString(), '2')
 
   const replacement = await createBomUpload({
     projectId,
@@ -151,7 +150,7 @@ run('stages, reconciles, and atomically accepts hierarchical BOMs', async () => 
     rows: [row({ lineId: 'C', title: 'Replacement Root', quantity: 3 })],
   })
   assert.ok(replacement)
-  assert.equal((await getProjectComponentRequirements(projectId)).length, 2, 'pending upload must not affect live requirements')
+  assert.equal(await db.projectComponent.count({ where: { bomUpload: { status: ProjectBomUploadStatus.ACCEPTED } } }), 2, 'pending upload must not become active')
 
   const replacementLine = replacement!.lines[0]
   const reconciledReplacement = await reconcileBomLine({
@@ -168,8 +167,8 @@ run('stages, reconciles, and atomically accepts hierarchical BOMs', async () => 
     (await db.projectBomUpload.findUniqueOrThrow({ where: { id: upload!.id } })).status,
     ProjectBomUploadStatus.SUPERSEDED
   )
-  const active = await getProjectComponentRequirements(projectId)
+  const active = await db.projectComponent.findMany({ where: { bomUpload: { status: ProjectBomUploadStatus.ACCEPTED } } })
   assert.equal(active.length, 1)
-  assert.equal(active[0].projectComponentId, replacementLine.id)
-  assert.equal(active[0].grossRequired.toString(), '3')
+  assert.equal(active[0].id, replacementLine.id)
+  assert.equal(active[0].quantity.toString(), '3')
 })

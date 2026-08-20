@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
   const parsed = purchaseRequestCreateSchema.safeParse(await request.json())
   if (!parsed.success) return Response.json({ error: 'Invalid purchase request', details: parsed.error.flatten() }, { status: 400 })
   try {
-    const created = await createPurchaseRequest({ actorId: session.user.id, ...parsed.data })
+    const created = await createPurchaseRequest({ actorId: session.user.id, idempotencyKey: request.headers.get('idempotency-key') ?? undefined, ...parsed.data })
     return Response.json({ data: created }, { status: 201 })
   } catch (error) {
     if (error instanceof PurchaseRequestDomainError) {

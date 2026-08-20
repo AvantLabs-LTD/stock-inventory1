@@ -1,6 +1,6 @@
 import {
   AllocationEntryType,
-  CanonicalReservationStatus,
+  ReservationStatus,
   InventoryLedgerEntryType,
   Prisma,
 } from '@prisma/client'
@@ -115,89 +115,56 @@ async function postMovement(
 }
 
 async function reservationLineTotals(tx: Prisma.TransactionClient, reservationLineId: string) {
-  const [allocation, issued] = await Promise.all([
-    tx.inventoryAllocationEntry.aggregate({
-      where: { reservationLineId },
-      _sum: { quantity: true },
-    }),
-    tx.stockIssueLine.aggregate({
-      where: { reservationLineId },
-      _sum: { quantity: true },
-    }),
-  ])
-
-  return {
-    allocated: allocation._sum.quantity ?? ZERO,
-    issued: issued._sum.quantity ?? ZERO,
-  }
-}
-
-async function reservationLineTarget(
-  tx: Prisma.TransactionClient,
-  line: { projectComponentId: string | null; requestedQuantity: Prisma.Decimal | null }
-) {
-  if (!line.projectComponentId) {
-    if (!line.requestedQuantity) {
-      throw new InventoryDomainError('A general reservation line requires a fixed quantity', 'INVALID_STATE')
-    }
-    return line.requestedQuantity
-  }
-
-  const rows = await tx.$queryRaw<Array<{ grossRequired: Prisma.Decimal }>>`
-    SELECT "grossRequired"
-      FROM "project_component_requirements"
-     WHERE "projectComponentId" = ${line.projectComponentId}
+  const rows = await tx.$queryRaw<Array<{
+    requiredQuantity: Prisma.Decimal
+    cancelledQuantity: Prisma.Decimal
+    allocatedQuantity: Prisma.Decimal
+    netIssuedQuantity: Prisma.Decimal
+  }>>`
+    SELECT "requiredQuantity", "cancelledQuantity", "allocatedQuantity", "netIssuedQuantity"
+    FROM "reservation_line_requirements"
+    WHERE "reservationLineId" = ${reservationLineId}
   `
-  if (!rows[0]) {
-    throw new InventoryDomainError('The project component requirement was not found', 'NOT_FOUND')
+  if (!rows[0]) throw new InventoryDomainError('Reservation line requirement was not found', 'NOT_FOUND')
+  return {
+    target: rows[0].requiredQuantity,
+    cancelled: rows[0].cancelledQuantity,
+    allocated: rows[0].allocatedQuantity,
+    issued: rows[0].netIssuedQuantity,
   }
-  return rows[0].grossRequired
 }
 
 async function refreshReservationStatus(tx: Prisma.TransactionClient, reservationId: string) {
   const reservation = await tx.reservation.findUnique({
     where: { id: reservationId },
     include: {
-      lines: {
-        include: {
-          allocationEntries: { select: { quantity: true } },
-          issueLines: { select: { quantity: true } },
-        },
-      },
+      lines: { select: { id: true } },
     },
   })
   if (!reservation) throw new InventoryDomainError('Reservation was not found', 'NOT_FOUND')
-  if (reservation.status === CanonicalReservationStatus.CANCELLED) return reservation
+  if (reservation.status === ReservationStatus.CANCELLED) return reservation
 
-  let allFulfilled = reservation.lines.length > 0
-  let allCovered = reservation.lines.length > 0
-  let anyCovered = false
-  let anyIssued = false
+  const requirements = await tx.$queryRaw<Array<{
+    remainingQuantity: Prisma.Decimal
+    netIssuedQuantity: Prisma.Decimal
+  }>>`
+    SELECT "remainingQuantity", "netIssuedQuantity"
+    FROM "reservation_line_requirements"
+    WHERE "reservationId" = ${reservationId}
+  `
+  const allFulfilled = requirements.length > 0 && requirements.every((line) => line.remainingQuantity.isZero())
+  const anyIssued = requirements.some((line) => line.netIssuedQuantity.isPositive())
 
-  for (const line of reservation.lines) {
-    const target = (await reservationLineTarget(tx, line)).minus(line.cancelledQuantity)
-    const issued = line.issueLines.reduce((sum, item) => sum.plus(item.quantity), ZERO)
-    const allocated = line.allocationEntries.reduce((sum, item) => sum.plus(item.quantity), ZERO)
-    const covered = issued.plus(allocated)
-
-    if (issued.isPositive()) anyIssued = true
-    if (covered.isPositive()) anyCovered = true
-    if (issued.lessThan(target)) allFulfilled = false
-    if (covered.lessThan(target)) allCovered = false
-  }
-
-  let status: CanonicalReservationStatus
-  if (allFulfilled) status = CanonicalReservationStatus.CLOSED
-  else if (anyIssued) status = CanonicalReservationStatus.PARTIALLY_ISSUED
-  else if (allCovered) status = CanonicalReservationStatus.AVAILABLE
-  else if (anyCovered) status = CanonicalReservationStatus.PARTIALLY_AVAILABLE
-  else status = CanonicalReservationStatus.PENDING_STOCK
+  let status: ReservationStatus
+  if (allFulfilled) status = ReservationStatus.CLOSED
+  else if (anyIssued) status = ReservationStatus.IN_PROGRESS
+  else status = ReservationStatus.PENDING
 
   return tx.reservation.update({
     where: { id: reservationId },
     data: {
       status,
-      closedAt: status === CanonicalReservationStatus.CLOSED ? new Date() : null,
+      closedAt: status === ReservationStatus.CLOSED ? new Date() : null,
     },
   })
 }
@@ -220,7 +187,7 @@ export async function allocateReservationLine(input: {
     }
 
     const totals = await reservationLineTotals(tx, line.id)
-    const target = (await reservationLineTarget(tx, line)).minus(line.cancelledQuantity)
+    const target = totals.target.minus(totals.cancelled)
     const remainingDemand = target.minus(totals.issued).minus(totals.allocated)
     if (quantity.greaterThan(remainingDemand)) {
       throw new InventoryDomainError('Allocation exceeds the outstanding reservation quantity', 'OVER_FULFILLMENT')
@@ -254,8 +221,174 @@ export async function allocateReservationLine(input: {
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
 }
 
+export async function releaseReservationLine(input: {
+  reservationId?: string
+  reservationLineId: string
+  quantity: QuantityInput
+  actorId: string
+  sourceId: string
+  remarks?: string
+}) {
+  const quantity = positive(input.quantity)
+  return db.$transaction(async (tx) => {
+    const line = await tx.reservationLine.findUnique({ where: { id: input.reservationLineId } })
+    if (!line) throw new InventoryDomainError('Reservation line was not found', 'NOT_FOUND')
+    if (input.reservationId && line.reservationId !== input.reservationId) {
+      throw new InventoryDomainError('Reservation line does not belong to this reservation', 'INVALID_STATE')
+    }
+    const totals = await reservationLineTotals(tx, line.id)
+    if (quantity.greaterThan(totals.allocated)) {
+      throw new InventoryDomainError('Release quantity exceeds the active allocation', 'INSUFFICIENT_ALLOCATION')
+    }
+    const balance = await lockBalance(tx, line.componentId)
+    const allocatedAfter = balance.allocated.minus(quantity)
+    await tx.componentBalance.update({
+      where: { componentId: line.componentId },
+      data: { allocated: allocatedAfter, version: { increment: 1 } },
+    })
+    const entry = await tx.inventoryAllocationEntry.create({
+      data: {
+        reservationLineId: line.id,
+        type: AllocationEntryType.RELEASE,
+        quantity: quantity.negated(),
+        componentAllocatedAfter: allocatedAfter,
+        sourceType: 'RESERVATION_RELEASE',
+        sourceId: input.sourceId,
+        createdById: input.actorId,
+        remarks: input.remarks,
+      },
+    })
+    await refreshReservationStatus(tx, line.reservationId)
+    return entry
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+}
+
+export async function cancelReservationLine(input: {
+  reservationId?: string
+  reservationLineId: string
+  quantity: QuantityInput
+  actorId: string
+  sourceId: string
+  reason: string
+}) {
+  const quantity = positive(input.quantity)
+  if (!input.reason.trim()) throw new InventoryDomainError('Cancellation reason is required', 'INVALID_STATE')
+  return db.$transaction(async (tx) => {
+    const line = await tx.reservationLine.findUnique({ where: { id: input.reservationLineId } })
+    if (!line) throw new InventoryDomainError('Reservation line was not found', 'NOT_FOUND')
+    if (input.reservationId && line.reservationId !== input.reservationId) {
+      throw new InventoryDomainError('Reservation line does not belong to this reservation', 'INVALID_STATE')
+    }
+    const totals = await reservationLineTotals(tx, line.id)
+    const cancellable = Prisma.Decimal.max(totals.target.minus(totals.cancelled).minus(totals.issued), ZERO)
+    if (quantity.greaterThan(cancellable)) {
+      throw new InventoryDomainError('Cancellation exceeds the unissued requirement', 'OVER_FULFILLMENT')
+    }
+    const remainingAfter = cancellable.minus(quantity)
+    const releaseQuantity = Prisma.Decimal.max(totals.allocated.minus(remainingAfter), ZERO)
+    if (releaseQuantity.isPositive()) {
+      const balance = await lockBalance(tx, line.componentId)
+      const allocatedAfter = balance.allocated.minus(releaseQuantity)
+      await tx.componentBalance.update({
+        where: { componentId: line.componentId },
+        data: { allocated: allocatedAfter, version: { increment: 1 } },
+      })
+      await tx.inventoryAllocationEntry.create({
+        data: {
+          reservationLineId: line.id,
+          type: AllocationEntryType.RELEASE,
+          quantity: releaseQuantity.negated(),
+          componentAllocatedAfter: allocatedAfter,
+          sourceType: 'RESERVATION_CANCELLATION_RELEASE',
+          sourceId: input.sourceId,
+          createdById: input.actorId,
+          remarks: `Released by cancellation: ${input.reason.trim()}`,
+        },
+      })
+    }
+    const cancellation = await tx.reservationCancellationEntry.create({
+      data: {
+        reservationLineId: line.id,
+        quantity,
+        reason: input.reason.trim(),
+        sourceId: input.sourceId,
+        createdById: input.actorId,
+      },
+    })
+    await refreshReservationStatus(tx, line.reservationId)
+    return cancellation
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+}
+
+export async function cancelReservation(input: {
+  reservationId: string
+  actorId: string
+  sourceId: string
+  reason: string
+}) {
+  if (!input.reason.trim()) throw new InventoryDomainError('Cancellation reason is required', 'INVALID_STATE')
+  return db.$transaction(async (tx) => {
+    const reservation = await tx.reservation.findUnique({
+      where: { id: input.reservationId },
+      include: { lines: true },
+    })
+    if (!reservation) throw new InventoryDomainError('Reservation was not found', 'NOT_FOUND')
+    if (reservation.status === ReservationStatus.CANCELLED) return reservation
+    if (reservation.status === ReservationStatus.CLOSED) {
+      throw new InventoryDomainError('A fulfilled reservation cannot be cancelled', 'INVALID_STATE')
+    }
+
+    for (const line of reservation.lines) {
+      const totals = await reservationLineTotals(tx, line.id)
+      if (totals.allocated.isPositive()) {
+        const balance = await lockBalance(tx, line.componentId)
+        const allocatedAfter = balance.allocated.minus(totals.allocated)
+        await tx.componentBalance.update({
+          where: { componentId: line.componentId },
+          data: { allocated: allocatedAfter, version: { increment: 1 } },
+        })
+        await tx.inventoryAllocationEntry.create({
+          data: {
+            reservationLineId: line.id,
+            type: AllocationEntryType.RELEASE,
+            quantity: totals.allocated.negated(),
+            componentAllocatedAfter: allocatedAfter,
+            sourceType: 'RESERVATION_CANCELLATION_RELEASE',
+            sourceId: `${input.sourceId}:${line.id}`,
+            createdById: input.actorId,
+            remarks: `Released by reservation cancellation: ${input.reason.trim()}`,
+          },
+        })
+      }
+      const cancellable = Prisma.Decimal.max(totals.target.minus(totals.cancelled).minus(totals.issued), ZERO)
+      if (cancellable.isPositive()) {
+        await tx.reservationCancellationEntry.create({
+          data: {
+            reservationLineId: line.id,
+            quantity: cancellable,
+            reason: input.reason.trim(),
+            sourceId: `${input.sourceId}:cancel:${line.id}`,
+            createdById: input.actorId,
+          },
+        })
+      }
+    }
+    return tx.reservation.update({
+      where: { id: reservation.id },
+      data: {
+        status: ReservationStatus.CANCELLED,
+        cancelledById: input.actorId,
+        cancelledAt: new Date(),
+        cancellationReason: input.reason.trim(),
+        closedAt: null,
+      },
+    })
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+}
+
 export async function postPartialIssue(input: {
   issueNo: string
+  idempotencyKey?: string
   reservationId: string
   actorId: string
   remarks?: string
@@ -269,11 +402,18 @@ export async function postPartialIssue(input: {
   }
 
   return db.$transaction(async (tx) => {
+    if (input.idempotencyKey) {
+      const existing = await tx.stockIssue.findUnique({ where: { idempotencyKey: input.idempotencyKey }, include: { lines: true } })
+      if (existing) {
+        if (existing.reservationId !== input.reservationId) throw new InventoryDomainError('Idempotency key belongs to another reservation', 'INVALID_STATE')
+        return existing
+      }
+    }
     const reservation = await tx.reservation.findUnique({ where: { id: input.reservationId } })
     if (!reservation) throw new InventoryDomainError('Reservation was not found', 'NOT_FOUND')
     if (
-      reservation.status === CanonicalReservationStatus.CLOSED
-      || reservation.status === CanonicalReservationStatus.CANCELLED
+      reservation.status === ReservationStatus.CLOSED
+      || reservation.status === ReservationStatus.CANCELLED
     ) {
       throw new InventoryDomainError(`Cannot issue against a ${reservation.status.toLowerCase()} reservation`, 'INVALID_STATE')
     }
@@ -281,6 +421,7 @@ export async function postPartialIssue(input: {
     const issue = await tx.stockIssue.create({
       data: {
         issueNo: input.issueNo,
+        idempotencyKey: input.idempotencyKey,
         reservationId: input.reservationId,
         postedById: input.actorId,
         remarks: input.remarks,
@@ -298,7 +439,7 @@ export async function postPartialIssue(input: {
       if (quantity.greaterThan(totals.allocated)) {
         throw new InventoryDomainError('Issue quantity exceeds the active allocation', 'INSUFFICIENT_ALLOCATION')
       }
-      const target = (await reservationLineTarget(tx, line)).minus(line.cancelledQuantity)
+      const target = totals.target.minus(totals.cancelled)
       if (totals.issued.plus(quantity).greaterThan(target)) {
         throw new InventoryDomainError('Issue quantity exceeds the reservation quantity', 'OVER_FULFILLMENT')
       }
@@ -353,6 +494,7 @@ export async function postPartialIssue(input: {
 
 export async function postGoodsReceipt(input: {
   receiptNo: string
+  idempotencyKey?: string
   actorId: string
   purchaseRequestId?: string
   provider?: string
@@ -372,6 +514,13 @@ export async function postGoodsReceipt(input: {
   }
 
   return db.$transaction(async (tx) => {
+    if (input.idempotencyKey) {
+      const existing = await tx.goodsReceipt.findUnique({ where: { idempotencyKey: input.idempotencyKey }, include: { lines: true } })
+      if (existing) {
+        if (existing.purchaseRequestId !== (input.purchaseRequestId ?? null)) throw new InventoryDomainError('Idempotency key belongs to another purchase request', 'INVALID_STATE')
+        return existing
+      }
+    }
     if (input.purchaseRequestId) {
       const purchaseRequest = await tx.purchaseRequest.findUnique({ where: { id: input.purchaseRequestId } })
       if (!purchaseRequest) throw new InventoryDomainError('Purchase request was not found', 'NOT_FOUND')
@@ -383,6 +532,7 @@ export async function postGoodsReceipt(input: {
     const receipt = await tx.goodsReceipt.create({
       data: {
         receiptNo: input.receiptNo,
+        idempotencyKey: input.idempotencyKey,
         purchaseRequestId: input.purchaseRequestId,
         provider: input.provider,
         trackingNumber: input.trackingNumber,
@@ -456,6 +606,7 @@ export async function postGoodsReceipt(input: {
 
 export async function postStockReturn(input: {
   returnNo: string
+  idempotencyKey?: string
   actorId: string
   reason?: string
   remarks?: string
@@ -466,9 +617,15 @@ export async function postStockReturn(input: {
   }
 
   return db.$transaction(async (tx) => {
+    if (input.idempotencyKey) {
+      const existing = await tx.stockReturn.findUnique({ where: { idempotencyKey: input.idempotencyKey }, include: { lines: true } })
+      if (existing) return existing
+    }
+    const affectedReservationIds = new Set<string>()
     const stockReturn = await tx.stockReturn.create({
       data: {
         returnNo: input.returnNo,
+        idempotencyKey: input.idempotencyKey,
         postedById: input.actorId,
         reason: input.reason,
         remarks: input.remarks,
@@ -479,6 +636,12 @@ export async function postStockReturn(input: {
       const quantity = positive(requestedLine.quantity)
       const issueLine = await tx.stockIssueLine.findUnique({ where: { id: requestedLine.issueLineId } })
       if (!issueLine) throw new InventoryDomainError('Original issue line was not found', 'NOT_FOUND')
+      const reservationLine = await tx.reservationLine.findUnique({
+        where: { id: issueLine.reservationLineId },
+        select: { reservationId: true },
+      })
+      if (!reservationLine) throw new InventoryDomainError('Reservation line was not found', 'NOT_FOUND')
+      affectedReservationIds.add(reservationLine.reservationId)
       const returned = await tx.stockReturnLine.aggregate({
         where: { issueLineId: issueLine.id },
         _sum: { quantity: true },
@@ -508,12 +671,18 @@ export async function postStockReturn(input: {
       })
     }
 
+    for (const reservationId of affectedReservationIds) {
+      await refreshReservationStatus(tx, reservationId)
+    }
+
     return tx.stockReturn.findUnique({ where: { id: stockReturn.id }, include: { lines: true } })
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
 }
 
 export async function postInventoryAdjustment(input: {
   adjustmentNo: string
+  idempotencyKey?: string
+  kind?: 'OPENING' | 'ADJUSTMENT'
   actorId: string
   reason: string
   remarks?: string
@@ -524,9 +693,14 @@ export async function postInventoryAdjustment(input: {
   }
 
   return db.$transaction(async (tx) => {
+    if (input.idempotencyKey) {
+      const existing = await tx.inventoryAdjustment.findUnique({ where: { idempotencyKey: input.idempotencyKey }, include: { lines: true } })
+      if (existing) return existing
+    }
     const adjustment = await tx.inventoryAdjustment.create({
       data: {
         adjustmentNo: input.adjustmentNo,
+        idempotencyKey: input.idempotencyKey,
         postedById: input.actorId,
         reason: input.reason,
         remarks: input.remarks,
@@ -538,6 +712,11 @@ export async function postInventoryAdjustment(input: {
       if (quantity.isZero()) {
         throw new InventoryDomainError('Adjustment quantity cannot be zero', 'INVALID_QUANTITY')
       }
+      if (input.kind === 'OPENING') {
+        if (!quantity.isPositive()) throw new InventoryDomainError('Opening quantity must be positive', 'INVALID_QUANTITY')
+        const priorMovement = await tx.inventoryLedgerEntry.findFirst({ where: { componentId: requestedLine.componentId } })
+        if (priorMovement) throw new InventoryDomainError('Opening stock can only be posted before the component has movements', 'INVALID_STATE')
+      }
       const line = await tx.inventoryAdjustmentLine.create({
         data: {
           adjustmentId: adjustment.id,
@@ -548,11 +727,13 @@ export async function postInventoryAdjustment(input: {
       })
       await postMovement(tx, {
         componentId: requestedLine.componentId,
-        type: quantity.isPositive()
-          ? InventoryLedgerEntryType.ADJUSTMENT_IN
-          : InventoryLedgerEntryType.ADJUSTMENT_OUT,
+        type: input.kind === 'OPENING'
+          ? InventoryLedgerEntryType.OPENING
+          : quantity.isPositive()
+            ? InventoryLedgerEntryType.ADJUSTMENT_IN
+            : InventoryLedgerEntryType.ADJUSTMENT_OUT,
         quantity,
-        sourceType: 'INVENTORY_ADJUSTMENT',
+        sourceType: input.kind === 'OPENING' ? 'OPENING_STOCK' : 'INVENTORY_ADJUSTMENT',
         sourceId: adjustment.id,
         sourceLineId: line.id,
         actorId: input.actorId,

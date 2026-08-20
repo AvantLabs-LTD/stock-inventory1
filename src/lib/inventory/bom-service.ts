@@ -28,9 +28,15 @@ export async function createBomUpload(input: {
     const project = await tx.project.findUnique({ where: { id: input.projectId }, select: { id: true } })
     if (!project) throw new BomDomainError('Project was not found', 'NOT_FOUND')
 
+    const latestVersion = await tx.projectBomUpload.aggregate({
+      where: { projectId: input.projectId },
+      _max: { versionNumber: true },
+    })
+
     const upload = await tx.projectBomUpload.create({
       data: {
         projectId: input.projectId,
+        versionNumber: (latestVersion._max.versionNumber ?? 0) + 1,
         fileName: input.fileName,
         sheetName: input.sheetName,
         uploadedById: input.uploadedById,

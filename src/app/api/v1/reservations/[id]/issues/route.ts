@@ -17,6 +17,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const issue = await postPartialIssue({
       reservationId: id,
       issueNo: parsed.data.issueNo ?? `ISS-${randomUUID().slice(0, 8).toUpperCase()}`,
+      idempotencyKey: request.headers.get('idempotency-key') ?? undefined,
       actorId: session.user.id,
       remarks: parsed.data.remarks ?? undefined,
       lines: parsed.data.lines.map((line) => ({ ...line, remarks: line.remarks ?? undefined })),

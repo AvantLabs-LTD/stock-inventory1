@@ -54,6 +54,18 @@ export const reservationLineReconciliationSchema = z.union([
   }),
 ])
 
+export const reservationRequestConvertSchema = z.object({
+  bomVersionId: z.string().min(1).optional(),
+  setCount: z.number().int().positive().max(1_000_000).optional(),
+}).superRefine((value, context) => {
+  if (Boolean(value.bomVersionId) !== Boolean(value.setCount)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'BOM version and set count must be supplied together',
+    })
+  }
+})
+
 export const allocationCreateSchema = z.object({
   quantity,
   remarks: optionalText,

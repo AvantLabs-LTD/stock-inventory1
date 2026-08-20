@@ -1,6 +1,6 @@
 # Store Management and Purchase Portal
 
-This repository is transitioning from its legacy SQLite inventory prototype to a PostgreSQL-backed store-management and purchasing portal.
+This repository is a PostgreSQL-backed store-management and purchasing portal built around one component catalogue, one inventory ledger, cycle-scoped demand, and linked purchasing.
 
 ## Run the complete stack
 
@@ -95,9 +95,7 @@ Never run `docker compose down -v` unless permanent deletion of the database and
 - The application container runs as an unprivileged user.
 - Authentication secrets must contain at least 32 characters.
 - The stack health check verifies both the web server and its database connection.
-- Upload endpoints must enforce the agreed 5 MB limit and validate file signatures when attachments are implemented.
-
-The old local `.env`, `auth-state.json`, and SQLite database are ignored by Git. They are retained locally for later controlled data reconciliation but are not copied into container images.
+- Upload endpoints enforce the agreed 5 MB limit and validate supported file signatures.
 
 ## Development commands
 

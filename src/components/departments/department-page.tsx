@@ -81,7 +81,7 @@ export function DepartmentPage() {
       const params = new URLSearchParams()
       if (search) params.set('search', search)
 
-      const res = await fetch(`/api/departments?${params}`)
+      const res = await fetch(`/api/v1/departments?${params}`)
       if (res.ok) {
         const data = await res.json()
         let items: Department[] = data.data || []
@@ -109,7 +109,7 @@ export function DepartmentPage() {
     if (!deletingDept) return
     setDeleting(true)
     try {
-      const res = await fetch(`/api/departments/${deletingDept.id}`, { method: 'DELETE' })
+      const res = await fetch(`/api/v1/departments/${deletingDept.id}`, { method: 'DELETE' })
       if (res.ok) {
         toast.success('Department deleted successfully')
         setDeleteOpen(false)

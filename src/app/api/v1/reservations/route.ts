@@ -1,4 +1,4 @@
-import { CanonicalReservationStatus, Prisma } from '@prisma/client'
+import { ReservationStatus, Prisma } from '@prisma/client'
 import { NextRequest } from 'next/server'
 import { getSession, forbiddenResponse, unauthorizedResponse } from '@/lib/auth-middleware'
 import { db } from '@/lib/db'
@@ -10,16 +10,20 @@ export async function GET(request: NextRequest) {
   if (!hasPermission(session.user.role, 'reservations', 'view')) return forbiddenResponse()
   const { searchParams } = new URL(request.url)
   const status = searchParams.get('status')
-  if (status && !Object.values(CanonicalReservationStatus).includes(status as CanonicalReservationStatus)) {
+  const projectId = searchParams.get('projectId') || undefined
+  if (status && !Object.values(ReservationStatus).includes(status as ReservationStatus)) {
     return Response.json({ error: 'Invalid reservation status' }, { status: 400 })
   }
   const page = Math.max(1, Number.parseInt(searchParams.get('page') ?? '1', 10) || 1)
   const limit = Math.min(100, Math.max(1, Number.parseInt(searchParams.get('limit') ?? '25', 10) || 25))
-  const where: Prisma.ReservationWhereInput = status ? { status: status as CanonicalReservationStatus } : {}
+  const where: Prisma.ReservationWhereInput = {
+    ...(status ? { status: status as ReservationStatus } : {}),
+    ...(projectId ? { projectId } : {}),
+  }
   const [items, total] = await Promise.all([
     db.reservation.findMany({
       where,
-      include: { project: true, department: true, request: { include: { requestedBy: { select: { id: true, name: true } } } }, _count: { select: { lines: true, issues: true } } },
+      include: { project: true, department: true, bomVersion: true, request: { include: { requestedBy: { select: { id: true, name: true } } } }, _count: { select: { lines: true, issues: true } } },
       orderBy: { createdAt: 'desc' },
       skip: (page - 1) * limit,
       take: limit,

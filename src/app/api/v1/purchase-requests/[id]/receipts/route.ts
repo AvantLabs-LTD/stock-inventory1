@@ -21,6 +21,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   try {
     const receipt = await postGoodsReceipt({
       receiptNo: parsed.data.receiptNo ?? `GR-${randomUUID().slice(0, 8).toUpperCase()}`,
+      idempotencyKey: request.headers.get('idempotency-key') ?? undefined,
       purchaseRequestId,
       actorId: session.user.id,
       provider: parsed.data.provider ?? undefined,

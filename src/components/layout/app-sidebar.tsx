@@ -2,27 +2,14 @@
 
 import {
   LayoutDashboard,
-  Package,
-
-  ArrowDownToLine,
+  ArrowLeftRight,
   Building2,
   FolderKanban,
-  ArrowUpFromLine,
-  Lock,
-  ClipboardList,
-  RotateCcw,
-  SlidersHorizontal,
-  BarChart3,
   ScrollText,
-  Users,
-  PackageCheck,
-  History,
-  Timer,
   Boxes,
   ClipboardCheck,
   ShoppingCart,
 } from "lucide-react"
-import { cn } from "@/lib/utils"
 import { hasPermission } from "@/lib/permissions"
 import { useAuthStore } from "@/stores/auth-store"
 import { useAppStore, type AppPage } from "@/stores/app-store"
@@ -65,58 +52,15 @@ const navItems: NavItem[] = [
     module: "components",
     action: "view",
   },
-  {
-    title: "Products",
-    icon: Package,
-    page: "products",
-    module: "products",
-    action: "view",
-  },
-
 ]
 
 const inventoryItems: NavItem[] = [
   {
-    title: "Stock",
-    icon: ArrowDownToLine,
-    page: "stock",
+    title: "Inventory Ledger",
+    icon: ArrowLeftRight,
+    page: "inventory",
     module: "stock",
     action: "view",
-  },
-  {
-    title: "Goods Received",
-    icon: PackageCheck,
-    page: "goods-received",
-    module: "stock",
-    action: "view",
-  },
-  {
-    title: "Issue Inventory",
-    icon: ArrowUpFromLine,
-    page: "issue-inventory",
-    module: "issue_inventory",
-    action: "view",
-  },
-  {
-    title: "Reserved Inventory",
-    icon: Lock,
-    page: "reserved-inventory",
-    module: "reserved_inventory",
-    action: "view",
-  },
-  {
-    title: "Returns",
-    icon: RotateCcw,
-    page: "returns",
-    module: "returns",
-    action: "view",
-  },
-  {
-    title: "Stock Adjustments",
-    icon: SlidersHorizontal,
-    page: "stock-adjustments",
-    module: "stock",
-    action: "adjust",
   },
 ]
 
@@ -139,7 +83,7 @@ const orgItems: NavItem[] = [
 
 const workflowItems: NavItem[] = [
   {
-    title: "Reservations",
+    title: "Demand & Cycles",
     icon: ClipboardCheck,
     page: "reservations",
     module: "reservations",
@@ -152,52 +96,14 @@ const workflowItems: NavItem[] = [
     module: "purchase_requests",
     action: "view",
   },
-  {
-    title: "Inventory Requests",
-    icon: ClipboardList,
-    page: "requests",
-    module: "inventory_requests",
-    action: "view",
-  },
-]
-
-const reportItems: NavItem[] = [
-  {
-    title: "Transaction History",
-    icon: History,
-    page: "history",
-    module: "reports",
-    action: "view",
-  },
-  {
-    title: "Product History",
-    icon: Timer,
-    page: "product-history",
-    module: "reports",
-    action: "view",
-  },
 ]
 
 const systemItems: NavItem[] = [
-  {
-    title: "Reports",
-    icon: BarChart3,
-    page: "reports",
-    module: "reports",
-    action: "view",
-  },
   {
     title: "Audit Logs",
     icon: ScrollText,
     page: "audit-logs",
     module: "audit_logs",
-    action: "view",
-  },
-  {
-    title: "User Management",
-    icon: Users,
-    page: "dashboard",
-    module: "user_management",
     action: "view",
   },
 ]
@@ -252,7 +158,6 @@ export function AppSidebar() {
   const filteredInventory = filterByPermission(inventoryItems, user.role)
   const filteredOrg = filterByPermission(orgItems, user.role)
   const filteredWorkflow = filterByPermission(workflowItems, user.role)
-  const filteredReports = filterByPermission(reportItems, user.role)
   const filteredSystem = filterByPermission(systemItems, user.role)
 
   const initials = user.name
@@ -285,15 +190,13 @@ export function AppSidebar() {
       <SidebarContent>
         <NavSection label="Overview" items={filteredNav.slice(0, 1)} currentPage={currentPage} onNavigate={handleNavigate} />
         <SidebarSeparator />
-        <NavSection label="Inventory Master" items={filteredNav.slice(1)} currentPage={currentPage} onNavigate={handleNavigate} />
+        <NavSection label="Catalogue" items={filteredNav.slice(1)} currentPage={currentPage} onNavigate={handleNavigate} />
         <SidebarSeparator />
-        <NavSection label="Stock Operations" items={filteredInventory} currentPage={currentPage} onNavigate={handleNavigate} />
+        <NavSection label="Inventory" items={filteredInventory} currentPage={currentPage} onNavigate={handleNavigate} />
         <SidebarSeparator />
         <NavSection label="Organization" items={filteredOrg} currentPage={currentPage} onNavigate={handleNavigate} />
         <SidebarSeparator />
-        <NavSection label="Workflow" items={filteredWorkflow} currentPage={currentPage} onNavigate={handleNavigate} />
-        <SidebarSeparator />
-        <NavSection label="Reports" items={filteredReports} currentPage={currentPage} onNavigate={handleNavigate} />
+        <NavSection label="Operations" items={filteredWorkflow} currentPage={currentPage} onNavigate={handleNavigate} />
         <SidebarSeparator />
         <NavSection label="System" items={filteredSystem} currentPage={currentPage} onNavigate={handleNavigate} />
       </SidebarContent>

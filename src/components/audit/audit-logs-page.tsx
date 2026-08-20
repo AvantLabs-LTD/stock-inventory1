@@ -151,7 +151,7 @@ export function AuditLogsPage() {
       if (dateFrom) params.set("dateFrom", dateFrom)
       if (dateTo) params.set("dateTo", dateTo)
 
-      const res = await fetch(`/api/audit-logs?${params}`)
+      const res = await fetch(`/api/v1/audit-logs?${params}`)
       if (res.ok) {
         const data = await res.json()
         setLogs(data.data || [])

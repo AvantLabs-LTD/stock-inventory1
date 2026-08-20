@@ -2,8 +2,9 @@ import assert from 'node:assert/strict'
 import { after, before, test } from 'node:test'
 import { randomUUID } from 'node:crypto'
 import {
-  CanonicalReservationStatus,
+  ReservationStatus,
   ComponentDiscipline,
+  Prisma,
   ProjectComponentReconciliationStatus,
 } from '@prisma/client'
 import { db } from '../../src/lib/db'
@@ -13,7 +14,6 @@ import {
   postInventoryAdjustment,
   postPartialIssue,
 } from '../../src/lib/inventory/canonical-ledger'
-import { getProjectComponentRequirements } from '../../src/lib/inventory/project-requirements'
 
 const enabled = process.env.RUN_INTEGRATION_TESTS === '1'
 const run = enabled ? test : test.skip
@@ -26,9 +26,25 @@ let componentAId: string
 let componentBId: string
 let projectAId: string
 let projectBId: string
+let bomVersionId: string
 let reservationId: string
 let reservationLineAId: string
 let reservationLineBId: string
+
+async function cycleRequirements() {
+  return db.$queryRaw<Array<{
+    projectComponentId: string
+    grossRequired: Prisma.Decimal
+    allocatedQuantity: Prisma.Decimal
+    issuedQuantity: Prisma.Decimal
+    uncoveredQuantity: Prisma.Decimal
+  }>>`
+    SELECT "projectComponentId", "requiredQuantity" AS "grossRequired", "allocatedQuantity",
+      "netIssuedQuantity" AS "issuedQuantity", "manufacturingUncoveredQuantity" AS "uncoveredQuantity"
+    FROM "reservation_line_requirements"
+    WHERE "reservationId" = ${reservationId}
+  `
+}
 
 before(async () => {
   if (!enabled) return
@@ -57,6 +73,19 @@ before(async () => {
   })
   projectId = project.id
 
+  const bomVersion = await db.projectBomUpload.create({
+    data: {
+      projectId,
+      versionNumber: 1,
+      fileName: 'integration-bom.xlsx',
+      status: 'ACCEPTED',
+      uploadedById: userId,
+      acceptedById: userId,
+      acceptedAt: new Date(),
+    },
+  })
+  bomVersionId = bomVersion.id
+
   const [componentA, componentB] = await Promise.all([
     db.component.create({
       data: {
@@ -83,6 +112,7 @@ before(async () => {
   const projectA = await db.projectComponent.create({
     data: {
       projectId,
+      bomUploadId: bomVersionId,
       componentId: componentAId,
       sourceLineKey: 'A',
       title: componentA.title,
@@ -99,6 +129,7 @@ before(async () => {
   const projectB = await db.projectComponent.create({
     data: {
       projectId,
+      bomUploadId: bomVersionId,
       componentId: componentBId,
       parentProjectComponentId: projectAId,
       sourceLineKey: 'B',
@@ -115,6 +146,7 @@ before(async () => {
 
   await postInventoryAdjustment({
     adjustmentNo: `OPEN-${suffix}`,
+    kind: 'OPENING',
     actorId: userId,
     reason: 'Integration test opening balance',
     lines: [
@@ -159,6 +191,8 @@ before(async () => {
       reservationNo: `RSV-${suffix}`,
       requestId: request.id,
       projectId,
+      bomVersionId,
+      setCount: 1,
       convertedById: userId,
       lines: {
         create: [
@@ -203,6 +237,7 @@ after(async () => {
   await db.inventoryAdjustment.deleteMany({ where: { adjustmentNo: `OPEN-${suffix}` } })
   await db.projectComponent.deleteMany({ where: { id: projectBId } })
   await db.projectComponent.deleteMany({ where: { id: projectAId } })
+  await db.projectBomUpload.deleteMany({ where: { id: bomVersionId } })
   await db.componentBalance.deleteMany({ where: { componentId: { in: [componentAId, componentBId] } } })
   await db.component.deleteMany({ where: { id: { in: [componentAId, componentBId] } } })
   await db.project.deleteMany({ where: { id: projectId } })
@@ -212,7 +247,7 @@ after(async () => {
 })
 
 run('derives child demand from uncovered parent demand', async () => {
-  const initial = await getProjectComponentRequirements(projectId)
+  const initial = await cycleRequirements()
   assert.equal(initial.find((row) => row.projectComponentId === projectAId)?.grossRequired.toString(), '10')
   assert.equal(initial.find((row) => row.projectComponentId === projectBId)?.grossRequired.toString(), '20')
 
@@ -223,11 +258,49 @@ run('derives child demand from uncovered parent demand', async () => {
     sourceId: `ALLOC-A-${suffix}`,
   })
 
-  const afterAllocation = await getProjectComponentRequirements(projectId)
+  const afterAllocation = await cycleRequirements()
   const parent = afterAllocation.find((row) => row.projectComponentId === projectAId)!
   const child = afterAllocation.find((row) => row.projectComponentId === projectBId)!
   assert.equal(parent.uncoveredQuantity.toString(), '6')
   assert.equal(child.grossRequired.toString(), '12')
+})
+
+run('keeps requirements independent across cycles on the same BOM version', async () => {
+  const request = await db.reservationRequest.create({
+    data: {
+      requestNo: `RRQ-SECOND-${suffix}`,
+      projectId,
+      requestedById: userId,
+    },
+  })
+  const second = await db.reservation.create({
+    data: {
+      reservationNo: `RSV-SECOND-${suffix}`,
+      requestId: request.id,
+      projectId,
+      bomVersionId,
+      setCount: 2,
+      convertedById: userId,
+      lines: {
+        create: [
+          { componentId: componentAId, projectComponentId: projectAId },
+          { componentId: componentBId, projectComponentId: projectBId },
+        ],
+      },
+    },
+  })
+  const requirements = await db.$queryRaw<Array<{ reservationId: string; componentId: string; requiredQuantity: { toString(): string } }>>`
+    SELECT "reservationId", "componentId", "requiredQuantity"
+    FROM "reservation_line_requirements"
+    WHERE "reservationId" IN (${reservationId}, ${second.id})
+  `
+  assert.equal(requirements.find((row) => row.reservationId === reservationId && row.componentId === componentAId)?.requiredQuantity.toString(), '10')
+  assert.equal(requirements.find((row) => row.reservationId === second.id && row.componentId === componentAId)?.requiredQuantity.toString(), '20')
+  assert.equal(requirements.find((row) => row.reservationId === second.id && row.componentId === componentBId)?.requiredQuantity.toString(), '40')
+
+  await db.reservationLine.deleteMany({ where: { reservationId: second.id } })
+  await db.reservation.delete({ where: { id: second.id } })
+  await db.reservationRequest.delete({ where: { id: request.id } })
 })
 
 run('supports arbitrary partial issues without losing parent coverage', async () => {
@@ -248,7 +321,7 @@ run('supports arbitrary partial issues without losing parent coverage', async ()
     ],
   })
 
-  const requirements = await getProjectComponentRequirements(projectId)
+  const requirements = await cycleRequirements()
   const parent = requirements.find((row) => row.projectComponentId === projectAId)!
   const child = requirements.find((row) => row.projectComponentId === projectBId)!
   assert.equal(parent.allocatedQuantity.toString(), '2')
@@ -260,7 +333,7 @@ run('supports arbitrary partial issues without losing parent coverage', async ()
   assert.equal(child.uncoveredQuantity.toString(), '0')
 
   const reservation = await db.reservation.findUniqueOrThrow({ where: { id: reservationId } })
-  assert.equal(reservation.status, CanonicalReservationStatus.PARTIALLY_ISSUED)
+  assert.equal(reservation.status, ReservationStatus.IN_PROGRESS)
 
   await assert.rejects(
     postPartialIssue({

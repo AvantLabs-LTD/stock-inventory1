@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { CanonicalRecordStatus, ComponentDiscipline, Prisma } from '@prisma/client'
+import { RecordStatus, ComponentDiscipline, Prisma } from '@prisma/client'
 import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { getSession, forbiddenResponse, unauthorizedResponse } from '@/lib/auth-middleware'
@@ -25,12 +25,12 @@ export async function GET(request: NextRequest) {
   if (discipline && !Object.values(ComponentDiscipline).includes(discipline as ComponentDiscipline)) {
     return Response.json({ error: 'discipline must be MECHANICAL or ELECTRONICS' }, { status: 400 })
   }
-  if (status !== 'ALL' && !Object.values(CanonicalRecordStatus).includes(status as CanonicalRecordStatus)) {
+  if (status !== 'ALL' && !Object.values(RecordStatus).includes(status as RecordStatus)) {
     return Response.json({ error: 'Invalid component status filter' }, { status: 400 })
   }
 
   const where: Prisma.ComponentWhereInput = {
-    ...(status === 'ALL' ? {} : { status: status as CanonicalRecordStatus }),
+    ...(status === 'ALL' ? {} : { status: status as RecordStatus }),
     ...(discipline ? { discipline: discipline as ComponentDiscipline } : {}),
     ...(search
       ? {

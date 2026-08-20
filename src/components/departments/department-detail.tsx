@@ -36,7 +36,7 @@ interface DepartmentDetail {
   status: string
   users: DeptUser[]
   projects: DeptProject[]
-  _count: { users: number; projects: number; issues: number; requests: number; returns: number }
+  _count: { users: number; projects: number; reservationRequests: number; reservations: number }
 }
 
 const statusColorMap: Record<string, string> = {
@@ -52,7 +52,7 @@ const projectStatusColor: Record<string, string> = {
 }
 
 export function DepartmentDetail() {
-  const selectedId = useAppStore((s) => s.selectedProductId)
+  const selectedId = useAppStore((s) => s.selectedEntityId)
   const goBack = useAppStore((s) => s.goBack)
   const navigate = useAppStore((s) => s.navigate)
   const [dept, setDept] = useState<DepartmentDetail | null>(null)
@@ -62,7 +62,7 @@ export function DepartmentDetail() {
     if (!selectedId) return
     setLoading(true)
     try {
-      const res = await fetch(`/api/departments/${selectedId}`)
+      const res = await fetch(`/api/v1/departments/${selectedId}`)
       if (res.ok) {
         const data = await res.json()
         setDept(data)
@@ -122,7 +122,7 @@ export function DepartmentDetail() {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <Card className="p-4">
           <div className="text-2xl font-bold">{dept._count.users}</div>
           <p className="text-xs text-muted-foreground">Users</p>
@@ -132,16 +132,12 @@ export function DepartmentDetail() {
           <p className="text-xs text-muted-foreground">Projects</p>
         </Card>
         <Card className="p-4">
-          <div className="text-2xl font-bold">{dept._count.issues}</div>
-          <p className="text-xs text-muted-foreground">Issues</p>
-        </Card>
-        <Card className="p-4">
-          <div className="text-2xl font-bold">{dept._count.requests}</div>
+          <div className="text-2xl font-bold">{dept._count.reservationRequests}</div>
           <p className="text-xs text-muted-foreground">Requests</p>
         </Card>
         <Card className="p-4">
-          <div className="text-2xl font-bold">{dept._count.returns}</div>
-          <p className="text-xs text-muted-foreground">Returns</p>
+          <div className="text-2xl font-bold">{dept._count.reservations}</div>
+          <p className="text-xs text-muted-foreground">Cycles / reservations</p>
         </Card>
       </div>
 
@@ -227,7 +223,7 @@ export function DepartmentDetail() {
                     <div
                       key={project.id}
                       className="flex items-center justify-between rounded-md border p-3 cursor-pointer hover:bg-muted/50 transition-colors"
-                      onClick={() => navigate('project-detail', project.id)}
+                      onClick={() => navigate('projects', project.id)}
                     >
                       <div className="min-w-0">
                         <p className="text-sm font-medium truncate">{project.name}</p>

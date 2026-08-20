@@ -20,11 +20,7 @@ function generatedNo() {
 
 type Candidate = {
   reservationLineId: string
-  targetQuantity: Prisma.Decimal
-  cancelledQuantity: Prisma.Decimal
-  issuedQuantity: Prisma.Decimal
-  allocatedQuantity: Prisma.Decimal
-  existingPurchaseQuantity: Prisma.Decimal
+  unprocuredDeficit: Prisma.Decimal
 }
 
 async function linkOutstandingReservations(
@@ -35,51 +31,17 @@ async function linkOutstandingReservations(
 ) {
   const candidates = await tx.$queryRaw<Candidate[]>`
     SELECT
-      line."id" AS "reservationLineId",
-      COALESCE(requirement."grossRequired", line."requestedQuantity") AS "targetQuantity",
-      line."cancelledQuantity",
-      COALESCE(issue."quantity", 0) AS "issuedQuantity",
-      COALESCE(allocation."quantity", 0) AS "allocatedQuantity",
-      COALESCE(linked."quantity", 0) AS "existingPurchaseQuantity"
-    FROM "reservation_lines" line
-    JOIN "reservations" reservation ON reservation."id" = line."reservationId"
-    LEFT JOIN "project_component_requirements" requirement
-      ON requirement."projectComponentId" = line."projectComponentId"
-    LEFT JOIN LATERAL (
-      SELECT SUM("quantity") AS "quantity" FROM "stock_issue_lines" WHERE "reservationLineId" = line."id"
-    ) issue ON TRUE
-    LEFT JOIN LATERAL (
-      SELECT SUM("quantity") AS "quantity" FROM "inventory_allocation_entries" WHERE "reservationLineId" = line."id"
-    ) allocation ON TRUE
-    LEFT JOIN LATERAL (
-      SELECT SUM(link."quantity") AS "quantity"
-      FROM "purchase_reservation_links" link
-      JOIN "purchase_request_lines" pr_line ON pr_line."id" = link."purchaseRequestLineId"
-      JOIN "purchase_requests" request ON request."id" = pr_line."purchaseRequestId"
-      WHERE link."reservationLineId" = line."id"
-        AND request."status" NOT IN ('CANCELLED', 'RECEIVED_IN_STORE')
-    ) linked ON TRUE
-    WHERE line."componentId" = ${componentId}
-      AND reservation."status" NOT IN ('CLOSED', 'CANCELLED')
-    ORDER BY reservation."createdAt", line."createdAt"
+      "reservationLineId",
+      "unprocuredDeficit"
+    FROM "reservation_line_supply"
+    WHERE "componentId" = ${componentId}
+      AND "unprocuredDeficit" > 0
+    ORDER BY "reservationCreatedAt", "reservationNo", "reservationLineId"
   `
 
-  const balance = await tx.componentBalance.findUnique({ where: { componentId } })
-  let freeStock = (balance?.onHand ?? ZERO).minus(balance?.allocated ?? ZERO)
   let remainingPurchase = purchaseQuantity
   for (const candidate of candidates) {
-    let shortage = Prisma.Decimal.max(
-      candidate.targetQuantity
-        .minus(candidate.cancelledQuantity)
-        .minus(candidate.issuedQuantity)
-        .minus(candidate.allocatedQuantity),
-      ZERO
-    )
-    const coveredByStock = Prisma.Decimal.min(shortage, Prisma.Decimal.max(freeStock, ZERO))
-    shortage = shortage.minus(coveredByStock)
-    freeStock = freeStock.minus(coveredByStock)
-    shortage = Prisma.Decimal.max(shortage.minus(candidate.existingPurchaseQuantity), ZERO)
-    const linkedQuantity = Prisma.Decimal.min(shortage, remainingPurchase)
+    const linkedQuantity = Prisma.Decimal.min(candidate.unprocuredDeficit, remainingPurchase)
     if (!linkedQuantity.isPositive()) continue
     await tx.purchaseReservationLink.create({
       data: { purchaseRequestLineId, reservationLineId: candidate.reservationLineId, quantity: linkedQuantity },
@@ -91,6 +53,7 @@ async function linkOutstandingReservations(
 
 export async function createPurchaseRequest(input: {
   actorId: string
+  idempotencyKey?: string
   remarks?: string | null
   lines: Array<{
     componentId: string
@@ -100,8 +63,12 @@ export async function createPurchaseRequest(input: {
   }>
 }) {
   return db.$transaction(async (tx) => {
+    if (input.idempotencyKey) {
+      const existing = await tx.purchaseRequest.findUnique({ where: { idempotencyKey: input.idempotencyKey } })
+      if (existing) return getPurchaseRequestWithin(tx, existing.id)
+    }
     const request = await tx.purchaseRequest.create({
-      data: { requestNo: generatedNo(), createdById: input.actorId, remarks: input.remarks?.trim() || null },
+      data: { requestNo: generatedNo(), idempotencyKey: input.idempotencyKey, createdById: input.actorId, remarks: input.remarks?.trim() || null },
     })
     for (const item of input.lines) {
       const quantity = new Prisma.Decimal(item.quantity)
@@ -163,7 +130,7 @@ export async function updatePurchaseRequestDetails(input: {
 }) {
   const request = await db.purchaseRequest.findUnique({ where: { id: input.id } })
   if (!request) throw new PurchaseRequestDomainError('Purchase request was not found', 'NOT_FOUND')
-  if (request.status === PurchaseRequestStatus.RECEIVED_IN_STORE || request.status === PurchaseRequestStatus.CANCELLED) {
+  if (request.status === PurchaseRequestStatus.RECEIVED_IN_STORE) {
     throw new PurchaseRequestDomainError('A completed purchase request cannot be edited', 'INVALID_STATE')
   }
   const clean = (value: string | null | undefined) => value === undefined ? undefined : value?.trim() || null
@@ -223,8 +190,39 @@ export async function updatePurchaseReservationLink(input: { requestId: string; 
     }
     if (input.quantity === undefined) return tx.purchaseReservationLink.delete({ where: { id: link.id } })
     const quantity = new Prisma.Decimal(input.quantity)
-    if (!quantity.isPositive() || quantity.greaterThan(link.purchaseRequestLine.quantity)) {
-      throw new PurchaseRequestDomainError('Link quantity must be positive and cannot exceed the purchase line', 'INVALID_QUANTITY')
+    if (!quantity.isPositive()) {
+      throw new PurchaseRequestDomainError('Link quantity must be positive', 'INVALID_QUANTITY')
+    }
+    const [otherLinks, demand] = await Promise.all([
+      tx.purchaseReservationLink.aggregate({
+        where: { purchaseRequestLineId: link.purchaseRequestLineId, id: { not: link.id } },
+        _sum: { quantity: true },
+      }),
+      tx.$queryRaw<Array<{ physicalStockDeficit: Prisma.Decimal }>>`
+        SELECT "physicalStockDeficit"
+        FROM "reservation_line_supply"
+        WHERE "reservationLineId" = ${link.reservationLineId}
+      `,
+    ])
+    const otherLineCoverage = otherLinks._sum.quantity ?? ZERO
+    if (otherLineCoverage.plus(quantity).greaterThan(link.purchaseRequestLine.quantity)) {
+      throw new PurchaseRequestDomainError('Reservation links cannot exceed the purchase line quantity', 'INVALID_QUANTITY')
+    }
+    const otherActiveReservationCoverage = await tx.$queryRaw<Array<{ quantity: Prisma.Decimal }>>`
+      SELECT COALESCE(SUM(other."quantity"), 0)::DECIMAL(18, 6) AS quantity
+      FROM "purchase_reservation_links" other
+      JOIN "purchase_request_lines" purchase_line ON purchase_line."id" = other."purchaseRequestLineId"
+      JOIN "purchase_requests" request ON request."id" = purchase_line."purchaseRequestId"
+      WHERE other."reservationLineId" = ${link.reservationLineId}
+        AND other."id" <> ${link.id}
+        AND request."status" <> 'RECEIVED_IN_STORE'
+    `
+    const maximumNeeded = Prisma.Decimal.max(
+      (demand[0]?.physicalStockDeficit ?? ZERO).minus(otherActiveReservationCoverage[0]?.quantity ?? ZERO),
+      ZERO
+    )
+    if (quantity.greaterThan(maximumNeeded)) {
+      throw new PurchaseRequestDomainError('Link quantity exceeds the reservation line physical deficit', 'INVALID_QUANTITY')
     }
     return tx.purchaseReservationLink.update({ where: { id: link.id }, data: { quantity } })
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
