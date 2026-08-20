@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server"
+import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
 import { getSession, unauthorizedResponse } from "@/lib/auth-middleware"
 import { apiError } from "@/lib/inventory-service"
@@ -11,7 +12,19 @@ export async function GET(request: NextRequest) {
     include: { balance: true, defaultClassification: true },
     orderBy: [{ status: "asc" }, { title: "asc" }], take: 200,
   })
-  return Response.json({ items: items.map(i => ({ ...i, free: Number(i.balance?.onHand || 0) - Number(i.balance?.reserved || 0) })) })
+  const operational = await db.$queryRaw<Array<{ itemId: string; demand: Prisma.Decimal; procurement: Prisma.Decimal; deficit: Prisma.Decimal }>>
+    `SELECT "itemId",COALESCE(SUM(remaining),0) demand,
+      COALESCE(SUM(backlog+"pendingApproval"+ordered+shipped),0) procurement,
+      COALESCE(SUM("physicalDeficit"),0) deficit
+     FROM "demand_line_supply" WHERE "itemId" IS NOT NULL GROUP BY "itemId"`
+  const byItem = new Map(operational.map(row => [row.itemId, row]))
+  return Response.json({ items: items.map(i => ({
+    ...i,
+    free: Number(i.balance?.onHand || 0) - Number(i.balance?.reserved || 0),
+    demand: byItem.get(i.id)?.demand || 0,
+    procurement: byItem.get(i.id)?.procurement || 0,
+    deficit: byItem.get(i.id)?.deficit || 0,
+  })) })
 }
 
 export async function POST(request: NextRequest) {

@@ -7,10 +7,10 @@ import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupLabel
 
 const items: Array<{ title:string; page:AppPage; icon:React.ElementType }> = [
   { title:"Overview", page:"dashboard", icon:Gauge },
-  { title:"Items", page:"items", icon:Boxes },
+  { title:"Store Inventory", page:"items", icon:Boxes },
   { title:"Demands", page:"demands", icon:ClipboardList },
   { title:"Purchasing", page:"purchasing", icon:ShoppingCart },
-  { title:"Inventory ledger", page:"inventory", icon:Warehouse },
+  { title:"Stock Movements", page:"inventory", icon:Warehouse },
   { title:"Tags & reference data", page:"reference-data", icon:Tags },
 ]
 export function AppSidebar() {

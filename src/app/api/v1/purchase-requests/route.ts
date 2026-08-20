@@ -8,7 +8,7 @@ export async function GET(request: NextRequest) {
   if (!await getSession(request)) return unauthorizedResponse()
   const requests = await db.purchaseRequest.findMany({ include: {
     vendor: true, createdBy: { select: { id: true, name: true } },
-    lines: { include: { item: true, classification: true, demandLinks: true, receiptLines: true } },
+    lines: { include: { item: true, classification: true, demandLinks: { include: { demandLine: { include: { demand: { select: { demandNo: true } } } } } }, receiptLines: true } },
   }, orderBy: { createdAt: "desc" }, take: 200 })
   return Response.json({ requests })
 }
