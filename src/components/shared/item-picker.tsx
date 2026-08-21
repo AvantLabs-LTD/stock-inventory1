@@ -51,10 +51,19 @@ export function ItemPicker({
   const [categoryId, setCategoryId] = useState("ALL")
   const selected = items.find(item => item.id === value)
   const visibleCategories = categories.filter(category => discipline === "ALL" || category.discipline === discipline)
+  const categoryPaths = useMemo(() => {
+    const byId = new Map(categories.map(category => [category.id, category]))
+    return new Map(categories.map(category => {
+      const path: CatalogueCategory[] = [], visited = new Set<string>()
+      let current: CatalogueCategory | undefined = category
+      while (current && !visited.has(current.id)) { path.unshift(current); visited.add(current.id); current = current.parentId ? byId.get(current.parentId) : undefined }
+      return [category.id, path] as const
+    }))
+  }, [categories])
   const filtered = useMemo(() => items.filter(item =>
     (discipline === "ALL" || item.discipline === discipline) &&
-    (categoryId === "ALL" || item.category?.id === categoryId || item.category?.parentId === categoryId)
-  ), [items, discipline, categoryId])
+    (categoryId === "ALL" || Boolean(item.category && categoryPaths.get(item.category.id)?.some(category => category.id === categoryId)))
+  ), [items, discipline, categoryId, categoryPaths])
 
   return <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild><Button type="button" variant="outline" role="combobox" className="h-auto min-h-10 w-full justify-between py-2 text-left font-normal">
@@ -64,15 +73,15 @@ export function ItemPicker({
     <PopoverContent align="start" className="w-[min(42rem,calc(100vw-2rem))] p-0">
       <div className="grid grid-cols-2 gap-2 border-b p-2">
         <Select value={discipline} onValueChange={value => { setDiscipline(value as typeof discipline); setCategoryId("ALL") }}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="ALL">All disciplines</SelectItem><SelectItem value="MECHANICAL">Mechanical</SelectItem><SelectItem value="ELECTRONICS">Electronics</SelectItem></SelectContent></Select>
-        <Select value={categoryId} onValueChange={setCategoryId}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="ALL">All categories</SelectItem>{visibleCategories.map(category=><SelectItem key={category.id} value={category.id}>{category.parent ? `${category.parent.name} / ` : ""}{category.name}</SelectItem>)}</SelectContent></Select>
+        <Select value={categoryId} onValueChange={setCategoryId}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="ALL">All categories</SelectItem>{visibleCategories.map(category=><SelectItem key={category.id} value={category.id}>{categoryPaths.get(category.id)?.map(part=>part.name).join(" / ")}</SelectItem>)}</SelectContent></Select>
       </div>
       <Command shouldFilter><CommandInput value={search} onValueChange={setSearch} placeholder="Type a name, specification, code, manufacturer or part number…"/>
         <CommandList>
           <CommandEmpty><div className="space-y-3 px-4"><p>No matching component found.</p>{onRequestNew&&search.trim()&&<Button type="button" size="sm" onClick={()=>{onRequestNew(search.trim(),categoryId==="ALL"?null:categoryId,discipline==="ALL"?null:discipline);setOpen(false)}}><Plus className="mr-2 size-4"/>Use “{search.trim()}” as a new component</Button>}</div></CommandEmpty>
           <CommandGroup heading={`${filtered.length} component${filtered.length===1?"":"s"}`}>
-            {filtered.map(item=><CommandItem key={item.id} value={[item.id,item.code,item.title,item.specification,item.manufacturerName,item.manufacturerPartNumber,item.supplierPartNumber,item.category?.name].filter(Boolean).join(" ")} onSelect={()=>{onValueChange(item.id);setOpen(false)}}>
-              <Check className={cn("size-4",value===item.id?"opacity-100":"opacity-0")}/><div className="min-w-0 flex-1"><div className="truncate font-medium">{item.code} — {item.title}</div><div className="truncate text-xs text-muted-foreground">{[item.category?.name,item.specification,item.manufacturerPartNumber].filter(Boolean).join(" · ")||`${item.discipline} · ${item.unit}`}</div></div>{item.catalogueState==="INCOMPLETE"&&<span className="text-xs text-amber-600">Needs review</span>}
-            </CommandItem>)}
+            {filtered.map(item=>{const path=item.category?categoryPaths.get(item.category.id)?.map(category=>category.name).join(" / "):null;return <CommandItem key={item.id} value={[item.id,item.code,item.title,item.specification,item.manufacturerName,item.manufacturerPartNumber,item.supplierPartNumber,path].filter(Boolean).join(" ")} onSelect={()=>{onValueChange(item.id);setOpen(false)}}>
+              <Check className={cn("size-4",value===item.id?"opacity-100":"opacity-0")}/><div className="min-w-0 flex-1"><div className="truncate font-medium">{item.code} — {item.title}</div><div className="truncate text-xs text-muted-foreground">{[path,item.specification,item.manufacturerPartNumber].filter(Boolean).join(" · ")||`${item.discipline} · ${item.unit}`}</div></div>{item.catalogueState==="INCOMPLETE"&&<span className="text-xs text-amber-600">Needs review</span>}
+            </CommandItem>})}
           </CommandGroup>
         </CommandList>
       </Command>

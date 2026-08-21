@@ -26,10 +26,14 @@ try {
         name,
         password: await bcrypt.hash(password, 12),
         status: 'ACTIVE',
+        role: 'SUPER_ADMIN',
       },
     })
     console.log(`Created bootstrap administrator: ${email}`)
   } else {
+    if (existing.role !== 'SUPER_ADMIN') {
+      await prisma.user.update({ where: { id: existing.id }, data: { role: 'SUPER_ADMIN', status: 'ACTIVE' } })
+    }
     console.log(`Bootstrap administrator already exists: ${email}`)
   }
 } finally {

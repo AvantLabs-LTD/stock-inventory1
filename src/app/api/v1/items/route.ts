@@ -4,30 +4,89 @@ import { db } from "@/lib/db"
 import { forbiddenResponse, getSession, hasRole, unauthorizedResponse } from "@/lib/auth-middleware"
 import { apiError } from "@/lib/inventory-service"
 
+const PAGE_SIZE_DEFAULT = 200
+const PAGE_SIZE_MAX = 200
+
+function positiveInteger(value: string | null, fallback: number, maximum?: number) {
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < 1) return fallback
+  return maximum ? Math.min(parsed, maximum) : parsed
+}
+
+async function categoryDescendants(input: { id?: string; query?: string }) {
+  if (!input.id && !input.query) return []
+  const seed = input.id
+    ? Prisma.sql`WHERE "id" = ${input.id}`
+    : Prisma.sql`WHERE "name" ILIKE ${`%${input.query}%`} OR "normalizedName" ILIKE ${`%${input.query}%`}`
+  const rows = await db.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    WITH RECURSIVE category_scope AS (
+      SELECT "id" FROM "item_categories" ${seed}
+      UNION
+      SELECT child."id"
+      FROM "item_categories" child
+      INNER JOIN category_scope parent ON child."parentId" = parent."id"
+    )
+    SELECT "id" FROM category_scope
+  `)
+  return rows.map(row => row.id)
+}
+
 export async function GET(request: NextRequest) {
   if (!await getSession(request)) return unauthorizedResponse()
   const q = request.nextUrl.searchParams.get("q")?.trim()
+  const rootCategoryId = request.nextUrl.searchParams.get("rootCategoryId") || undefined
   const categoryId = request.nextUrl.searchParams.get("categoryId") || undefined
-  const discipline = request.nextUrl.searchParams.get("discipline") as "MECHANICAL" | "ELECTRONICS" | null
-  const items = await db.item.findMany({
-    where: {
-      categoryId,
-      discipline: discipline || undefined,
-      OR: q ? [
-        { code: { contains: q, mode: "insensitive" } }, { title: { contains: q, mode: "insensitive" } },
-        { description: { contains: q, mode: "insensitive" } }, { specification: { contains: q, mode: "insensitive" } },
-        { manufacturerName: { contains: q, mode: "insensitive" } }, { manufacturerPartNumber: { contains: q, mode: "insensitive" } },
-        { supplierPartNumber: { contains: q, mode: "insensitive" } },
-      ] : undefined,
-    },
-    include: { balance: true, category: { include: { parent: true } } },
-    orderBy: [{ status: "asc" }, { title: "asc" }], take: 200,
-  })
-  const operational = await db.$queryRaw<Array<{ itemId: string; demand: Prisma.Decimal; procurement: Prisma.Decimal; deficit: Prisma.Decimal }>>
-    `SELECT "itemId",COALESCE(SUM(remaining),0) demand,
+  const disciplineParam = request.nextUrl.searchParams.get("discipline")
+  const catalogueStateParam = request.nextUrl.searchParams.get("catalogueState")
+  const statusParam = request.nextUrl.searchParams.get("status")
+  const stock = request.nextUrl.searchParams.get("stock")
+  const page = positiveInteger(request.nextUrl.searchParams.get("page"), 1)
+  const pageSize = positiveInteger(request.nextUrl.searchParams.get("pageSize"), PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX)
+  const discipline = disciplineParam === "MECHANICAL" || disciplineParam === "ELECTRONICS" ? disciplineParam : undefined
+  const catalogueState = catalogueStateParam === "COMPLETE" || catalogueStateParam === "INCOMPLETE" ? catalogueStateParam : undefined
+  const status = statusParam === "ACTIVE" || statusParam === "INACTIVE" || statusParam === "ARCHIVED" ? statusParam : undefined
+  const [rootCategoryIds, categoryIds, searchCategoryIds] = await Promise.all([
+    rootCategoryId ? categoryDescendants({ id: rootCategoryId }) : Promise.resolve([]),
+    categoryId ? categoryDescendants({ id: categoryId }) : Promise.resolve([]),
+    q ? categoryDescendants({ query: q }) : Promise.resolve([]),
+  ])
+  const conditions: Prisma.ItemWhereInput[] = []
+  if (rootCategoryId) conditions.push({ categoryId: { in: rootCategoryIds } })
+  if (categoryId) conditions.push({ categoryId: { in: categoryIds } })
+  if (discipline) conditions.push({ discipline })
+  if (catalogueState) conditions.push({ catalogueState })
+  if (status) conditions.push({ status })
+  if (stock === "IN_STOCK") conditions.push({ balance: { is: { onHand: { gt: 0 } } } })
+  if (stock === "OUT_OF_STOCK") conditions.push({ OR: [{ balance: { is: null } }, { balance: { is: { onHand: { lte: 0 } } } }] })
+  if (stock === "RESERVED") conditions.push({ balance: { is: { reserved: { gt: 0 } } } })
+  if (q) conditions.push({ OR: [
+    { code: { contains: q, mode: "insensitive" } }, { title: { contains: q, mode: "insensitive" } },
+    { description: { contains: q, mode: "insensitive" } }, { specification: { contains: q, mode: "insensitive" } },
+    { manufacturerName: { contains: q, mode: "insensitive" } }, { manufacturerPartNumber: { contains: q, mode: "insensitive" } },
+    { supplierPartNumber: { contains: q, mode: "insensitive" } }, { function: { contains: q, mode: "insensitive" } },
+    { optionSelection: { contains: q, mode: "insensitive" } }, { remarks: { contains: q, mode: "insensitive" } },
+    ...(searchCategoryIds.length ? [{ categoryId: { in: searchCategoryIds } } satisfies Prisma.ItemWhereInput] : []),
+  ] })
+  const where: Prisma.ItemWhereInput = conditions.length ? { AND: conditions } : {}
+  const [total, items] = await db.$transaction([
+    db.item.count({ where }),
+    db.item.findMany({
+      where,
+      include: { balance: true, category: { include: { parent: true } } },
+      orderBy: [{ status: "asc" }, { title: "asc" }, { code: "asc" }],
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+  ])
+  const itemIds = items.map(item => item.id)
+  const operational = itemIds.length ? await db.$queryRaw<Array<{ itemId: string; demand: Prisma.Decimal; procurement: Prisma.Decimal; deficit: Prisma.Decimal }>>(Prisma.sql`
+    SELECT "itemId",COALESCE(SUM(remaining),0) demand,
       COALESCE(SUM(backlog+"pendingApproval"+ordered+shipped),0) procurement,
       COALESCE(SUM("physicalDeficit"),0) deficit
-     FROM "demand_line_supply" WHERE "itemId" IS NOT NULL GROUP BY "itemId"`
+    FROM "demand_line_supply"
+    WHERE "itemId" IN (${Prisma.join(itemIds)})
+    GROUP BY "itemId"
+  `) : []
   const byItem = new Map(operational.map(row => [row.itemId, row]))
   return Response.json({ items: items.map(i => ({
     ...i,
@@ -35,7 +94,7 @@ export async function GET(request: NextRequest) {
     demand: byItem.get(i.id)?.demand || 0,
     procurement: byItem.get(i.id)?.procurement || 0,
     deficit: byItem.get(i.id)?.deficit || 0,
-  })) })
+  })), pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) } })
 }
 
 export async function POST(request: NextRequest) {

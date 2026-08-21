@@ -78,6 +78,29 @@ docker compose up --build -d
 
 The one-shot `migrate` service runs before the application and uses `prisma migrate deploy`.
 
+## Import the consolidated inventory workbook
+
+The authenticated inventory-master API always supports a preview before committing. The Python uploader uses only the standard library and prompts for the portal password without printing it:
+
+```sh
+python3 scripts/import-inventory-master.py \
+  --base-url http://localhost:3000 \
+  --file ../stock-inventory-editor/Consolidated\ BOM_unified.xlsx \
+  --email admin@localhost
+```
+
+The command above is preview-only. After reviewing the category and normalization counts, commit with:
+
+```sh
+python3 scripts/import-inventory-master.py \
+  --base-url http://localhost:3000 \
+  --file ../stock-inventory-editor/Consolidated\ BOM_unified.xlsx \
+  --email admin@localhost \
+  --commit
+```
+
+For non-interactive operation, set `STORE_PORTAL_PASSWORD` and add `--yes`. Do not place the password directly in the command line or commit it to a file.
+
 ## Data persistence and backup
 
 PostgreSQL data and generated secrets are held in the named volumes `postgres-data` and `runtime-secrets`. Do not delete only the secrets volume while retaining the database volume because the generated database password is stored there.

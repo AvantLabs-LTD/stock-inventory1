@@ -1,32 +1,56 @@
 "use client"
 
-import { FormEvent, useCallback, useEffect, useState } from "react"
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
-import { Boxes, ClipboardList, Download, Gauge, Plus, RefreshCw, ShoppingCart, Tags, Upload, Warehouse } from "lucide-react"
+import { Boxes, ClipboardList, Download, Filter, Gauge, Plus, RefreshCw, Search, ShoppingCart, Tags, Upload, Warehouse } from "lucide-react"
 import { PageHeader } from "@/components/shared/page-header"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useAuthStore } from "@/stores/auth-store"
 import { ItemPicker, type CatalogueCategory, type CatalogueItem } from "@/components/shared/item-picker"
 
 type Ref = { id: string; name: string; status?: string }
 type Item = CatalogueItem & { status: string; description?:string|null; balance?: { onHand: string; reserved: string }; free?: number; demand?: string; procurement?: string; deficit?: string }
 type ReferenceData = { itemCategories: CatalogueCategory[]; departments: Ref[]; projects: Ref[]; vendors: Ref[] }
+type CataloguePagination = { page:number; pageSize:number; total:number; totalPages:number }
+type CatalogueFilters = { categoryId:string; discipline:string; stock:string; catalogueState:string; status:string }
+const defaultCatalogueFilters: CatalogueFilters = { categoryId:"ALL", discipline:"ALL", stock:"ALL", catalogueState:"ALL", status:"ACTIVE" }
 const procurementTypes = ["FOREIGN_STANDARD","FOREIGN_MANUFACTURED","LOCAL_STANDARD","LOCAL_MANUFACTURED"] as const
 const procurementLabel = (value:string) => value.toLowerCase().replaceAll("_"," ").replace(/\b\w/g,letter=>letter.toUpperCase())
+
+function catalogueCategoryPath(categoryId:string|undefined|null,categories:CatalogueCategory[]){
+  if(!categoryId)return[]
+  const byId=new Map(categories.map(category=>[category.id,category])), path:CatalogueCategory[]=[] , visited=new Set<string>()
+  let current=byId.get(categoryId)
+  while(current&&!visited.has(current.id)){path.unshift(current);visited.add(current.id);current=current.parentId?byId.get(current.parentId):undefined}
+  return path
+}
 
 async function jsonFetch(url: string, init?: RequestInit) {
   const response = await fetch(url, init)
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.error || "Request failed")
   return body
+}
+
+async function loadAllCatalogueItems() {
+  const items: Item[] = []
+  let page = 1, totalPages = 1
+  do {
+    const response = await jsonFetch(`/api/v1/items?page=${page}&pageSize=200&status=ACTIVE`)
+    items.push(...response.items)
+    totalPages = response.pagination?.totalPages || 1
+    page += 1
+  } while (page <= totalPages)
+  return items
 }
 
 function Empty({ children }: { children: string }) {
@@ -45,22 +69,63 @@ export function OverviewPage() {
 
 export function ItemsPage() {
   const role=useAuthStore(s=>s.user?.role), canManage=role==="SUPER_ADMIN"||role==="INVENTORY_MANAGER"
-  const [items, setItems] = useState<Item[]>([]), [categories, setCategories] = useState<CatalogueCategory[]>([]), [open, setOpen] = useState(false), [query,setQuery]=useState(""), [categoryFilter,setCategoryFilter]=useState("ALL"), [itemDiscipline,setItemDiscipline]=useState<"MECHANICAL"|"ELECTRONICS">("MECHANICAL")
-  const load = useCallback(() => Promise.all([jsonFetch("/api/v1/items"), jsonFetch("/api/v1/reference-data")]).then(([a,b]) => { setItems(a.items); setCategories(b.itemCategories) }).catch(e => toast.error(e.message)), [])
+  const [items, setItems] = useState<Item[]>([]), [categories, setCategories] = useState<CatalogueCategory[]>([]), [open, setOpen] = useState(false), [query,setQuery]=useState(""), [debouncedQuery,setDebouncedQuery]=useState(""), [rootCategoryId,setRootCategoryId]=useState("ALL"), [filters,setFilters]=useState<CatalogueFilters>(defaultCatalogueFilters), [draftFilters,setDraftFilters]=useState<CatalogueFilters>(defaultCatalogueFilters), [filterOpen,setFilterOpen]=useState(false), [page,setPage]=useState(1), [pageSize,setPageSize]=useState(50), [pagination,setPagination]=useState<CataloguePagination>({page:1,pageSize:50,total:0,totalPages:1}), [loading,setLoading]=useState(true), [itemDiscipline,setItemDiscipline]=useState<"MECHANICAL"|"ELECTRONICS">("MECHANICAL")
+  const roots=useMemo(()=>categories.filter(category=>!category.parentId),[categories])
+  const categoryPaths=useMemo(()=>new Map(categories.map(category=>[category.id,catalogueCategoryPath(category.id,categories)])),[categories])
+  const lowerCategories=useMemo(()=>categories.filter(category=>category.parentId&&(rootCategoryId==="ALL"||categoryPaths.get(category.id)?.[0]?.id===rootCategoryId)),[categories,categoryPaths,rootCategoryId])
+  const activeAdvancedFilters=[filters.categoryId!=="ALL",filters.discipline!=="ALL",filters.stock!=="ALL",filters.catalogueState!=="ALL",filters.status!=="ACTIVE"].filter(Boolean).length
+  useEffect(()=>{const timer=setTimeout(()=>{setDebouncedQuery(query.trim());setPage(1)},250);return()=>clearTimeout(timer)},[query])
+  useEffect(()=>{jsonFetch("/api/v1/reference-data").then(data=>setCategories(data.itemCategories)).catch(e=>toast.error(e.message))},[])
+  const load = useCallback(async()=>{
+    setLoading(true)
+    const params=new URLSearchParams({page:String(page),pageSize:String(pageSize)})
+    if(debouncedQuery)params.set("q",debouncedQuery)
+    if(rootCategoryId!=="ALL")params.set("rootCategoryId",rootCategoryId)
+    if(filters.categoryId!=="ALL")params.set("categoryId",filters.categoryId)
+    if(filters.discipline!=="ALL")params.set("discipline",filters.discipline)
+    if(filters.stock!=="ALL")params.set("stock",filters.stock)
+    if(filters.catalogueState!=="ALL")params.set("catalogueState",filters.catalogueState)
+    if(filters.status!=="ALL")params.set("status",filters.status)
+    try{const data=await jsonFetch(`/api/v1/items?${params}`);setItems(data.items);setPagination(data.pagination)}catch(e){toast.error((e as Error).message)}finally{setLoading(false)}
+  },[debouncedQuery,filters,page,pageSize,rootCategoryId])
   useEffect(() => { void load() }, [load])
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault(); const f = new FormData(e.currentTarget)
     try { await jsonFetch("/api/v1/items", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(f)) }); toast.success("Item created"); setOpen(false); await load() } catch(e) { toast.error((e as Error).message) }
   }
-  return <div className="space-y-6"><PageHeader title="Store Inventory" description="The primary view of current stock, commitments, demand, procurement and shortages." icon={Boxes}>
+  function selectRoot(value:string){setRootCategoryId(value);setFilters(current=>({...current,categoryId:"ALL"}));setPage(1)}
+  function applyFilters(){setFilters(draftFilters);setPage(1);setFilterOpen(false)}
+  function clearFilters(){const cleared={...defaultCatalogueFilters,status:"ALL"};setDraftFilters(cleared);setFilters(cleared);setRootCategoryId("ALL");setPage(1);setFilterOpen(false)}
+  const firstRow=pagination.total?(pagination.page-1)*pagination.pageSize+1:0, lastRow=Math.min(pagination.page*pagination.pageSize,pagination.total)
+  return <div className="space-y-6"><PageHeader title="Store Inventory" description="Browse the canonical component catalogue by hierarchy, then inspect physical stock, demand and procurement together." icon={Boxes}>
     {canManage&&<Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild><Button><Plus className="mr-2 size-4"/>New item</Button></DialogTrigger><DialogContent><DialogHeader><DialogTitle>Create item</DialogTitle></DialogHeader>
       <form className="grid gap-4" onSubmit={submit}><div className="grid grid-cols-2 gap-3"><div><Label>Code</Label><Input name="code" required/></div><div><Label>Unit</Label><Input name="unit" defaultValue="pcs"/></div></div><div><Label>Title</Label><Input name="title" required/></div>
         <div><Label>Discipline</Label><Select name="discipline" value={itemDiscipline} onValueChange={value=>setItemDiscipline(value as typeof itemDiscipline)}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="MECHANICAL">Mechanical</SelectItem><SelectItem value="ELECTRONICS">Electronics</SelectItem></SelectContent></Select></div>
         <div><Label>Category</Label><Select key={itemDiscipline} name="categoryId" required><SelectTrigger><SelectValue placeholder="Select category"/></SelectTrigger><SelectContent>{categories.filter(x=>x.discipline===itemDiscipline).map(x=><SelectItem key={x.id} value={x.id}>{x.parent?`${x.parent.name} / `:""}{x.name}</SelectItem>)}</SelectContent></Select></div>
         <div><Label>Specification</Label><Input name="specification" placeholder="Size, rating, variant or package"/></div><div className="grid grid-cols-2 gap-3"><div><Label>Manufacturer</Label><Input name="manufacturerName"/></div><div><Label>Manufacturer part number</Label><Input name="manufacturerPartNumber"/></div></div>
         <div><Label>Description</Label><Textarea name="description"/></div><Button type="submit">Create component</Button></form></DialogContent></Dialog>}
-  </PageHeader><InventoryMasterImport onDone={load}/><Card><CardContent className="pt-6"><div className="mb-4 grid gap-3 md:grid-cols-[1fr_18rem]"><Input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Filter by code, name, specification or part number…"/><Select value={categoryFilter} onValueChange={setCategoryFilter}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="ALL">All categories</SelectItem>{categories.map(x=><SelectItem key={x.id} value={x.id}>{x.name}</SelectItem>)}</SelectContent></Select></div><Table><TableHeader><TableRow><TableHead>Code</TableHead><TableHead>Item</TableHead><TableHead>Category</TableHead><TableHead className="text-right">On hand</TableHead><TableHead className="text-right">Reserved</TableHead><TableHead className="text-right">Free</TableHead><TableHead className="text-right">Demand</TableHead><TableHead className="text-right">In procurement</TableHead><TableHead className="text-right">Deficit</TableHead></TableRow></TableHeader>
-    <TableBody>{items.filter(i=>{const haystack=[i.code,i.title,i.specification,i.manufacturerName,i.manufacturerPartNumber].filter(Boolean).join(" ").toLowerCase();return(!query||haystack.includes(query.toLowerCase()))&&(categoryFilter==="ALL"||i.category?.id===categoryFilter||i.category?.parentId===categoryFilter)}).map(i=><TableRow key={i.id}><TableCell className="font-mono">{i.code}</TableCell><TableCell><div className="flex items-center gap-2 font-medium">{i.title}{i.catalogueState==="INCOMPLETE"&&<Badge variant="outline">Needs review</Badge>}</div><div className="text-xs text-muted-foreground">{[i.specification,i.manufacturerPartNumber,`${i.discipline} · ${i.unit}`].filter(Boolean).join(" · ")}</div></TableCell><TableCell>{i.category?.name || "Uncategorised"}</TableCell><TableCell className="text-right">{i.balance?.onHand || "0"}</TableCell><TableCell className="text-right">{i.balance?.reserved || "0"}</TableCell><TableCell className="text-right font-medium">{i.free ?? 0}</TableCell><TableCell className="text-right">{i.demand ?? 0}</TableCell><TableCell className="text-right">{i.procurement ?? 0}</TableCell><TableCell className="text-right">{i.deficit ?? 0}</TableCell></TableRow>)}</TableBody></Table>{!items.length&&<Empty>No items yet.</Empty>}</CardContent></Card></div>
+  </PageHeader><InventoryMasterImport onDone={load}/>
+  <Card><CardContent className="space-y-4 pt-6">
+    <div className="space-y-3">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+        <div className="relative min-w-0 flex-1"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"/><Input className="pl-9" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search components, specifications, part numbers, categories or subcategories…"/></div>
+        <Button type="button" variant="outline" onClick={()=>{setDraftFilters(filters);setFilterOpen(true)}}><Filter className="mr-2 size-4"/>Advanced filters{activeAdvancedFilters>0&&<Badge className="ml-2" variant="secondary">{activeAdvancedFilters}</Badge>}</Button>
+      </div>
+      <Tabs value={rootCategoryId} onValueChange={selectRoot}><TabsList className="h-auto max-w-full flex-wrap justify-start"><TabsTrigger value="ALL">All components</TabsTrigger>{roots.map(category=><TabsTrigger key={category.id} value={category.id}>{category.name}</TabsTrigger>)}</TabsList></Tabs>
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"><span>{rootCategoryId==="ALL"?"Showing the complete catalogue hierarchy":roots.find(category=>category.id===rootCategoryId)?.name}{filters.categoryId!=="ALL"&&` / ${categories.find(category=>category.id===filters.categoryId)?.name||"Selected subcategory"}`}</span>{(rootCategoryId!=="ALL"||activeAdvancedFilters>0)&&<Button className="h-auto px-2 py-1 text-xs" variant="ghost" onClick={clearFilters}>Clear all filters</Button>}</div>
+    </div>
+    <div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead>Code</TableHead><TableHead>Component</TableHead><TableHead>Catalogue hierarchy</TableHead><TableHead className="text-right">On hand</TableHead><TableHead className="text-right">Reserved</TableHead><TableHead className="text-right">Free</TableHead><TableHead className="text-right">Demand</TableHead><TableHead className="text-right">In procurement</TableHead><TableHead className="text-right">Deficit</TableHead></TableRow></TableHeader>
+      <TableBody>{items.map(i=><TableRow key={i.id}><TableCell className="font-mono text-xs">{i.code}</TableCell><TableCell><div className="flex items-center gap-2 font-medium">{i.title}{i.catalogueState==="INCOMPLETE"&&<Badge variant="outline">Needs review</Badge>}</div><div className="text-xs text-muted-foreground">{[i.specification,i.manufacturerPartNumber,`${i.discipline} · ${i.unit}`].filter(Boolean).join(" · ")}</div></TableCell><TableCell><div className="text-sm">{i.category?categoryPaths.get(i.category.id)?.map((category,index,path)=><span key={category.id}><span className={index<path.length-1?"text-muted-foreground":""}>{category.name}</span>{index<path.length-1&&<span className="mx-1.5 text-muted-foreground">/</span>}</span>):"Uncategorised"}</div></TableCell><TableCell className="text-right">{i.balance?.onHand||"0"}</TableCell><TableCell className="text-right">{i.balance?.reserved||"0"}</TableCell><TableCell className="text-right font-medium">{i.free??0}</TableCell><TableCell className="text-right">{i.demand??0}</TableCell><TableCell className="text-right">{i.procurement??0}</TableCell><TableCell className="text-right">{i.deficit??0}</TableCell></TableRow>)}</TableBody></Table></div>
+    {loading?<div className="py-10 text-center text-sm text-muted-foreground">Loading catalogue…</div>:!items.length?<Empty>No components match the current search and filters.</Empty>:<div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between"><div className="text-sm text-muted-foreground">Showing {firstRow}–{lastRow} of {pagination.total} components</div><div className="flex items-center gap-2"><Select value={String(pageSize)} onValueChange={value=>{setPageSize(Number(value));setPage(1)}}><SelectTrigger className="w-28"><SelectValue/></SelectTrigger><SelectContent>{[25,50,100,200].map(size=><SelectItem key={size} value={String(size)}>{size} rows</SelectItem>)}</SelectContent></Select><Button variant="outline" size="sm" disabled={pagination.page<=1} onClick={()=>setPage(current=>Math.max(1,current-1))}>Previous</Button><span className="min-w-20 text-center text-sm">{pagination.page} / {pagination.totalPages}</span><Button variant="outline" size="sm" disabled={pagination.page>=pagination.totalPages} onClick={()=>setPage(current=>Math.min(pagination.totalPages,current+1))}>Next</Button></div></div>}
+  </CardContent></Card>
+  <Dialog open={filterOpen} onOpenChange={setFilterOpen}><DialogContent className="sm:max-w-xl"><DialogHeader><DialogTitle>Advanced catalogue filters</DialogTitle><DialogDescription>Refine the selected top-level tab without changing the component catalogue itself.</DialogDescription></DialogHeader><div className="grid gap-4 py-2 sm:grid-cols-2">
+    <div className="space-y-2 sm:col-span-2"><Label>Lower-tier category</Label><Select value={draftFilters.categoryId} onValueChange={value=>setDraftFilters(current=>({...current,categoryId:value}))}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="ALL">All lower-tier categories</SelectItem>{lowerCategories.map(category=><SelectItem key={category.id} value={category.id}>{categoryPaths.get(category.id)?.map(part=>part.name).join(" / ")}</SelectItem>)}</SelectContent></Select></div>
+    <div className="space-y-2"><Label>Discipline</Label><Select value={draftFilters.discipline} onValueChange={value=>setDraftFilters(current=>({...current,discipline:value}))}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="ALL">All disciplines</SelectItem><SelectItem value="MECHANICAL">Mechanical</SelectItem><SelectItem value="ELECTRONICS">Electronics</SelectItem></SelectContent></Select></div>
+    <div className="space-y-2"><Label>Physical stock</Label><Select value={draftFilters.stock} onValueChange={value=>setDraftFilters(current=>({...current,stock:value}))}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="ALL">Any stock level</SelectItem><SelectItem value="IN_STOCK">In stock</SelectItem><SelectItem value="OUT_OF_STOCK">Zero stock</SelectItem><SelectItem value="RESERVED">Has reservations</SelectItem></SelectContent></Select></div>
+    <div className="space-y-2"><Label>Catalogue completeness</Label><Select value={draftFilters.catalogueState} onValueChange={value=>setDraftFilters(current=>({...current,catalogueState:value}))}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="ALL">Complete and incomplete</SelectItem><SelectItem value="COMPLETE">Complete records</SelectItem><SelectItem value="INCOMPLETE">Needs review</SelectItem></SelectContent></Select></div>
+    <div className="space-y-2"><Label>Record status</Label><Select value={draftFilters.status} onValueChange={value=>setDraftFilters(current=>({...current,status:value}))}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="ALL">All statuses</SelectItem><SelectItem value="ACTIVE">Active</SelectItem><SelectItem value="INACTIVE">Inactive</SelectItem><SelectItem value="ARCHIVED">Archived</SelectItem></SelectContent></Select></div>
+  </div><DialogFooter className="gap-2"><Button type="button" variant="ghost" onClick={clearFilters}>Clear all</Button><Button type="button" variant="outline" onClick={()=>setFilterOpen(false)}>Cancel</Button><Button type="button" onClick={applyFilters}>Apply filters</Button></DialogFooter></DialogContent></Dialog>
+  </div>
 }
 
 function InventoryMasterImport({onDone}:{onDone:()=>void}) {
@@ -74,7 +139,7 @@ type Demand = { id:string; demandNo:string; state:string; requestedAt:string; re
 export function DemandsPage() {
   const user=useAuthStore(s=>s.user), [demands,setDemands]=useState<Demand[]>([]), [items,setItems]=useState<Item[]>([]), [refs,setRefs]=useState<ReferenceData>({itemCategories:[],departments:[],projects:[],vendors:[]}), [mine,setMine]=useState(true), [open,setOpen]=useState(false), [selected,setSelected]=useState<string|null>(null)
   const [selectedItemId,setSelectedItemId]=useState<string|null>(null), [requestedTitle,setRequestedTitle]=useState(""), [requestedCategoryId,setRequestedCategoryId]=useState<string|null>(null), [requestedDiscipline,setRequestedDiscipline]=useState<"MECHANICAL"|"ELECTRONICS"|null>(null), [procurementType,setProcurementType]=useState("NOT_SPECIFIED")
-  const load=useCallback(()=>Promise.all([jsonFetch("/api/v1/demands?mine="+mine),jsonFetch("/api/v1/items"),jsonFetch("/api/v1/reference-data")]).then(([a,b,c])=>{setDemands(a.demands);setItems(b.items);setRefs(c)}).catch(e=>toast.error(e.message)),[mine])
+  const load=useCallback(()=>Promise.all([jsonFetch("/api/v1/demands?mine="+mine),loadAllCatalogueItems(),jsonFetch("/api/v1/reference-data")]).then(([a,b,c])=>{setDemands(a.demands);setItems(b);setRefs(c)}).catch(e=>toast.error(e.message)),[mine])
   useEffect(()=>{void load()},[load])
   async function create(e:FormEvent<HTMLFormElement>){e.preventDefault();const f=new FormData(e.currentTarget);const item=items.find(x=>x.id===selectedItemId);try{await jsonFetch("/api/v1/demands",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({departmentTagId:f.get("departmentTagId")||null,remarks:f.get("remarks"),lines:[{itemId:item?.id||null,title:item?.title||requestedTitle,description:f.get("description")||null,unit:item?.unit||f.get("unit")||"pcs",quantity:f.get("quantity"),suggestedCategoryId:item?.category?.id||requestedCategoryId,procurementType:procurementType==="NOT_SPECIFIED"?null:procurementType,projectTagId:f.get("projectTagId")||null,vendorName:f.get("vendorName")||null}]})});toast.success(item?"Demand submitted":"Demand submitted with a new-component request");setOpen(false);setSelectedItemId(null);setRequestedTitle("");await load()}catch(e){toast.error((e as Error).message)}}
   return <div className="space-y-6"><PageHeader title="Demands" description="Department belongs to the demand; project belongs only to an individual row." icon={ClipboardList}>
@@ -132,7 +197,7 @@ export function PurchasingPage() {
   const role=useAuthStore(s=>s.user?.role), canManage=role==="SUPER_ADMIN"||role==="INVENTORY_MANAGER", canApprove=role==="SUPER_ADMIN"||role==="PURCHASE_APPROVER"
   const [requests,setRequests]=useState<Array<{id:string;requestNo:string;status:string;vendor?:Ref|null;lines:Array<{id:string;quantity:string;type:string;item:Item;demandLinks:Array<{quantity:string;demandLine:{demand:{demandNo:string}}}>;receiptLines:Array<{quantity:string}>}>}>>([])
   const [items,setItems]=useState<Item[]>([]), [categories,setCategories]=useState<CatalogueCategory[]>([]), [open,setOpen]=useState(false), [selectedItemId,setSelectedItemId]=useState<string|null>(null), [newItemTitle,setNewItemTitle]=useState(""), [newCategoryId,setNewCategoryId]=useState<string|null>(null), [newDiscipline,setNewDiscipline]=useState<"MECHANICAL"|"ELECTRONICS"|null>(null)
-  const load=useCallback(()=>Promise.all([jsonFetch("/api/v1/purchase-requests"),jsonFetch("/api/v1/items"),jsonFetch("/api/v1/reference-data")]).then(([a,b,c])=>{setRequests(a.requests);setItems(b.items);setCategories(c.itemCategories)}).catch(e=>toast.error(e.message)),[])
+  const load=useCallback(()=>Promise.all([jsonFetch("/api/v1/purchase-requests"),loadAllCatalogueItems(),jsonFetch("/api/v1/reference-data")]).then(([a,b,c])=>{setRequests(a.requests);setItems(b);setCategories(c.itemCategories)}).catch(e=>toast.error(e.message)),[])
   useEffect(()=>{void load()},[load])
   async function advance(id:string,status:string){const next:{[k:string]:string}={BACKLOG:"PENDING_APPROVAL",PENDING_APPROVAL:"ORDERED",ORDERED:"SHIPPED"};if(!next[status])return;try{await jsonFetch("/api/v1/purchase-requests/"+id+"/transition",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status:next[status]})});toast.success("Purchase moved to "+next[status]);await load()}catch(e){toast.error((e as Error).message)}}
   async function create(e:FormEvent<HTMLFormElement>){e.preventDefault();const f=new FormData(e.currentTarget),item=items.find(x=>x.id===selectedItemId);try{await jsonFetch("/api/v1/purchase-requests",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({vendorName:f.get("vendorName"),remarks:f.get("remarks"),lines:[{itemId:item?.id,type:f.get("type"),quantity:f.get("quantity"),newItem:item?undefined:{title:newItemTitle,specification:f.get("specification"),discipline:newDiscipline,categoryId:newCategoryId,unit:f.get("unit")||"pcs",manufacturerName:f.get("manufacturerName"),manufacturerPartNumber:f.get("manufacturerPartNumber")}}]})});toast.success(item?"Purchase request created":"Purchase request created; the new component is marked for review");setOpen(false);setSelectedItemId(null);setNewItemTitle("");await load()}catch(e){toast.error((e as Error).message)}}
