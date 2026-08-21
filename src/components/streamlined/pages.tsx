@@ -104,7 +104,7 @@ export function ItemsPage() {
         <div><Label>Category</Label><Select key={itemDiscipline} name="categoryId" required><SelectTrigger><SelectValue placeholder="Select category"/></SelectTrigger><SelectContent>{categories.filter(x=>x.discipline===itemDiscipline).map(x=><SelectItem key={x.id} value={x.id}>{x.parent?`${x.parent.name} / `:""}{x.name}</SelectItem>)}</SelectContent></Select></div>
         <div><Label>Specification</Label><Input name="specification" placeholder="Size, rating, variant or package"/></div><div className="grid grid-cols-2 gap-3"><div><Label>Manufacturer</Label><Input name="manufacturerName"/></div><div><Label>Manufacturer part number</Label><Input name="manufacturerPartNumber"/></div></div>
         <div><Label>Description</Label><Textarea name="description"/></div><Button type="submit">Create component</Button></form></DialogContent></Dialog>}
-  </PageHeader><InventoryMasterImport onDone={load}/>
+  </PageHeader>
   <Card><CardContent className="space-y-4 pt-6">
     <div className="space-y-3">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
@@ -126,13 +126,6 @@ export function ItemsPage() {
     <div className="space-y-2"><Label>Record status</Label><Select value={draftFilters.status} onValueChange={value=>setDraftFilters(current=>({...current,status:value}))}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="ALL">All statuses</SelectItem><SelectItem value="ACTIVE">Active</SelectItem><SelectItem value="INACTIVE">Inactive</SelectItem><SelectItem value="ARCHIVED">Archived</SelectItem></SelectContent></Select></div>
   </div><DialogFooter className="gap-2"><Button type="button" variant="ghost" onClick={clearFilters}>Clear all</Button><Button type="button" variant="outline" onClick={()=>setFilterOpen(false)}>Cancel</Button><Button type="button" onClick={applyFilters}>Apply filters</Button></DialogFooter></DialogContent></Dialog>
   </div>
-}
-
-function InventoryMasterImport({onDone}:{onDone:()=>void}) {
-  const role=useAuthStore(s=>s.user?.role), [file,setFile]=useState<File|null>(null), [preview,setPreview]=useState<{total:number;bySheet:Record<string,number>;blankStockRows:number;negativeStockRows:number;ignoredSheets:string[]}|null>(null), [busy,setBusy]=useState(false)
-  if(!role||!["SUPER_ADMIN","INVENTORY_MANAGER"].includes(role))return null
-  async function send(mode:"preview"|"commit"){if(!file)return;setBusy(true);const form=new FormData();form.set("file",file);form.set("mode",mode);try{const result=await jsonFetch("/api/v1/items/import-master",{method:"POST",body:form});setPreview(result.summary);if(mode==="commit"){toast.success(`${result.result.created} components created; ${result.result.openingEntries} opening balances posted`);setFile(null);setPreview(null);onDone()}else toast.success("Import preview is ready")}catch(e){toast.error((e as Error).message)}finally{setBusy(false)}}
-  return <Card><CardContent className="space-y-4 pt-6"><div className="flex flex-wrap items-center gap-3"><Upload className="size-5 text-muted-foreground"/><div className="min-w-60 flex-1"><div className="text-sm font-medium">Import consolidated inventory master</div><div className="text-xs text-muted-foreground">Preview first. Assemblies is ignored; blank and negative stock become zero; Metal Connectors use pcs.</div></div><Input className="max-w-xs" type="file" accept=".xlsx" onChange={e=>{setFile(e.target.files?.[0]||null);setPreview(null)}}/><Button type="button" variant="outline" disabled={!file||busy} onClick={()=>send("preview")}>Preview</Button></div>{preview&&<div className="rounded-md border bg-muted/30 p-3 text-sm"><div className="font-medium">{preview.total} components ready</div><div className="mt-1 text-muted-foreground">{Object.entries(preview.bySheet).map(([sheet,count])=>`${sheet}: ${count}`).join(" · ")}</div><div className="mt-1 text-muted-foreground">{preview.blankStockRows} blank stock rows and {preview.negativeStockRows} negative stock row(s) will open at zero.{preview.ignoredSheets.length?` Ignored: ${preview.ignoredSheets.join(", ")}.`:""}</div><Button className="mt-3" type="button" disabled={busy} onClick={()=>send("commit")}>Import components and opening balances</Button></div>}</CardContent></Card>
 }
 
 type Demand = { id:string; demandNo:string; state:string; requestedAt:string; requestedBy:{id:string;name:string}; departmentTag?:Ref|null; lines:Array<{id:string}>; quantities?:{required:string;reserved:string;allocated:string;remaining:string}|null }
