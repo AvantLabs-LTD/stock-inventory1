@@ -8,6 +8,7 @@ import { TopBar } from "@/components/layout/top-bar"
 import { ChangePasswordDialog } from "@/components/change-password/change-password-dialog"
 import { LoginForm } from "@/components/login/login-form"
 import { DemandsPage, InventoryPage, ItemsPage, OverviewPage, PurchasingPage, ReferenceDataPage } from "@/components/streamlined/pages"
+import { UsersPage } from "@/components/users/users-page"
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Toaster } from "@/components/ui/sonner"
@@ -41,6 +42,8 @@ function PageContent() {
       return <InventoryPage />
     case 'reference-data':
       return <ReferenceDataPage />
+    case 'users':
+      return <UsersPage />
     case 'dashboard':
     default:
       return <OverviewPage />

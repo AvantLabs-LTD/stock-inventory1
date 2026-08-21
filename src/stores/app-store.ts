@@ -7,6 +7,7 @@ export type AppPage =
   | 'purchasing'
   | 'inventory'
   | 'reference-data'
+  | 'users'
 
 interface AppState {
   currentPage: AppPage
