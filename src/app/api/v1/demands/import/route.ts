@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server"
 import * as XLSX from "xlsx"
+import { ProcurementType } from "@prisma/client"
 import { db } from "@/lib/db"
 import { getSession, unauthorizedResponse } from "@/lib/auth-middleware"
 import { apiError, createDemand, DomainError, normalizeName } from "@/lib/inventory-service"
@@ -16,17 +17,20 @@ export async function POST(request: NextRequest) {
     const sheet = workbook.Sheets[workbook.SheetNames[0]]
     const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" })
     if (!rows.length) throw new DomainError("EMPTY_WORKBOOK", "The workbook has no demand rows")
-    const classifications = await db.itemClassification.findMany()
-    const classByName = new Map(classifications.map(x => [normalizeName(x.name), x.id]))
-    const lines: Array<{ itemId?: string; title: string; description: string | null; quantity: number; unit: string; classificationId: string; projectName: string | null; vendorName: string | null; remarks: string | null }> = []
+    const categories = await db.itemCategory.findMany()
+    const categoryByName = new Map(categories.map(x => [normalizeName(x.name), x.id]))
+    const lines: Array<{ itemId?: string; title: string; description: string | null; quantity: number; unit: string; suggestedCategoryId: string | null; procurementType: ProcurementType | null; projectName: string | null; vendorName: string | null; remarks: string | null }> = []
     for (const row of rows) {
       const code = String(row["Item Code"] || "").trim()
       const item = code ? await db.item.findUnique({ where: { code } }) : null
-      const className = String(row["Classification"] || "").trim()
-      const classificationId = className ? classByName.get(normalizeName(className)) : item?.defaultClassificationId
-      if (!classificationId) throw new DomainError("CLASSIFICATION_REQUIRED", "Unknown or missing classification for " + (code || row["Title"]))
+      const categoryName = String(row["Category"] || "").trim()
+      const suggestedCategoryId = categoryName ? categoryByName.get(normalizeName(categoryName)) || null : item?.categoryId || null
+      if (categoryName && !suggestedCategoryId) throw new DomainError("CATEGORY_NOT_FOUND", `Unknown category: ${categoryName}`)
+      const procurementValue = String(row["Procurement Type"] || "").trim().toUpperCase().replace(/\s+/g, "_")
+      const procurementType = procurementValue ? ProcurementType[procurementValue as keyof typeof ProcurementType] || null : null
+      if (procurementValue && !procurementType) throw new DomainError("INVALID_PROCUREMENT_TYPE", `Unknown procurement type: ${procurementValue}`)
       lines.push({ itemId: item?.id, title: String(row["Title"] || item?.title || "").trim(), description: String(row["Description"] || "").trim() || null,
-        quantity: row["Quantity"] as number, unit: String(row["Unit"] || item?.unit || "pcs"), classificationId,
+        quantity: row["Quantity"] as number, unit: String(row["Unit"] || item?.unit || "pcs"), suggestedCategoryId, procurementType,
         projectName: String(row["Project"] || "").trim() || null, vendorName: String(row["Vendor"] || "").trim() || null,
         remarks: String(row["Remarks"] || "").trim() || null })
     }

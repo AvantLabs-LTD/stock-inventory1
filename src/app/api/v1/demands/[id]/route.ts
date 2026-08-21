@@ -10,7 +10,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
   const demand = await db.demand.findUnique({ where: { id }, include: {
     departmentTag: true, requestedBy: { select: { id: true, name: true, email: true } },
     lines: { include: {
-      item: { include: { balance: true } }, projectTag: true, classification: true, vendor: true,
+      item: { include: { balance: true, category: true } }, projectTag: true, suggestedCategory: true, vendor: true,
       reservations: { orderBy: { createdAt: "asc" } }, cancellations: true,
       allocationLines: { include: { allocation: true, returnLines: true }, orderBy: { createdAt: "asc" } },
       purchaseLinks: { include: { purchaseRequestLine: { include: { purchaseRequest: { include: { vendor: true } } } } } },

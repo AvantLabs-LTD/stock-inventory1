@@ -1,4 +1,4 @@
-import { Prisma, PrismaClient } from "@prisma/client"
+import { Prisma, PrismaClient, ProcurementType } from "@prisma/client"
 import { db } from "@/lib/db"
 
 type Tx = Parameters<Parameters<PrismaClient["$transaction"]>[0]>[0]
@@ -40,7 +40,7 @@ async function balance(tx: Tx, itemId: string) {
 export async function createDemand(input: {
   requestedById: string; departmentTagId?: string | null; departmentName?: string | null; remarks?: string | null
   lines: Array<{ itemId?: string | null; projectTagId?: string | null; projectName?: string | null
-    classificationId?: string | null; vendorId?: string | null; vendorName?: string | null
+    suggestedCategoryId?: string | null; procurementType?: ProcurementType | null; vendorId?: string | null; vendorName?: string | null
     title?: string; description?: string | null; unit?: string; quantity: Prisma.Decimal.Value; remarks?: string | null }>
 }) {
   if (!input.lines.length) throw new DomainError("DEMAND_LINES_REQUIRED", "At least one demand row is required")
@@ -59,8 +59,6 @@ export async function createDemand(input: {
       if (quantity.lte(0)) throw new DomainError("INVALID_QUANTITY", "Demand quantities must be positive")
       const item = row.itemId ? await tx.item.findUnique({ where: { id: row.itemId } }) : null
       if (row.itemId && !item) throw new DomainError("ITEM_NOT_FOUND", "Item was not found", 404)
-      const classificationId = row.classificationId || item?.defaultClassificationId
-      if (!classificationId) throw new DomainError("CLASSIFICATION_REQUIRED", "Every demand row needs a classification")
       let projectTagId = row.projectTagId || null
       if (!projectTagId && row.projectName?.trim()) {
         const name = row.projectName.trim()
@@ -73,8 +71,9 @@ export async function createDemand(input: {
       }
       const title = row.title?.trim() || item?.title
       if (!title) throw new DomainError("TITLE_REQUIRED", "Free-text demand rows need a title")
+      const suggestedCategoryId = row.suggestedCategoryId || item?.categoryId || null
       await tx.demandLine.create({ data: {
-        demandId: demand.id, itemId: item?.id, projectTagId, classificationId, vendorId,
+        demandId: demand.id, itemId: item?.id, projectTagId, suggestedCategoryId, procurementType: row.procurementType || null, vendorId,
         itemCodeSnapshot: item?.code, title, description: row.description ?? item?.description,
         unit: row.unit?.trim() || item?.unit || "pcs", requiredQuantity: quantity, remarks: row.remarks, sortOrder,
       } })

@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import { cookies } from 'next/headers'
 import { verifySessionToken, COOKIE_NAME, type SessionPayload } from '@/lib/auth'
 import { db } from '@/lib/db'
+import type { UserRole } from '@prisma/client'
 
 export interface AuthSession {
   user: {
@@ -9,6 +10,7 @@ export interface AuthSession {
     email: string
     name: string
     status: string
+    role: UserRole
   }
 }
 
@@ -44,6 +46,7 @@ export async function getSession(request?: NextRequest): Promise<AuthSession | n
         email: true,
         name: true,
         status: true,
+        role: true,
       },
     })
 
@@ -55,6 +58,7 @@ export async function getSession(request?: NextRequest): Promise<AuthSession | n
         email: user.email,
         name: user.name,
         status: user.status,
+        role: user.role,
       },
     }
   } catch {
@@ -67,4 +71,12 @@ export async function getSession(request?: NextRequest): Promise<AuthSession | n
  */
 export function unauthorizedResponse(message = 'Unauthorized') {
   return Response.json({ error: message }, { status: 401 })
+}
+
+export function forbiddenResponse(message = 'You do not have permission to perform this action') {
+  return Response.json({ error: message, code: 'FORBIDDEN' }, { status: 403 })
+}
+
+export function hasRole(session: AuthSession, ...roles: UserRole[]) {
+  return session.user.role === 'SUPER_ADMIN' || roles.includes(session.user.role)
 }

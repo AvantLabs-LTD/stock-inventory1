@@ -4,11 +4,11 @@ import { getSession, unauthorizedResponse } from "@/lib/auth-middleware"
 
 export async function GET(request: NextRequest) {
   if (!await getSession(request)) return unauthorizedResponse()
-  const [classifications, departments, projects, vendors] = await Promise.all([
-    db.itemClassification.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
+  const [itemCategories, departments, projects, vendors] = await Promise.all([
+    db.itemCategory.findMany({ include: { parent: true }, orderBy: [{ discipline: "asc" }, { sortOrder: "asc" }, { name: "asc" }] }),
     db.departmentTag.findMany({ orderBy: { name: "asc" } }),
     db.projectTag.findMany({ orderBy: { name: "asc" } }),
     db.vendor.findMany({ orderBy: { name: "asc" } }),
   ])
-  return Response.json({ classifications, departments, projects, vendors })
+  return Response.json({ itemCategories, departments, projects, vendors })
 }

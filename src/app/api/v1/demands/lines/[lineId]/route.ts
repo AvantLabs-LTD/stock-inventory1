@@ -1,9 +1,11 @@
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
-import { getSession, unauthorizedResponse } from "@/lib/auth-middleware"
+import { forbiddenResponse, getSession, hasRole, unauthorizedResponse } from "@/lib/auth-middleware"
 import { apiError, DomainError } from "@/lib/inventory-service"
 export async function PATCH(request: NextRequest, context: { params: Promise<{ lineId: string }> }) {
-  if (!await getSession(request)) return unauthorizedResponse()
+  const session = await getSession(request)
+  if (!session) return unauthorizedResponse()
+  if (!hasRole(session, "INVENTORY_MANAGER")) return forbiddenResponse()
   try {
     const { lineId } = await context.params; const body = await request.json()
     const existing = await db.demandLine.findUnique({ where: { id: lineId }, include: { reservations: true, allocationLines: true } })
@@ -16,7 +18,8 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ l
       itemId: body.itemId, itemCodeSnapshot: item?.code, title: body.title || item?.title,
       description: body.description === undefined ? item?.description : body.description,
       unit: body.unit || item?.unit, projectTagId: body.projectTagId,
-      classificationId: body.classificationId || item?.defaultClassificationId,
+      suggestedCategoryId: body.suggestedCategoryId === undefined ? item?.categoryId : body.suggestedCategoryId,
+      procurementType: body.procurementType,
       vendorId: body.vendorId, requiredQuantity: body.requiredQuantity, remarks: body.remarks,
     } })
     return Response.json({ line })

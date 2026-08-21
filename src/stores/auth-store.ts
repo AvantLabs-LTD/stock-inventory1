@@ -4,6 +4,7 @@ export interface User {
   id: string
   email: string
   name: string
+  role: 'SUPER_ADMIN' | 'INVENTORY_MANAGER' | 'PURCHASE_APPROVER' | 'USER'
 }
 
 interface AuthState {

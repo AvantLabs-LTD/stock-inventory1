@@ -1,11 +1,12 @@
 import { NextRequest } from "next/server"
 import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
-import { getSession, unauthorizedResponse } from "@/lib/auth-middleware"
+import { forbiddenResponse, getSession, hasRole, unauthorizedResponse } from "@/lib/auth-middleware"
 import { apiError, DomainError } from "@/lib/inventory-service"
 
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const session = await getSession(request); if (!session) return unauthorizedResponse()
+  if (!hasRole(session, "INVENTORY_MANAGER")) return forbiddenResponse()
   try {
     const { id } = await context.params; const body = await request.json()
     const result = await db.$transaction(async tx => {
