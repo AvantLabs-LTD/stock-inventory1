@@ -1,6 +1,6 @@
 "use client"
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react"
+import { FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import {
   ArrowRight, Building2, Check, CheckCircle2, ChevronRight, CircleDollarSign, ClipboardList,
@@ -22,6 +22,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useAuthStore } from "@/stores/auth-store"
 import { cn } from "@/lib/utils"
 
@@ -50,6 +51,7 @@ type DemandHeader = {
   lines: Array<{ id: string }>; quantities?: Pick<Quantities, "required" | "reserved" | "allocated" | "remaining"> | null
 }
 type DemandDetail = Omit<DemandHeader, "lines"> & { lines: DemandLine[] }
+type DemandAction = { kind: "reserve" | "release" | "allocate" | "return"; demandId: string; line: DemandLine }
 type LinkableLine = {
   demandLineId: string; itemId: string; demandId: string; demandNo: string; requestedAt: string; state: string
   departmentName?: string | null; projectName?: string | null; requestedByName: string
@@ -116,6 +118,12 @@ function Metric({ label, value, emphasis }: { label: string; value: string | num
 
 function EmptyState({ icon: Icon, title, description }: { icon: typeof ClipboardList; title: string; description: string }) {
   return <div className="flex flex-col items-center justify-center px-4 py-16 text-center"><div className="mb-4 rounded-2xl bg-muted p-4"><Icon className="size-7 text-muted-foreground"/></div><div className="font-semibold">{title}</div><p className="mt-1 max-w-md text-sm text-muted-foreground">{description}</p></div>
+}
+
+function ReasonedButton({ children, disabledReason, onClick, variant = "outline", className }: { children: ReactNode; disabledReason?: string | null; onClick: () => void; variant?: "default" | "outline" | "secondary"; className?: string }) {
+  const button = <Button size="sm" variant={variant} className={className} disabled={Boolean(disabledReason)} onClick={onClick}>{children}</Button>
+  if (!disabledReason) return button
+  return <Tooltip><TooltipTrigger asChild><span className="inline-flex cursor-not-allowed" tabIndex={0}>{button}</span></TooltipTrigger><TooltipContent className="max-w-72">{disabledReason}</TooltipContent></Tooltip>
 }
 
 function SummaryCard({ icon: Icon, label, value, detail, tone = "default" }: { icon: typeof ClipboardList; label: string; value: string | number; detail: string; tone?: "default" | "amber" | "blue" | "emerald" }) {
@@ -199,7 +207,49 @@ function PurchaseComposer({ open, onOpenChange, onCreated, initial }: { open: bo
   </div><DialogFooter className="border-t bg-muted/15 px-6 py-4"><Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button disabled={busy || (!selectedItemId && !newItemTitle.trim()) || quantity(orderedQuantity) <= 0 || linkedQuantity > quantity(orderedQuantity)}>{busy && <Loader2 className="mr-2 size-4 animate-spin"/>}Create backlog purchase</Button></DialogFooter></form></DialogContent></Dialog>
 }
 
-function QuantityActionDialog({ action, onClose, onDone }: { action: { kind: "reserve" | "release" | "allocate" | "return"; demandId: string; line: DemandLine } | null; onClose: () => void; onDone: () => void }) {
+function ReconcileDemandLineDialog({ line, onDone }: { line: DemandLine; onDone: () => void }) {
+  const [open, setOpen] = useState(false), [busy, setBusy] = useState(false), [items, setItems] = useState<Item[]>([]), [categories, setCategories] = useState<CatalogueCategory[]>([])
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(line.item?.id || null), [newTitle, setNewTitle] = useState("")
+  const [newDiscipline, setNewDiscipline] = useState<"MECHANICAL" | "ELECTRONICS" | null>(null), [newCategoryId, setNewCategoryId] = useState<string | null>(null)
+  useEffect(() => { if (!open) return; Promise.all([loadCatalogue(), jsonFetch<ReferenceData>("/api/v1/reference-data")]).then(([catalogue, refs]) => { setItems(catalogue); setCategories(refs.itemCategories) }).catch(error => toast.error(error.message)) }, [open])
+  async function reconcile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setBusy(true); const form = new FormData(event.currentTarget)
+    try {
+      let itemId = selectedItemId
+      if (!itemId) {
+        const created = await jsonFetch<{ item: Item }>("/api/v1/items", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+          code: form.get("code"), title: newTitle, discipline: newDiscipline, categoryId: newCategoryId,
+          specification: form.get("specification"), description: line.description, unit: form.get("unit") || line.unit || "pcs",
+        }) })
+        itemId = created.item.id
+      }
+      await jsonFetch(`/api/v1/demands/lines/${line.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ itemId }) })
+      toast.success("Demand component reconciled", { description: "Stock and purchasing actions are now available for this row." })
+      setOpen(false); onDone()
+    } catch (error) { toast.error((error as Error).message) } finally { setBusy(false) }
+  }
+  return <Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild><Button size="sm" variant={line.item ? "ghost" : "default"}>{line.item ? "Change component" : "Reconcile component"}</Button></DialogTrigger><DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle>Reconcile demand component</DialogTitle><DialogDescription>Match “{line.title}” to the central catalogue. If it does not exist, create the catalogue record here and link it immediately.</DialogDescription></DialogHeader><form className="space-y-5" onSubmit={reconcile}><div className="space-y-2"><Label>Catalogue component</Label><ItemPicker items={items} categories={categories} value={selectedItemId} onValueChange={id => { setSelectedItemId(id); if (id) setNewTitle("") }} onRequestNew={(title, categoryId, discipline) => { setSelectedItemId(null); setNewTitle(title); setNewCategoryId(categoryId); setNewDiscipline(discipline) }}/>{!selectedItemId && !newTitle && <Button type="button" size="sm" variant="outline" onClick={() => { setNewTitle(line.title); setNewCategoryId(line.suggestedCategory?.id || null); setNewDiscipline(line.suggestedCategory?.discipline || null) }}><Plus className="mr-2 size-4"/>Create new component from this demand</Button>}</div>
+    {newTitle && <div className="space-y-4 rounded-xl border border-amber-200 bg-amber-50/50 p-4 dark:bg-amber-950/20"><div><div className="font-semibold">Create new catalogue component</div><p className="mt-1 text-xs text-muted-foreground">Complete the minimum catalogue information. The new component will be linked to this demand row.</p></div><div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label>Component code</Label><Input name="code" required placeholder="Unique store code"/></div><div className="space-y-2"><Label>Unit</Label><Input name="unit" defaultValue={line.unit || "pcs"} required/></div></div><div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label>Discipline</Label><Select value={newDiscipline || ""} onValueChange={value => { setNewDiscipline(value as "MECHANICAL" | "ELECTRONICS"); setNewCategoryId(null) }}><SelectTrigger><SelectValue placeholder="Select discipline"/></SelectTrigger><SelectContent><SelectItem value="MECHANICAL">Mechanical</SelectItem><SelectItem value="ELECTRONICS">Electronics</SelectItem></SelectContent></Select></div><div className="space-y-2"><Label>Category</Label><Select value={newCategoryId || ""} onValueChange={setNewCategoryId}><SelectTrigger><SelectValue placeholder="Select category"/></SelectTrigger><SelectContent>{categories.filter(category => !newDiscipline || category.discipline === newDiscipline).map(category => <SelectItem key={category.id} value={category.id}>{category.name}</SelectItem>)}</SelectContent></Select></div></div><div className="space-y-2"><Label>Specification</Label><Input name="specification" defaultValue={line.description || ""} placeholder="Size, rating or identifying specification"/></div></div>}
+    <DialogFooter><Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button disabled={busy || (!selectedItemId && (!newTitle.trim() || !newDiscipline || !newCategoryId))}>{busy && <Loader2 className="mr-2 size-4 animate-spin"/>}{selectedItemId ? "Link component" : "Create and link component"}</Button></DialogFooter>
+  </form></DialogContent></Dialog>
+}
+
+function DemandLineActions({ canManage, demandId, line, onAction, onPurchase, onChanged }: { canManage: boolean; demandId: string; line: DemandLine; onAction: (action: DemandAction) => void; onPurchase: () => void; onChanged: () => void }) {
+  if (!canManage) return <div className="rounded-lg border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">Purchase creation and stock posting require Inventory Manager access.</div>
+  const reconciled = Boolean(line.item)
+  const availableToReserve = Math.max(quantity(line.quantities.remaining) - quantity(line.quantities.reserved), 0)
+  const reserved = quantity(line.quantities.reserved), issued = quantity(line.quantities.allocated), physicalDeficit = quantity(line.quantities.physicalDeficit), unprocured = quantity(line.quantities.unprocuredDeficit)
+  const reserveReason = !reconciled ? "Reconcile this row to a catalogue component first." : availableToReserve <= 0 ? "The remaining requirement is already fully reserved or fulfilled." : null
+  const releaseReason = reserved <= 0 ? "There is no protected stock to release. Reserve stock first when physical stock is available." : null
+  const issueReason = reserved <= 0 ? "Issue requires protected stock. Use Reserve first, then post the issue." : null
+  const returnReason = issued <= 0 ? "There is no issued quantity available to return." : null
+  const purchaseReason = !reconciled ? "Reconcile this row to a catalogue component before purchasing." : unprocured <= 0 ? physicalDeficit <= 0 ? "No purchase is required: current physical stock can cover the outstanding demand." : "The physical deficit is already covered by active linked purchases. Review them below." : null
+  return <div className="space-y-2"><div className="flex flex-wrap justify-end gap-2">{!reconciled && <ReconcileDemandLineDialog line={line} onDone={onChanged}/>}<ReasonedButton disabledReason={reserveReason} onClick={() => onAction({ kind: "reserve", demandId, line })}>Reserve</ReasonedButton><ReasonedButton disabledReason={releaseReason} onClick={() => onAction({ kind: "release", demandId, line })}>Release</ReasonedButton><ReasonedButton variant="default" disabledReason={issueReason} onClick={() => onAction({ kind: "allocate", demandId, line })}>Issue</ReasonedButton><ReasonedButton variant="secondary" disabledReason={returnReason} onClick={() => onAction({ kind: "return", demandId, line })}>Return</ReasonedButton><ReasonedButton className="border-primary/30" disabledReason={purchaseReason} onClick={onPurchase}><ShoppingCart className="mr-2 size-4"/>Create purchase</ReasonedButton></div>
+    {purchaseReason && <div className={cn("ml-auto max-w-xl rounded-lg border px-3 py-2 text-xs", !reconciled ? "border-amber-200 bg-amber-50 text-amber-900 dark:bg-amber-950/20 dark:text-amber-200" : "bg-muted/25 text-muted-foreground")}><span className="font-semibold">Why purchase is unavailable: </span>{purchaseReason}{!reconciled && <span className="ml-1">Use <span className="font-semibold">Reconcile component</span> above to resolve it now.</span>}</div>}
+  </div>
+}
+
+function QuantityActionDialog({ action, onClose, onDone }: { action: DemandAction | null; onClose: () => void; onDone: () => void }) {
   const [busy, setBusy] = useState(false)
   if (!action) return null
   const currentAction = action
@@ -220,7 +270,7 @@ function QuantityActionDialog({ action, onClose, onDone }: { action: { kind: "re
 function DemandDetailSheet({ demandId, onClose, onChanged }: { demandId: string | null; onClose: () => void; onChanged: () => void }) {
   const role = useAuthStore(state => state.user?.role), canManage = role === "SUPER_ADMIN" || role === "INVENTORY_MANAGER"
   const [demand, setDemand] = useState<DemandDetail | null>(null), [loading, setLoading] = useState(false)
-  const [action, setAction] = useState<{ kind: "reserve" | "release" | "allocate" | "return"; demandId: string; line: DemandLine } | null>(null)
+  const [action, setAction] = useState<DemandAction | null>(null)
   const [purchaseInitial, setPurchaseInitial] = useState<{ item: Item; demandLineId: string; unprocuredDeficit: string } | null>(null), [purchaseOpen, setPurchaseOpen] = useState(false)
   const load = useCallback(async () => { if (!demandId) return; setLoading(true); try { const data = await jsonFetch<{ demand: DemandDetail }>(`/api/v1/demands/${demandId}`); setDemand(data.demand) } catch (error) { toast.error((error as Error).message) } finally { setLoading(false) } }, [demandId])
   useEffect(() => { void load() }, [load])
@@ -229,7 +279,7 @@ function DemandDetailSheet({ demandId, onClose, onChanged }: { demandId: string 
       {demand.remarks && <div className="rounded-xl border bg-muted/20 p-4"><div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Demand remarks</div><p className="mt-1 text-sm">{demand.remarks}</p></div>}
       <div className="space-y-4"><div><h3 className="text-base font-semibold">Demand lines</h3><p className="text-sm text-muted-foreground">Fulfilment, physical stock, and purchase coverage are shown as separate facts.</p></div>{demand.lines.map(line => {
         const required = quantity(line.quantities.required), fulfilled = Math.max(quantity(line.quantities.allocated) - quantity(line.quantities.returned), 0), progress = required ? Math.min(100, fulfilled / required * 100) : 0
-        return <Card key={line.id} className="overflow-hidden shadow-sm"><CardHeader className="border-b bg-muted/15 pb-4"><div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-start"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><CardTitle className="text-base">{line.item?.code || "Unreconciled"} — {line.title}</CardTitle><StatusBadge status={line.quantities.fulfilmentFacet}/><Badge variant="secondary">{statusLabel(line.quantities.stockFacet)}</Badge></div><div className="mt-1 text-xs text-muted-foreground">{[line.item?.specification, line.projectTag?.name || demand.departmentTag?.name, line.procurementType ? procurementLabel(line.procurementType) : null, line.vendor?.name].filter(Boolean).join(" · ")}</div></div>{canManage ? <div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" disabled={!line.item || quantity(line.quantities.remaining) <= quantity(line.quantities.reserved)} onClick={() => setAction({ kind: "reserve", demandId: demand.id, line })}>Reserve</Button><Button size="sm" variant="outline" disabled={quantity(line.quantities.reserved) <= 0} onClick={() => setAction({ kind: "release", demandId: demand.id, line })}>Release</Button><Button size="sm" disabled={quantity(line.quantities.reserved) <= 0} onClick={() => setAction({ kind: "allocate", demandId: demand.id, line })}>Issue</Button><Button size="sm" variant="secondary" disabled={quantity(line.quantities.allocated) <= 0} onClick={() => setAction({ kind: "return", demandId: demand.id, line })}>Return</Button><Button size="sm" variant="outline" className="border-primary/30" disabled={!line.item || quantity(line.quantities.unprocuredDeficit) <= 0} title={!line.item ? "Reconcile this demand row to a catalogue component first" : quantity(line.quantities.unprocuredDeficit) <= 0 ? "This demand row has no unprocured deficit" : "Create a purchase linked to this demand row"} onClick={() => { if (!line.item) return; setPurchaseInitial({ item: line.item, demandLineId: line.id, unprocuredDeficit: line.quantities.unprocuredDeficit }); setPurchaseOpen(true) }}><ShoppingCart className="mr-2 size-4"/>Create purchase</Button></div> : <div className="rounded-lg border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">Purchase creation requires Inventory Manager access.</div>}</div></CardHeader><CardContent className="space-y-5 p-5">
+        return <Card key={line.id} className="overflow-hidden shadow-sm"><CardHeader className="border-b bg-muted/15 pb-4"><div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-start"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><CardTitle className="text-base">{line.item?.code || "Unreconciled"} — {line.title}</CardTitle><StatusBadge status={line.quantities.fulfilmentFacet}/><Badge variant="secondary">{statusLabel(line.quantities.stockFacet)}</Badge></div><div className="mt-1 text-xs text-muted-foreground">{[line.item?.specification, line.projectTag?.name || demand.departmentTag?.name, line.procurementType ? procurementLabel(line.procurementType) : null, line.vendor?.name].filter(Boolean).join(" · ")}</div></div><DemandLineActions canManage={canManage} demandId={demand.id} line={line} onAction={setAction} onChanged={() => { void load(); onChanged() }} onPurchase={() => { if (!line.item) return; setPurchaseInitial({ item: line.item, demandLineId: line.id, unprocuredDeficit: line.quantities.unprocuredDeficit }); setPurchaseOpen(true) }}/></div></CardHeader><CardContent className="space-y-5 p-5">
           <div><div className="mb-2 flex justify-between text-xs"><span className="text-muted-foreground">Issued progress</span><span className="font-medium">{formatQuantity(fulfilled)} of {formatQuantity(required)} {line.unit}</span></div><Progress value={progress}/></div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8"><Metric label="Required" value={line.quantities.required}/><Metric label="Reserved" value={line.quantities.reserved}/><Metric label="Issued" value={line.quantities.allocated}/><Metric label="Remaining" value={line.quantities.remaining}/><Metric label="Backlog" value={line.quantities.backlog}/><Metric label="Approval" value={line.quantities.pendingApproval}/><Metric label="Ordered" value={line.quantities.ordered}/><Metric label="Shipped" value={line.quantities.shipped}/></div>
           <div className="grid gap-3 md:grid-cols-2"><div className="rounded-xl border border-rose-200 bg-rose-50/50 p-4 dark:bg-rose-950/15"><div className="text-xs font-semibold uppercase tracking-wide text-rose-700 dark:text-rose-300">Physical stock deficit</div><div className="mt-1 text-2xl font-semibold tabular-nums">{formatQuantity(line.quantities.physicalDeficit)} <span className="text-sm font-normal">{line.unit}</span></div></div><div className="rounded-xl border border-amber-200 bg-amber-50/50 p-4 dark:bg-amber-950/15"><div className="text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">Still unprocured</div><div className="mt-1 text-2xl font-semibold tabular-nums">{formatQuantity(line.quantities.unprocuredDeficit)} <span className="text-sm font-normal">{line.unit}</span></div></div></div>
