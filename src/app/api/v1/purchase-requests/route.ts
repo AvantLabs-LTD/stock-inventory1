@@ -4,12 +4,13 @@ import { db } from "@/lib/db"
 import { forbiddenResponse, getSession, hasRole, unauthorizedResponse } from "@/lib/auth-middleware"
 import { apiError, DomainError, normalizeName } from "@/lib/inventory-service"
 import { createIncompleteItem } from "@/lib/item-service"
+import { validateDemandCoverage } from "@/lib/purchase-service"
 
 export async function GET(request: NextRequest) {
   if (!await getSession(request)) return unauthorizedResponse()
   const requests = await db.purchaseRequest.findMany({ include: {
     vendor: true, createdBy: { select: { id: true, name: true } },
-    lines: { include: { item: { include: { category: true } }, demandLinks: { include: { demandLine: { include: { demand: { select: { demandNo: true } } } } } }, receiptLines: true } },
+    lines: { include: { item: { include: { category: true } }, demandLinks: { include: { demandLine: { include: { demand: { include: { departmentTag: true, requestedBy: { select: { name: true } } } }, projectTag: true } } } }, receiptLines: true } },
   }, orderBy: { createdAt: "desc" }, take: 200 })
   return Response.json({ requests })
 }
@@ -43,8 +44,7 @@ export async function POST(request: NextRequest) {
         let linked = new Prisma.Decimal(0)
         for (const link of row.demandLinks || []) {
           const q = new Prisma.Decimal(link.quantity); linked = linked.plus(q)
-          const demandLine = await tx.demandLine.findUnique({ where: { id: link.demandLineId } })
-          if (!demandLine || demandLine.itemId !== item.id || q.lte(0)) throw new DomainError("INVALID_DEMAND_LINK", "Purchase link must target a demand row for the same item")
+          await validateDemandCoverage(tx, { demandLineId: link.demandLineId, itemId: item.id, quantity: q })
           await tx.demandPurchaseLink.create({ data: { purchaseRequestLineId: line.id, demandLineId: link.demandLineId, quantity: q } })
         }
         if (linked.gt(quantity)) throw new DomainError("OVER_LINKED_PURCHASE", "Linked demand quantity exceeds purchase quantity")

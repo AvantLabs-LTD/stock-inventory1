@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
-import { getSession, unauthorizedResponse } from "@/lib/auth-middleware"
+import { forbiddenResponse, getSession, hasRole, unauthorizedResponse } from "@/lib/auth-middleware"
 export async function GET(request:NextRequest,context:{params:Promise<{id:string;attachmentId:string}>}) {
   if(!await getSession(request))return unauthorizedResponse();const {id,attachmentId}=await context.params
   const file=await db.attachment.findFirst({where:{id:attachmentId,purchaseRequestId:id}})
@@ -9,7 +9,8 @@ export async function GET(request:NextRequest,context:{params:Promise<{id:string
   return new Response(file.data,{headers:{"Content-Type":file.contentType,"Content-Length":String(file.sizeBytes),"Content-Disposition":'attachment; filename="'+safe+'"',"X-Content-Type-Options":"nosniff"}})
 }
 export async function DELETE(request:NextRequest,context:{params:Promise<{id:string;attachmentId:string}>}) {
-  if(!await getSession(request))return unauthorizedResponse();const {id,attachmentId}=await context.params
+  const session=await getSession(request);if(!session)return unauthorizedResponse()
+  if(!hasRole(session,"INVENTORY_MANAGER"))return forbiddenResponse();const {id,attachmentId}=await context.params
   const result=await db.attachment.deleteMany({where:{id:attachmentId,purchaseRequestId:id}})
   return result.count?new Response(null,{status:204}):Response.json({error:"Attachment not found"},{status:404})
 }

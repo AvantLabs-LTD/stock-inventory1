@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
 import { forbiddenResponse, getSession, hasRole, unauthorizedResponse } from "@/lib/auth-middleware"
 import { apiError } from "@/lib/inventory-service"
+import { tokenizeItemSearch } from "@/lib/item-search"
 
 const PAGE_SIZE_DEFAULT = 200
 const PAGE_SIZE_MAX = 200
@@ -45,10 +46,11 @@ export async function GET(request: NextRequest) {
   const discipline = disciplineParam === "MECHANICAL" || disciplineParam === "ELECTRONICS" ? disciplineParam : undefined
   const catalogueState = catalogueStateParam === "COMPLETE" || catalogueStateParam === "INCOMPLETE" ? catalogueStateParam : undefined
   const status = statusParam === "ACTIVE" || statusParam === "INACTIVE" || statusParam === "ARCHIVED" ? statusParam : undefined
-  const [rootCategoryIds, categoryIds, searchCategoryIds] = await Promise.all([
+  const searchTerms = tokenizeItemSearch(q)
+  const [rootCategoryIds, categoryIds, ...searchCategoryScopes] = await Promise.all([
     rootCategoryId ? categoryDescendants({ id: rootCategoryId }) : Promise.resolve([]),
     categoryId ? categoryDescendants({ id: categoryId }) : Promise.resolve([]),
-    q ? categoryDescendants({ query: q }) : Promise.resolve([]),
+    ...searchTerms.map(term => categoryDescendants({ query: term })),
   ])
   const conditions: Prisma.ItemWhereInput[] = []
   if (rootCategoryId) conditions.push({ categoryId: { in: rootCategoryIds } })
@@ -59,14 +61,19 @@ export async function GET(request: NextRequest) {
   if (stock === "IN_STOCK") conditions.push({ balance: { is: { onHand: { gt: 0 } } } })
   if (stock === "OUT_OF_STOCK") conditions.push({ OR: [{ balance: { is: null } }, { balance: { is: { onHand: { lte: 0 } } } }] })
   if (stock === "RESERVED") conditions.push({ balance: { is: { reserved: { gt: 0 } } } })
-  if (q) conditions.push({ OR: [
-    { code: { contains: q, mode: "insensitive" } }, { title: { contains: q, mode: "insensitive" } },
-    { description: { contains: q, mode: "insensitive" } }, { specification: { contains: q, mode: "insensitive" } },
-    { manufacturerName: { contains: q, mode: "insensitive" } }, { manufacturerPartNumber: { contains: q, mode: "insensitive" } },
-    { supplierPartNumber: { contains: q, mode: "insensitive" } }, { function: { contains: q, mode: "insensitive" } },
-    { optionSelection: { contains: q, mode: "insensitive" } }, { remarks: { contains: q, mode: "insensitive" } },
-    ...(searchCategoryIds.length ? [{ categoryId: { in: searchCategoryIds } } satisfies Prisma.ItemWhereInput] : []),
-  ] })
+  // Each word may match a different searchable field. For example, "20 mm braided
+  // sleeve" can match "Braided sleeve" in the title and "20 mm" in specification.
+  searchTerms.forEach((term, index) => {
+    const searchCategoryIds = searchCategoryScopes[index] || []
+    conditions.push({ OR: [
+      { code: { contains: term, mode: "insensitive" } }, { title: { contains: term, mode: "insensitive" } },
+      { description: { contains: term, mode: "insensitive" } }, { specification: { contains: term, mode: "insensitive" } },
+      { manufacturerName: { contains: term, mode: "insensitive" } }, { manufacturerPartNumber: { contains: term, mode: "insensitive" } },
+      { supplierPartNumber: { contains: term, mode: "insensitive" } }, { function: { contains: term, mode: "insensitive" } },
+      { optionSelection: { contains: term, mode: "insensitive" } }, { remarks: { contains: term, mode: "insensitive" } },
+      ...(searchCategoryIds.length ? [{ categoryId: { in: searchCategoryIds } } satisfies Prisma.ItemWhereInput] : []),
+    ] })
+  })
   const where: Prisma.ItemWhereInput = conditions.length ? { AND: conditions } : {}
   const [total, items] = await db.$transaction([
     db.item.count({ where }),

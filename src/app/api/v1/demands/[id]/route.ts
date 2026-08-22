@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server"
 import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
-import { getSession, unauthorizedResponse } from "@/lib/auth-middleware"
+import { forbiddenResponse, getSession, hasRole, unauthorizedResponse } from "@/lib/auth-middleware"
 import { apiError, DomainError } from "@/lib/inventory-service"
 
 export async function GET(request: NextRequest, context: { params: Promise<{ id: string }> }) {
@@ -13,7 +13,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
       item: { include: { balance: true, category: true } }, projectTag: true, suggestedCategory: true, vendor: true,
       reservations: { orderBy: { createdAt: "asc" } }, cancellations: true,
       allocationLines: { include: { allocation: true, returnLines: true }, orderBy: { createdAt: "asc" } },
-      purchaseLinks: { include: { purchaseRequestLine: { include: { purchaseRequest: { include: { vendor: true } } } } } },
+      purchaseLinks: { include: { purchaseRequestLine: { include: { receiptLines: true, purchaseRequest: { include: { vendor: true } } } } } },
     }, orderBy: { sortOrder: "asc" } },
   } })
   if (!demand) return Response.json({ error: "Demand not found" }, { status: 404 })
@@ -28,6 +28,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
 export async function PATCH(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const session = await getSession(request)
   if (!session) return unauthorizedResponse()
+  if (!hasRole(session, "INVENTORY_MANAGER")) return forbiddenResponse()
   try {
     const { id } = await context.params
     const body = await request.json()
