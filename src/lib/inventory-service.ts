@@ -169,6 +169,87 @@ export async function returnAllocation(input: { actorId: string; idempotencyKey?
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
 }
 
+export async function adjustInventory(input: {
+  actorId: string
+  actorName: string
+  idempotencyKey?: string
+  reason?: string
+  remarks?: string
+  lines: Array<{ itemId: string; quantity: Prisma.Decimal.Value; remarks?: string }>
+}) {
+  const reason = input.reason?.trim()
+  if (!reason) throw new DomainError("ADJUSTMENT_REASON_REQUIRED", "A reason is required for every stock adjustment")
+  if (!Array.isArray(input.lines) || !input.lines.length) throw new DomainError("ADJUSTMENT_LINES_REQUIRED", "At least one stock adjustment row is required")
+  if (input.lines.length > 100) throw new DomainError("TOO_MANY_ADJUSTMENT_LINES", "A stock adjustment may contain at most 100 rows")
+  if (new Set(input.lines.map(row => row.itemId)).size !== input.lines.length) {
+    throw new DomainError("DUPLICATE_ADJUSTMENT_ITEM", "Each component may appear only once in a stock adjustment")
+  }
+
+  return db.$transaction(async tx => {
+    if (input.idempotencyKey) {
+      const found = await tx.inventoryAdjustment.findUnique({ where: { idempotencyKey: input.idempotencyKey }, include: { lines: true } })
+      if (found) return found
+    }
+
+    const header = await tx.inventoryAdjustment.create({ data: {
+      adjustmentNo: "ADJ-" + Date.now() + "-" + Math.floor(Math.random() * 1000).toString().padStart(3, "0"),
+      postedById: input.actorId,
+      idempotencyKey: input.idempotencyKey,
+      reason,
+      remarks: input.remarks?.trim() || null,
+    } })
+
+    const auditLines: Array<{ itemId: string; quantity: string; onHandAfter: string }> = []
+    for (const row of input.lines) {
+      if (!row.itemId?.trim()) throw new DomainError("ITEM_REQUIRED", "Every stock adjustment row needs a component")
+      let amount: Prisma.Decimal
+      try { amount = dec(row.quantity) } catch { throw new DomainError("INVALID_QUANTITY", "Adjustment quantity is invalid") }
+      if (amount.eq(0)) throw new DomainError("INVALID_QUANTITY", "Adjustment quantity cannot be zero")
+
+      const item = await tx.item.findUnique({ where: { id: row.itemId }, select: { id: true } })
+      if (!item) throw new DomainError("ITEM_NOT_FOUND", "The selected component was not found", 404)
+      const stock = await balance(tx, item.id)
+      const after = stock.onHand.plus(amount)
+      if (after.lt(0)) throw new DomainError("ADJUSTMENT_BELOW_ZERO", "Stock reduction would make on-hand stock negative")
+      if (after.lt(stock.reserved)) {
+        throw new DomainError("ADJUSTMENT_BELOW_COMMITTED", "Stock reduction would remove inventory already reserved for open demand")
+      }
+
+      const lineRemarks = row.remarks?.trim() || null
+      const ledgerRemarks = [reason, input.remarks?.trim(), lineRemarks].filter(Boolean).join(" — ")
+      const line = await tx.inventoryAdjustmentLine.create({ data: {
+        adjustmentId: header.id,
+        itemId: item.id,
+        quantity: amount,
+        remarks: lineRemarks,
+      } })
+      await tx.itemBalance.update({ where: { itemId: item.id }, data: { onHand: after, version: { increment: 1 } } })
+      await tx.inventoryLedgerEntry.create({ data: {
+        itemId: item.id,
+        type: amount.gt(0) ? "ADJUSTMENT_IN" : "ADJUSTMENT_OUT",
+        quantity: amount,
+        onHandAfter: after,
+        sourceType: "INVENTORY_ADJUSTMENT",
+        sourceId: header.id,
+        sourceLineId: line.id,
+        actorId: input.actorId,
+        remarks: ledgerRemarks,
+      } })
+      auditLines.push({ itemId: item.id, quantity: amount.toString(), onHandAfter: after.toString() })
+    }
+
+    await tx.auditLog.create({ data: {
+      userId: input.actorId,
+      userName: input.actorName,
+      action: "POST_INVENTORY_ADJUSTMENT",
+      entityType: "InventoryAdjustment",
+      entityId: header.id,
+      details: JSON.stringify({ adjustmentNo: header.adjustmentNo, reason, remarks: input.remarks?.trim() || null, lines: auditLines }),
+    } })
+    return tx.inventoryAdjustment.findUnique({ where: { id: header.id }, include: { lines: true } })
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+}
+
 export function apiError(error: unknown) {
   if (error instanceof DomainError) return Response.json({ error: error.message, code: error.code }, { status: error.status })
   console.error(error)

@@ -1,7 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { PrismaClient } from "@prisma/client"
-import { allocateDemand, createDemand, reserveLine, returnAllocation } from "../../src/lib/inventory-service"
+import { adjustInventory, allocateDemand, createDemand, reserveLine, returnAllocation } from "../../src/lib/inventory-service"
 
 const enabled = Boolean(process.env.DATABASE_URL)
 const prisma = new PrismaClient()
@@ -29,6 +29,43 @@ test("reserve -> allocate -> return has one stock-out fact and auditable balance
   const afterReturn = await prisma.itemBalance.findUniqueOrThrow({ where: { itemId: item.id } })
   assert.equal(afterReturn.onHand.toString(), "7")
   assert.equal(afterReturn.reserved.toString(), "2")
+})
+
+test("unlinked intake and reduction post immutable adjustment movements", { skip: !enabled }, async () => {
+  const suffix = Date.now().toString() + "-adjustment"
+  const user = await prisma.user.create({ data: { email: "adjustment-" + suffix + "@test.local", name: "Adjustment Test", password: "not-used", role: "INVENTORY_MANAGER" } })
+  const item = await prisma.item.create({ data: {
+    code: "ADJ-TEST-" + suffix, title: "Adjustment item", discipline: "MECHANICAL",
+    createdById: user.id,
+    balance: { create: { onHand: 5, reserved: 2 } },
+  } })
+
+  await adjustInventory({
+    actorId: user.id, actorName: user.name, idempotencyKey: "intake-" + suffix,
+    reason: "Stock intake without purchase request", remarks: "Delivery note DN-100",
+    lines: [{ itemId: item.id, quantity: 4 }],
+  })
+  await adjustInventory({
+    actorId: user.id, actorName: user.name, idempotencyKey: "reduction-" + suffix,
+    reason: "Damaged during inspection", remarks: "Damage report DR-100",
+    lines: [{ itemId: item.id, quantity: -3 }],
+  })
+
+  const balance = await prisma.itemBalance.findUniqueOrThrow({ where: { itemId: item.id } })
+  assert.equal(balance.onHand.toString(), "6")
+  assert.equal(balance.reserved.toString(), "2")
+  const movements = await prisma.inventoryLedgerEntry.findMany({ where: { itemId: item.id }, orderBy: { occurredAt: "asc" } })
+  assert.deepEqual(movements.map(row => row.type), ["ADJUSTMENT_IN", "ADJUSTMENT_OUT"])
+  assert.match(movements[0].remarks || "", /without purchase request/)
+  assert.match(movements[1].remarks || "", /Damaged during inspection/)
+
+  await assert.rejects(
+    adjustInventory({ actorId: user.id, actorName: user.name, idempotencyKey: "over-reduction-" + suffix, reason: "Invalid count", lines: [{ itemId: item.id, quantity: -5 }] }),
+    /reserved/,
+  )
+  const afterRejected = await prisma.itemBalance.findUniqueOrThrow({ where: { itemId: item.id } })
+  assert.equal(afterRejected.onHand.toString(), "6")
+  assert.equal(await prisma.inventoryAdjustment.count({ where: { idempotencyKey: "over-reduction-" + suffix } }), 0)
 })
 
 test.after(async () => prisma.$disconnect())
