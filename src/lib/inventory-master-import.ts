@@ -66,9 +66,13 @@ function candidate(input: CandidateInput): InventoryMasterCandidate {
   }
 }
 
-function headerMap(rows: unknown[][]) {
+function headerMap(rows: unknown[][]): Map<string, number> {
   const header = rows[1] || []
-  return new Map(header.map((value, index) => [normalizeHeader(value), index]).filter(([name]) => Boolean(name)))
+  const entries = header.flatMap((value, index) => {
+    const name = normalizeHeader(value)
+    return name ? [[name, index] as const] : []
+  })
+  return new Map(entries)
 }
 
 function column(headers: Map<string, number>, names: string[], fallback?: number) {

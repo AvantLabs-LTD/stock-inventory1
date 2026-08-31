@@ -12,6 +12,7 @@ import {
 
 type Tx = Parameters<Parameters<PrismaClient["$transaction"]>[0]>[0]
 type DbLike = PrismaClient | Tx
+type InventoryAdjustmentWithLines = Prisma.InventoryAdjustmentGetPayload<{ include: { lines: true } }>
 
 type ItemSnapshot = {
   id: string
@@ -320,13 +321,39 @@ export async function commitInventoryMasterReconciliation(input: {
     for (const action of plan.metadataUpdates) {
       const data: Prisma.ItemUpdateInput = {}
       for (const change of action.changes) {
-        if (change.field === "importSourceKey") data.importSourceKey = change.after
-        else data[change.field] = change.after
+        switch (change.field) {
+          case "importSourceKey":
+            data.importSourceKey = change.after
+            break
+          case "title":
+            if (change.after == null) throw new DomainError("IMPORT_TITLE_MISSING", "An imported component title cannot be empty.")
+            data.title = change.after
+            break
+          case "unit":
+            if (change.after == null) throw new DomainError("IMPORT_UNIT_MISSING", "An imported component unit cannot be empty.")
+            data.unit = change.after
+            break
+          case "specification":
+            data.specification = change.after
+            break
+          case "manufacturerName":
+            data.manufacturerName = change.after
+            break
+          case "manufacturerPartNumber":
+            data.manufacturerPartNumber = change.after
+            break
+          case "supplierPartNumber":
+            data.supplierPartNumber = change.after
+            break
+          case "remarks":
+            data.remarks = change.after
+            break
+        }
       }
       await tx.item.update({ where: { id: action.itemId }, data })
     }
 
-    let adjustment = null
+    let adjustment: InventoryAdjustmentWithLines | null = null
     if (plan.stockAdjustments.length) {
       const header = await tx.inventoryAdjustment.create({ data: {
         adjustmentNo: "ADJ-" + Date.now() + "-" + Math.floor(Math.random() * 1000).toString().padStart(3, "0"),
