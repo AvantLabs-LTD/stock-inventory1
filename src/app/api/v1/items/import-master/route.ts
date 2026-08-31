@@ -4,7 +4,19 @@ import { db } from "@/lib/db"
 import { forbiddenResponse, getSession, hasRole, unauthorizedResponse } from "@/lib/auth-middleware"
 import { apiError, DomainError, normalizeName } from "@/lib/inventory-service"
 import { parseInventoryMaster } from "@/lib/inventory-master-import"
+import { reconciliationFileHash } from "@/lib/inventory-master-reconciliation"
+import { commitInventoryMasterReconciliation, previewInventoryMasterReconciliation } from "@/lib/inventory-master-reconciliation-service"
 import { MAX_UPLOAD_BYTES } from "@/lib/upload-limits"
+
+async function workbookBuffer(value: FormDataEntryValue | null, fieldName: string) {
+  if (!(value instanceof File)) throw new DomainError("FILE_REQUIRED", `Select the ${fieldName} .xlsx file`)
+  if (value.size > MAX_UPLOAD_BYTES) throw new DomainError("FILE_TOO_LARGE", "The upload limit is 5 MB", 413)
+  if (!value.name.toLowerCase().endsWith(".xlsx")) throw new DomainError("INVALID_FILE_TYPE", "Only .xlsx files are accepted")
+  const buffer = await value.arrayBuffer()
+  const signature = new Uint8Array(buffer.slice(0, 4))
+  if (signature[0] !== 0x50 || signature[1] !== 0x4b) throw new DomainError("INVALID_FILE_SIGNATURE", "The file is not a valid .xlsx workbook")
+  return { file: value, buffer }
+}
 
 export async function POST(request: NextRequest) {
   const session = await getSession(request)
@@ -12,16 +24,40 @@ export async function POST(request: NextRequest) {
   if (!hasRole(session, "INVENTORY_MANAGER")) return forbiddenResponse()
   try {
     const form = await request.formData()
-    const file = form.get("file")
     const mode = String(form.get("mode") || "preview")
-    if (!(file instanceof File)) throw new DomainError("FILE_REQUIRED", "Select the consolidated inventory .xlsx file")
-    if (file.size > MAX_UPLOAD_BYTES) throw new DomainError("FILE_TOO_LARGE", "The upload limit is 5 MB", 413)
-    if (!file.name.toLowerCase().endsWith(".xlsx")) throw new DomainError("INVALID_FILE_TYPE", "Only .xlsx files are accepted")
-    const buffer = await file.arrayBuffer()
-    const signature = new Uint8Array(buffer.slice(0, 4))
-    if (signature[0] !== 0x50 || signature[1] !== 0x4b) throw new DomainError("INVALID_FILE_SIGNATURE", "The file is not a valid .xlsx workbook")
+    const { file, buffer } = await workbookBuffer(form.get("file"), "consolidated inventory")
     const parsed = parseInventoryMaster(buffer)
     if (mode === "preview") return Response.json({ summary: { ...parsed.summary, total: parsed.candidates.length }, sample: parsed.candidates.slice(0, 20) })
+
+    if (mode === "reconcile-preview" || mode === "reconcile-commit") {
+      const baseline = await workbookBuffer(form.get("baselineFile"), "baseline inventory")
+      const baselineParsed = parseInventoryMaster(baseline.buffer)
+      const fileHash = reconciliationFileHash(buffer)
+      if (mode === "reconcile-preview") {
+        const plan = await previewInventoryMasterReconciliation({
+          baselineCandidates: baselineParsed.candidates,
+          currentCandidates: parsed.candidates,
+          fileHash,
+        })
+        return Response.json({
+          baselineSummary: { ...baselineParsed.summary, total: baselineParsed.candidates.length },
+          currentSummary: { ...parsed.summary, total: parsed.candidates.length },
+          plan,
+        })
+      }
+      const expectedPlanHash = String(form.get("planHash") || "").trim()
+      if (!expectedPlanHash) throw new DomainError("PLAN_HASH_REQUIRED", "Preview the live reconciliation before committing")
+      const result = await commitInventoryMasterReconciliation({
+        baselineCandidates: baselineParsed.candidates,
+        currentCandidates: parsed.candidates,
+        fileHash,
+        expectedPlanHash,
+        fileName: file.name,
+        actorId: session.user.id,
+        actorName: session.user.name,
+      })
+      return Response.json({ result })
+    }
     if (mode !== "commit") throw new DomainError("INVALID_IMPORT_MODE", "Import mode must be preview or commit")
 
     const result = await db.$transaction(async tx => {

@@ -67,7 +67,7 @@ export function ItemPicker({
 
   return <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild><Button type="button" variant="outline" role="combobox" className="h-auto min-h-10 w-full justify-between py-2 text-left font-normal">
-      {selected ? <span><span className="font-medium">{selected.code} — {selected.title}</span>{selected.specification&&<span className="block text-xs text-muted-foreground">{selected.specification}</span>}</span> : <span className="text-muted-foreground">{placeholder}</span>}
+      {selected ? <span><span className="font-medium">{selected.title}</span><span className="block text-xs text-muted-foreground">{[selected.specification, selected.code].filter(Boolean).join(" · ")}</span></span> : <span className="text-muted-foreground">{placeholder}</span>}
       <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50"/>
     </Button></PopoverTrigger>
     <PopoverContent align="start" className="w-[min(42rem,calc(100vw-2rem))] p-0">
@@ -80,7 +80,7 @@ export function ItemPicker({
           <CommandEmpty><div className="space-y-3 px-4"><p>No matching component found.</p>{onRequestNew&&search.trim()&&<Button type="button" size="sm" onClick={()=>{onRequestNew(search.trim(),categoryId==="ALL"?null:categoryId,discipline==="ALL"?null:discipline);setOpen(false)}}><Plus className="mr-2 size-4"/>Use “{search.trim()}” as a new component</Button>}</div></CommandEmpty>
           <CommandGroup heading={`${filtered.length} component${filtered.length===1?"":"s"}`}>
             {filtered.map(item=>{const path=item.category?categoryPaths.get(item.category.id)?.map(category=>category.name).join(" / "):null;return <CommandItem key={item.id} value={[item.id,item.code,item.title,item.specification,item.manufacturerName,item.manufacturerPartNumber,item.supplierPartNumber,path].filter(Boolean).join(" ")} onSelect={()=>{onValueChange(item.id);setOpen(false)}}>
-              <Check className={cn("size-4",value===item.id?"opacity-100":"opacity-0")}/><div className="min-w-0 flex-1"><div className="truncate font-medium">{item.code} — {item.title}</div><div className="truncate text-xs text-muted-foreground">{[path,item.specification,item.manufacturerPartNumber].filter(Boolean).join(" · ")||`${item.discipline} · ${item.unit}`}</div></div>{item.catalogueState==="INCOMPLETE"&&<span className="text-xs text-amber-600">Needs review</span>}
+              <Check className={cn("size-4",value===item.id?"opacity-100":"opacity-0")}/><div className="min-w-0 flex-1"><div className="truncate font-medium">{item.title}</div><div className="truncate text-xs text-muted-foreground">{[path,item.specification,item.manufacturerPartNumber,item.code].filter(Boolean).join(" · ")||`${item.discipline} · ${item.unit}`}</div></div>{item.catalogueState==="INCOMPLETE"&&<span className="text-xs text-amber-600">Needs review</span>}
             </CommandItem>})}
           </CommandGroup>
         </CommandList>
