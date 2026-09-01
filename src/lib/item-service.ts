@@ -1,9 +1,75 @@
+import { randomBytes } from "node:crypto"
 import { ItemDiscipline, Prisma } from "@prisma/client"
 import { DomainError } from "@/lib/inventory-service"
+
+const COMPLETE_CODE_PREFIX = "CMP"
+const COMPLETE_CODE_SLUG_LENGTH = 40
+
+export function generatedItemCodeBase(title: string) {
+  const slug = title
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, COMPLETE_CODE_SLUG_LENGTH) || "ITEM"
+  return `${COMPLETE_CODE_PREFIX}-${slug}`
+}
 
 export function provisionalItemCode(title: string) {
   const slug = title.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 18) || "ITEM"
   return `INC-${slug}-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 1296).toString(36).padStart(2, "0").toUpperCase()}`
+}
+
+type ItemWriter = Pick<Prisma.TransactionClient, "item">
+
+export async function createCatalogueItem(
+  tx: ItemWriter,
+  input: {
+    title: string
+    discipline: ItemDiscipline
+    categoryId: string
+    catalogueState?: "COMPLETE" | "INCOMPLETE"
+    description?: string | null
+    specification?: string | null
+    manufacturerName?: string | null
+    manufacturerPartNumber?: string | null
+    supplierPartNumber?: string | null
+    function?: string | null
+    link?: string | null
+    optionSelection?: string | null
+    remarks?: string | null
+    unit?: string | null
+  },
+  actorId: string,
+) {
+  const title = input.title.trim()
+  const codeBase = generatedItemCodeBase(title)
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const code = attempt === 0 ? codeBase : `${codeBase}-${randomBytes(3).toString("hex").toUpperCase()}`
+    try {
+      return await tx.item.create({ data: {
+        code,
+        title,
+        discipline: input.discipline,
+        categoryId: input.categoryId,
+        catalogueState: input.catalogueState === "INCOMPLETE" ? "INCOMPLETE" : "COMPLETE",
+        description: input.description?.trim() || null,
+        specification: input.specification?.trim() || null,
+        manufacturerName: input.manufacturerName?.trim() || null,
+        manufacturerPartNumber: input.manufacturerPartNumber?.trim() || null,
+        supplierPartNumber: input.supplierPartNumber?.trim() || null,
+        function: input.function?.trim() || null,
+        link: input.link?.trim() || null,
+        optionSelection: input.optionSelection?.trim() || null,
+        remarks: input.remarks?.trim() || null,
+        unit: input.unit?.trim() || "pcs",
+        createdById: actorId,
+        balance: { create: {} },
+      }, include: { balance: true, category: true } })
+    } catch (error) {
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error
+    }
+  }
+  throw new DomainError("ITEM_CODE_GENERATION_FAILED", "Could not generate a unique component code", 409)
 }
 
 export async function createIncompleteItem(
