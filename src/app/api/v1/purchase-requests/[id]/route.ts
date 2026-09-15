@@ -19,7 +19,28 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
   if (!await getSession(request)) return unauthorizedResponse()
   const { id } = await context.params
   const purchase = await db.purchaseRequest.findUnique({ where: { id }, include: detailInclude })
-  return purchase ? Response.json({ request: purchase }) : Response.json({ error: "Purchase request not found" }, { status: 404 })
+  if (!purchase) return Response.json({ error: "Purchase request not found" }, { status: 404 })
+  const itemIds = purchase.lines.map(line => line.itemId)
+  const eligibleDemands = itemIds.length ? await db.$queryRaw<Array<{ itemId: string; demandLineId: string; demandNo: string; destination: string | null; approvedForProcurement: Prisma.Decimal; remaining: Prisma.Decimal; linkedToCurrentPurchase: boolean }>>(Prisma.sql`
+    SELECT q."itemId",q."demandLineId",d."demandNo",COALESCE(pt.name,dt.name) destination,
+      q."approvedForProcurement",q.remaining,
+      EXISTS (
+        SELECT 1 FROM "demand_purchase_links" link
+        JOIN "purchase_request_lines" pl ON pl.id=link."purchaseRequestLineId"
+        WHERE link."demandLineId"=q."demandLineId" AND pl."purchaseRequestId"=${id}
+      ) "linkedToCurrentPurchase"
+    FROM "demand_line_quantities" q
+    JOIN "demand_lines" dl ON dl.id=q."demandLineId"
+    JOIN "demands" d ON d.id=q."demandId"
+    LEFT JOIN "project_tags" pt ON pt.id=dl."projectTagId"
+    LEFT JOIN "department_tags" dt ON dt.id=d."departmentTagId"
+    WHERE q."itemId" IN (${Prisma.join(itemIds)}) AND q."approvedForProcurement">0 AND q.remaining>0
+    ORDER BY "linkedToCurrentPurchase" DESC,d."requestedAt",dl."sortOrder"
+  `) : []
+  return Response.json({ request: { ...purchase, lines: purchase.lines.map(line => ({
+    ...line,
+    eligibleDemands: eligibleDemands.filter(demand => demand.itemId === line.itemId),
+  })) } })
 }
 
 export async function PATCH(request: NextRequest, context: { params: Promise<{ id: string }> }) {

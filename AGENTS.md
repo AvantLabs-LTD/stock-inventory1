@@ -52,7 +52,7 @@ One component requirement within a reservation or manufacturing cycle. It is the
 
 ### Allocation
 
-A protected quantity of on-hand stock assigned to a reservation line. Allocation changes availability but not on-hand stock.
+The derived, unissued portion of a demand line that an authorized manager approved for fulfilment from on-hand stock. Allocation changes availability but not on-hand stock. It is not a separately entered allocation transaction; its source is always traceable to the approval decision and later revisions.
 
 ### Issue
 
@@ -174,9 +174,12 @@ An inventory manager then:
 2. Reconciles it to a central component.
 3. Creates a central component when no suitable record exists.
 4. For a project request, selects and binds the accepted BOM version and cycle set count.
-5. Converts the request into a canonical reservation/manufacturing cycle.
+5. Approves an explicit quantity, which may differ from the requested quantity, and splits it between fulfilment from on-hand stock and fulfilment through procurement.
+6. Converts project requests into a canonical reservation/manufacturing cycle where applicable.
 
 Conversion is mandatory before allocation or issue.
+
+Demand submission does not depend on current stock. The manager may deliberately procure material even when free stock exists. The approved-from-stock portion becomes allocation automatically; the approved-for-procurement portion does not count as allocation.
 
 ## 7. Multiple manufacturing cycles
 
@@ -210,8 +213,10 @@ Store only facts such as:
 - Requester, converter, timestamps, and remarks
 - Reservation-line component and project-line associations
 - Direct requested quantity for non-BOM requests
+- Initial approved quantity and its approved-from-stock and approved-for-procurement split
+- Approver, approval timestamp, and approval remarks
+- Immutable post-approval revisions, including return-linked reductions and cancellations
 - Explicit cancellation decisions or cancellation quantities
-- Immutable allocation/release/consume entries
 - Immutable issue and return lines
 
 Do not store independently editable issued, remaining, deficit, ordered, shipped, received, or progress totals on reservation lines.
@@ -244,7 +249,11 @@ required quantity = recursively derived BOM requirement for the cycle
 ```
 
 ```text
-allocated quantity = signed sum of allocation entries
+current approved quantity = initial approved quantity + signed approval revisions
+```
+
+```text
+current approved-from-stock quantity = initial approved-from-stock quantity + signed stock-route revisions
 ```
 
 ```text
@@ -252,7 +261,11 @@ net issued quantity = issue quantity minus applicable returned quantity
 ```
 
 ```text
-remaining to issue = max(required - cancelled - net issued, 0)
+allocated quantity = max(current approved-from-stock quantity - net issued quantity, 0)
+```
+
+```text
+remaining to issue = max(current approved quantity - net issued quantity, 0)
 ```
 
 Do not subtract the same coverage twice. Issued quantities have already consumed their allocations.
@@ -345,8 +358,9 @@ For example, a line may correctly display `PARTIALLY_ISSUED`, `3 issued`, and `7
 
 ## 10. Allocation, issue, and return rules
 
-- Allocation is an explicit inventory-manager action after conversion.
-- Allocation may be partial.
+- Approval is an explicit inventory-manager action after reconciliation/conversion and may authorize a quantity different from the request.
+- Approval explicitly splits the authorized quantity between on-hand fulfilment and procurement.
+- Allocation is derived from the unissued approved-from-stock quantity and may therefore be partial.
 - Allocated stock cannot be allocated to another reservation.
 - An issue must consume allocation and on-hand stock atomically.
 - A reservation may receive any number of partial issues.
@@ -355,7 +369,8 @@ For example, a line may correctly display `PARTIALLY_ISSUED`, `3 issued`, and `7
 - Never require a full reservation or full line to be issued at once.
 - Prevent negative on-hand balances, negative allocations, over-allocation, and over-issue.
 - Returns reference original issue lines, cannot exceed the net issued quantity, and post an immutable return movement.
-- Because fulfilment is derived, a valid return may move a formerly closed cycle back to `IN_PROGRESS` unless there is a separate explicit business closure that forbids it.
+- Every return explicitly records whether replacement is still required. A replacement-required return reopens that quantity and restores its allocation. A no-replacement return appends an immutable approval reduction linked to the return, preserving the original approval and issue history.
+- A partial no-replacement return reduces the current approved quantity and may leave the line fulfilled. A full no-replacement return that reduces the active approved quantity to zero marks the line, and the whole demand when applicable, `CANCELLED`.
 
 ## 11. Deficit and blocker views
 
@@ -429,7 +444,7 @@ Reservation details must show all related purchase requests and their current st
 - Every posted receipt creates canonical ledger movements in the same transaction.
 - A purchase request becomes `RECEIVED_IN_STORE` only when every line is fully received.
 - Receiving increases physical stock but does not silently allocate it to reservations.
-- After receipt, inventory managers can see which reservation lines are ready for allocation.
+- During and after receipt, inventory managers can see every open procurement-approved demand for each received component. Demands explicitly linked to the selected purchase are highlighted ahead of other matching demands. Receiving creates physical stock but does not silently assign it to any demand.
 
 ## 14. Attachments and uploads
 
@@ -494,8 +509,8 @@ Requirements:
 - Use idempotency/source uniqueness so retries cannot double-post.
 - Lock balance rows and use database transactions for every stock-changing operation.
 - Update any balance cache in the same transaction as the ledger entry.
-- Keep allocation entries immutable and signed (`ALLOCATE`, `RELEASE`, `CONSUME`).
-- The ledger and allocation entries must be sufficient to audit or rebuild cached balances.
+- Keep approval decisions and post-approval revisions auditable and sufficient to rebuild derived allocations.
+- The ledger, approval facts, issue lines, returns, and revisions must be sufficient to audit or rebuild cached balances.
 
 ## 17. Database and Prisma rules
 
@@ -542,11 +557,13 @@ The UI is an operational view of canonical data, not a separate workflow engine.
 - Cycle pages show line-level quantities and both fulfilment and procurement facets.
 - Deficit pages show aggregate shortages and expandable per-cycle/request attribution.
 - Purchase pages show linked reservation quantities separately from extra replenishment quantities.
-- Managers can reconcile descriptions, convert requests, allocate, partially issue, manage links, and receive goods from focused views.
+- Managers can reconcile descriptions, approve quantities and fulfilment splits, partially issue, manage purchase links, return with an explicit disposition, and receive goods from focused views.
 - Purchase approvers have a clear pending-order-approval queue.
 - Disable or hide unauthorized actions for usability, while still enforcing authorization on the server.
 - Do not display derived quantities as editable inputs.
-- Clearly distinguish physical availability, allocation, purchase coverage, and issued quantities.
+- Clearly distinguish requested quantity, approved quantity, approved-from-stock allocation, approved-for-procurement quantity, purchase coverage, and net issued quantity.
+- Allocation totals must support a hover or drill-down showing every contributing demand line, requester/destination, and quantity.
+- Goods-intake views must highlight demands linked to the selected order while also showing other open procurement-approved demands for the same component.
 - Use explicit confirmation for irreversible posting actions, but do not add unnecessary confirmation to read-only navigation.
 
 ## 21. Security and configuration
@@ -569,7 +586,7 @@ Every stock-changing or workflow-state-changing feature requires integration cov
 At minimum cover:
 
 - Opening, receiving, issuing, returning, and positive/negative adjustment
-- Allocation, release, and consume
+- Approval splits, derived allocation, approval revision, issue, and both return dispositions
 - Repeated arbitrary partial issues
 - Transaction rollback on over-allocation, over-issue, over-return, and over-receipt
 - Concurrent attempts against the same component balance

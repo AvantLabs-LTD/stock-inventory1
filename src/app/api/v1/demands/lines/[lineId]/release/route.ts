@@ -1,10 +1,7 @@
 import { NextRequest } from "next/server"
-import { forbiddenResponse, getSession, hasRole, unauthorizedResponse } from "@/lib/auth-middleware"
-import { apiError, releaseLine } from "@/lib/inventory-service"
+import { getSession, unauthorizedResponse } from "@/lib/auth-middleware"
 export async function POST(request: NextRequest, context: { params: Promise<{ lineId: string }> }) {
   const session = await getSession(request); if (!session) return unauthorizedResponse()
-  if (!hasRole(session, "INVENTORY_MANAGER")) return forbiddenResponse()
-  try { const { lineId } = await context.params; const b = await request.json()
-    return Response.json({ release: await releaseLine({ lineId, quantity: b.quantity, actorId: session.user.id, sourceId: b.idempotencyKey || crypto.randomUUID(), remarks: b.remarks }) }, { status: 201 })
-  } catch (e) { return apiError(e) }
+  void request; void context
+  return Response.json({ error: "Allocation release is now an approval revision rather than a separate reservation transaction.", code: "RELEASE_ENDPOINT_RETIRED" }, { status: 410 })
 }

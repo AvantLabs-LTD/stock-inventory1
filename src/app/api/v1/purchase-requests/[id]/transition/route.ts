@@ -2,22 +2,41 @@ import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { forbiddenResponse, getSession, hasRole, unauthorizedResponse } from "@/lib/auth-middleware"
 import { apiError, DomainError } from "@/lib/inventory-service"
+import type { PurchaseRequestStatus } from "@prisma/client"
 
-const next: Record<string, string> = { BACKLOG: "PENDING_APPROVAL", PENDING_APPROVAL: "ORDERED", ORDERED: "SHIPPED" }
+const next: Partial<Record<PurchaseRequestStatus, PurchaseRequestStatus>> = {
+  BACKLOG: "PENDING_ORDER_APPROVAL",
+  PENDING_ORDER_APPROVAL: "ORDERED",
+  ORDERED: "SHIPPED",
+}
+
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const session = await getSession(request); if (!session) return unauthorizedResponse()
   try {
     const { id } = await context.params; const body = await request.json()
     const current = await db.purchaseRequest.findUnique({ where: { id } })
     if (!current) throw new DomainError("PURCHASE_NOT_FOUND", "Purchase request not found", 404)
-    if (next[current.status] !== body.status) throw new DomainError("INVALID_TRANSITION", "Only the next forward purchase stage is allowed")
-    if (body.status === "ORDERED" && !hasRole(session, "PURCHASE_APPROVER")) return forbiddenResponse("Only a purchase approver may approve an order")
-    if (body.status !== "ORDERED" && !hasRole(session, "INVENTORY_MANAGER")) return forbiddenResponse()
+    const target = next[current.status]
+    if (!target || target !== body.status) throw new DomainError("INVALID_TRANSITION", "Only the next forward purchase stage is allowed")
+    if (target === "ORDERED" && !hasRole(session, "PURCHASE_APPROVER")) return forbiddenResponse("Only a purchase approver may approve an order")
+    if (target !== "ORDERED" && !hasRole(session, "INVENTORY_MANAGER")) return forbiddenResponse()
     const now = new Date()
-    const requestRecord = await db.purchaseRequest.update({ where: { id }, data: {
-      status: body.status, submittedAt: body.status === "PENDING_APPROVAL" ? now : undefined,
-      orderedAt: body.status === "ORDERED" ? now : undefined, shippedAt: body.status === "SHIPPED" ? now : undefined,
-    } })
+    const requestRecord = await db.$transaction(async tx => {
+      const updated = await tx.purchaseRequest.updateMany({ where: { id, status: current.status }, data: {
+        status: target, submittedAt: target === "PENDING_ORDER_APPROVAL" ? now : undefined,
+        orderedAt: target === "ORDERED" ? now : undefined, shippedAt: target === "SHIPPED" ? now : undefined,
+      } })
+      if (updated.count !== 1) throw new DomainError("PURCHASE_CONCURRENT_UPDATE", "The purchase request changed while it was being updated; reload and try again", 409)
+      await tx.auditLog.create({ data: {
+        userId: session.user.id,
+        userName: session.user.name,
+        action: "TRANSITION_PURCHASE_REQUEST",
+        entityType: "PurchaseRequest",
+        entityId: id,
+        details: JSON.stringify({ from: current.status, to: target }),
+      } })
+      return tx.purchaseRequest.findUniqueOrThrow({ where: { id } })
+    })
     return Response.json({ request: requestRecord })
   } catch (e) { return apiError(e) }
 }

@@ -95,13 +95,27 @@ export async function GET(request: NextRequest) {
     WHERE "itemId" IN (${Prisma.join(itemIds)})
     GROUP BY "itemId"
   `) : []
+  const allocationSources = itemIds.length ? await db.$queryRaw<Array<{ itemId: string; demandLineId: string; demandNo: string; destination: string | null; requester: string; quantity: Prisma.Decimal }>>(Prisma.sql`
+    SELECT q."itemId",q."demandLineId",d."demandNo",COALESCE(pt.name,dt.name) destination,u.name requester,q.allocated quantity
+    FROM "demand_line_quantities" q
+    JOIN "demand_lines" dl ON dl.id=q."demandLineId"
+    JOIN "demands" d ON d.id=q."demandId"
+    JOIN "User" u ON u.id=d."requestedById"
+    LEFT JOIN "project_tags" pt ON pt.id=dl."projectTagId"
+    LEFT JOIN "department_tags" dt ON dt.id=d."departmentTagId"
+    WHERE q."itemId" IN (${Prisma.join(itemIds)}) AND q.allocated>0
+    ORDER BY d."requestedAt",dl."sortOrder"
+  `) : []
   const byItem = new Map(operational.map(row => [row.itemId, row]))
+  const sourcesByItem = new Map<string, typeof allocationSources>()
+  for (const source of allocationSources) sourcesByItem.set(source.itemId, [...(sourcesByItem.get(source.itemId) || []), source])
   return Response.json({ items: items.map(i => ({
     ...i,
     free: Number(i.balance?.onHand || 0) - Number(i.balance?.reserved || 0),
     demand: byItem.get(i.id)?.demand || 0,
     procurement: byItem.get(i.id)?.procurement || 0,
     deficit: byItem.get(i.id)?.deficit || 0,
+    allocationSources: sourcesByItem.get(i.id) || [],
   })), pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) } })
 }
 

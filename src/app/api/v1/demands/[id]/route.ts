@@ -2,7 +2,7 @@ import { NextRequest } from "next/server"
 import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
 import { forbiddenResponse, getSession, hasRole, unauthorizedResponse } from "@/lib/auth-middleware"
-import { apiError, DomainError } from "@/lib/inventory-service"
+import { apiError, cancelDemand, DomainError } from "@/lib/inventory-service"
 
 export async function GET(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   if (!await getSession(request)) return unauthorizedResponse()
@@ -11,8 +11,8 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     departmentTag: true, requestedBy: { select: { id: true, name: true, email: true } },
     lines: { include: {
       item: { include: { balance: true, category: true } }, projectTag: true, suggestedCategory: true, vendor: true,
-      reservations: { orderBy: { createdAt: "asc" } }, cancellations: true,
-      allocationLines: { include: { allocation: true, returnLines: true }, orderBy: { createdAt: "asc" } },
+      approvedBy: { select: { id: true, name: true } }, approvalRevisions: { include: { createdBy: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } },
+      issueLines: { include: { issue: true, returnLines: true }, orderBy: { createdAt: "asc" } },
       purchaseLinks: { include: { purchaseRequestLine: { include: { receiptLines: true, purchaseRequest: { include: { vendor: true } } } } } },
     }, orderBy: { sortOrder: "asc" } },
   } })
@@ -36,20 +36,10 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
     if (body.state === "CLOSED") {
       const rows = await db.$queryRaw<Array<{ count: bigint }>>
         `SELECT COUNT(*) count FROM "demand_line_quantities" WHERE "demandId"=${id} AND remaining > 0`
-      if (Number(rows[0]?.count || 0) > 0) throw new DomainError("DEMAND_INCOMPLETE", "Allocate or cancel every remaining quantity before closing")
+      if (Number(rows[0]?.count || 0) > 0) throw new DomainError("DEMAND_INCOMPLETE", "Issue or cancel every remaining approved quantity before closing")
     }
     if (body.state === "CANCELLED") {
-      const cancelled = await db.$transaction(async tx => {
-        const rows = await tx.$queryRaw<Array<{ demandLineId: string; itemId: string | null; reserved: Prisma.Decimal }>>
-          `SELECT "demandLineId","itemId",reserved FROM "demand_line_quantities" WHERE "demandId"=${id}`
-        for (const row of rows) {
-          if (row.itemId && row.reserved.gt(0)) {
-            await tx.demandReservationEntry.create({ data: { demandLineId: row.demandLineId, type: "RELEASE", quantity: row.reserved, sourceId: "demand-cancel-" + id + "-" + row.demandLineId, createdById: session.user.id, remarks: "Released by demand cancellation" } })
-            await tx.itemBalance.update({ where: { itemId: row.itemId }, data: { reserved: { decrement: row.reserved }, version: { increment: 1 } } })
-          }
-        }
-        return tx.demand.update({ where: { id }, data: { state: "CANCELLED", cancelledAt: new Date(), cancelledById: session.user.id, cancellationReason: body.reason?.trim() || "Cancelled" } })
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      const cancelled = await cancelDemand({ demandId: id, actorId: session.user.id, actorName: session.user.name, reason: body.reason })
       return Response.json({ demand: cancelled })
     }
     const data = body.state === "ACTIVE"

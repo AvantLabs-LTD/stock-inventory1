@@ -1,8 +1,8 @@
 # Store Management and Purchase Portal
 
-This repository is a PostgreSQL-backed store-management and purchasing portal built around one item catalogue, one inventory ledger, row-based demands, and linked purchasing.
+This repository is a PostgreSQL-backed store-management and purchasing portal built around one item catalogue, one inventory ledger, row-based demand approval, derived allocations, immutable issues and returns, and linked purchasing.
 
-A department optionally tags a demand; a project optionally tags an individual demand row. There are no project, BOM, manufacturing-cycle, reservation-request, or issue domains. Reserving protects stock, while allocating is the final handover and the only stock-out event. Operational quantities and deficits are derived from immutable facts.
+A department optionally tags a demand; a project optionally tags an individual demand row. Demand submission does not inspect or reserve stock. An inventory manager approves each row with an explicit total and a split between on-hand fulfilment and procurement. The unissued on-hand portion is the derived allocation; only an issue reduces physical stock. Returns reference their issue and explicitly either reopen the requirement or reduce the approved quantity with an immutable audit revision. Project BOM, manufacturing-cycle, and reservation-request domains are planned but not implemented yet.
 
 ## Run the complete stack
 

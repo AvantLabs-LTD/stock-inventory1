@@ -52,15 +52,27 @@ enum ReservationEntryType {
 enum InventoryLedgerEntryType {
   OPENING
   RECEIPT
-  ALLOCATION
+  ISSUE
   RETURN
   ADJUSTMENT_IN
   ADJUSTMENT_OUT
 }
 
+enum DemandApprovalRevisionType {
+  MANAGER_ADJUSTMENT
+  PROCUREMENT_TO_STOCK
+  RETURN_NO_REPLACEMENT
+  CANCELLATION
+}
+
+enum ReturnDisposition {
+  REPLACEMENT_REQUIRED
+  REDUCE_APPROVED_QUANTITY
+}
+
 enum PurchaseRequestStatus {
   BACKLOG
-  PENDING_APPROVAL
+  PENDING_ORDER_APPROVAL
   ORDERED
   SHIPPED
   RECEIVED_IN_STORE
@@ -92,7 +104,9 @@ model User {
   demandsCancelled     Demand[]                 @relation("DemandCancelledBy")
   reservationsCreated  DemandReservationEntry[] @relation("ReservationCreatedBy")
   cancellationsCreated DemandLineCancellation[] @relation("CancellationCreatedBy")
-  allocationsPosted    DemandAllocation[]       @relation("AllocationPostedBy")
+  demandLinesApproved  DemandLine[]             @relation("DemandLineApprovedBy")
+  approvalRevisions    DemandApprovalRevision[] @relation("ApprovalRevisionCreatedBy")
+  issuesPosted         DemandIssue[]            @relation("IssuePostedBy")
   returnsPosted        DemandReturn[]           @relation("ReturnPostedBy")
   ledgerEntries        InventoryLedgerEntry[]   @relation("LedgerActor")
   purchaseRequests     PurchaseRequest[]        @relation("PurchaseCreatedBy")
@@ -198,7 +212,7 @@ model Item {
   createdBy              User?                     @relation("ItemCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   balance                ItemBalance?
   demandLines            DemandLine[]
-  allocationLines        DemandAllocationLine[]
+  issueLines             DemandIssueLine[]
   returnLines            DemandReturnLine[]
   ledgerEntries          InventoryLedgerEntry[]
   purchaseLines          PurchaseRequestLine[]
@@ -225,29 +239,29 @@ model ItemBalance {
 }
 
 model Demand {
-  id                 String             @id @default(cuid())
-  demandNo           String             @unique
-  state              DemandState        @default(SUBMITTED)
+  id                 String         @id @default(cuid())
+  demandNo           String         @unique
+  state              DemandState    @default(SUBMITTED)
   departmentTagId    String?
   requestedById      String
   startedById        String?
   closedById         String?
   cancelledById      String?
   remarks            String?
-  requestedAt        DateTime           @default(now())
+  requestedAt        DateTime       @default(now())
   startedAt          DateTime?
   closedAt           DateTime?
   cancelledAt        DateTime?
   cancellationReason String?
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
-  departmentTag      DepartmentTag?     @relation(fields: [departmentTagId], references: [id], onDelete: SetNull)
-  requestedBy        User               @relation("DemandRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
-  startedBy          User?              @relation("DemandStartedBy", fields: [startedById], references: [id], onDelete: Restrict)
-  closedBy           User?              @relation("DemandClosedBy", fields: [closedById], references: [id], onDelete: Restrict)
-  cancelledBy        User?              @relation("DemandCancelledBy", fields: [cancelledById], references: [id], onDelete: Restrict)
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  departmentTag      DepartmentTag? @relation(fields: [departmentTagId], references: [id], onDelete: SetNull)
+  requestedBy        User           @relation("DemandRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+  startedBy          User?          @relation("DemandStartedBy", fields: [startedById], references: [id], onDelete: Restrict)
+  closedBy           User?          @relation("DemandClosedBy", fields: [closedById], references: [id], onDelete: Restrict)
+  cancelledBy        User?          @relation("DemandCancelledBy", fields: [cancelledById], references: [id], onDelete: Restrict)
   lines              DemandLine[]
-  allocations        DemandAllocation[]
+  issues             DemandIssue[]
 
   @@index([state, requestedAt])
   @@index([requestedById])
@@ -255,36 +269,45 @@ model Demand {
 }
 
 model DemandLine {
-  id                  String                   @id @default(cuid())
-  demandId            String
-  itemId              String?
-  projectTagId        String?
-  suggestedCategoryId String?
-  procurementType     ProcurementType?
-  vendorId            String?
-  itemCodeSnapshot    String?
-  title               String
-  description         String?
-  unit                String                   @default("pcs")
-  requiredQuantity    Decimal                  @db.Decimal(18, 6)
-  remarks             String?
-  sortOrder           Int                      @default(0)
-  createdAt           DateTime                 @default(now())
-  updatedAt           DateTime                 @updatedAt
-  demand              Demand                   @relation(fields: [demandId], references: [id], onDelete: Cascade)
-  item                Item?                    @relation(fields: [itemId], references: [id], onDelete: Restrict)
-  projectTag          ProjectTag?              @relation(fields: [projectTagId], references: [id], onDelete: SetNull)
-  suggestedCategory   ItemCategory?            @relation("SuggestedDemandCategory", fields: [suggestedCategoryId], references: [id], onDelete: SetNull)
-  vendor              Vendor?                  @relation(fields: [vendorId], references: [id], onDelete: SetNull)
-  reservations        DemandReservationEntry[]
-  cancellations       DemandLineCancellation[]
-  allocationLines     DemandAllocationLine[]
-  purchaseLinks       DemandPurchaseLink[]
+  id                             String                   @id @default(cuid())
+  demandId                       String
+  itemId                         String?
+  projectTagId                   String?
+  suggestedCategoryId            String?
+  procurementType                ProcurementType?
+  vendorId                       String?
+  itemCodeSnapshot               String?
+  title                          String
+  description                    String?
+  unit                           String                   @default("pcs")
+  requiredQuantity               Decimal                  @db.Decimal(18, 6)
+  approvedQuantity               Decimal?                 @db.Decimal(18, 6)
+  approvedFromStockQuantity      Decimal?                 @db.Decimal(18, 6)
+  approvedForProcurementQuantity Decimal?                 @db.Decimal(18, 6)
+  approvedById                   String?
+  approvedAt                     DateTime?
+  approvalRemarks                String?
+  remarks                        String?
+  sortOrder                      Int                      @default(0)
+  createdAt                      DateTime                 @default(now())
+  updatedAt                      DateTime                 @updatedAt
+  demand                         Demand                   @relation(fields: [demandId], references: [id], onDelete: Cascade)
+  item                           Item?                    @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  projectTag                     ProjectTag?              @relation(fields: [projectTagId], references: [id], onDelete: SetNull)
+  suggestedCategory              ItemCategory?            @relation("SuggestedDemandCategory", fields: [suggestedCategoryId], references: [id], onDelete: SetNull)
+  vendor                         Vendor?                  @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+  approvedBy                     User?                    @relation("DemandLineApprovedBy", fields: [approvedById], references: [id], onDelete: Restrict)
+  reservations                   DemandReservationEntry[]
+  cancellations                  DemandLineCancellation[]
+  issueLines                     DemandIssueLine[]
+  approvalRevisions              DemandApprovalRevision[]
+  purchaseLinks                  DemandPurchaseLink[]
 
   @@index([demandId, sortOrder])
   @@index([itemId])
   @@index([projectTagId])
   @@index([suggestedCategoryId])
+  @@index([approvedById])
   @@map("demand_lines")
 }
 
@@ -319,37 +342,37 @@ model DemandLineCancellation {
   @@map("demand_line_cancellations")
 }
 
-model DemandAllocation {
-  id             String                 @id @default(cuid())
-  allocationNo   String                 @unique
+model DemandIssue {
+  id             String            @id @default(cuid())
+  issueNo        String            @unique @map("allocationNo")
   demandId       String
   postedById     String
-  idempotencyKey String?                @unique
+  idempotencyKey String?           @unique
   remarks        String?
-  postedAt       DateTime               @default(now())
-  createdAt      DateTime               @default(now())
-  demand         Demand                 @relation(fields: [demandId], references: [id], onDelete: Restrict)
-  postedBy       User                   @relation("AllocationPostedBy", fields: [postedById], references: [id], onDelete: Restrict)
-  lines          DemandAllocationLine[]
+  postedAt       DateTime          @default(now())
+  createdAt      DateTime          @default(now())
+  demand         Demand            @relation(fields: [demandId], references: [id], onDelete: Restrict)
+  postedBy       User              @relation("IssuePostedBy", fields: [postedById], references: [id], onDelete: Restrict)
+  lines          DemandIssueLine[]
 
   @@index([demandId, postedAt])
   @@map("demand_allocations")
 }
 
-model DemandAllocationLine {
+model DemandIssueLine {
   id           String             @id @default(cuid())
-  allocationId String
+  issueId      String             @map("allocationId")
   demandLineId String
   itemId       String
   quantity     Decimal            @db.Decimal(18, 6)
   remarks      String?
   createdAt    DateTime           @default(now())
-  allocation   DemandAllocation   @relation(fields: [allocationId], references: [id], onDelete: Cascade)
+  issue        DemandIssue        @relation(fields: [issueId], references: [id], onDelete: Cascade)
   demandLine   DemandLine         @relation(fields: [demandLineId], references: [id], onDelete: Restrict)
   item         Item               @relation(fields: [itemId], references: [id], onDelete: Restrict)
   returnLines  DemandReturnLine[]
 
-  @@index([allocationId])
+  @@index([issueId])
   @@index([demandLineId])
   @@map("demand_allocation_lines")
 }
@@ -370,19 +393,41 @@ model DemandReturn {
 }
 
 model DemandReturnLine {
-  id               String               @id @default(cuid())
+  id               String                  @id @default(cuid())
   returnId         String
-  allocationLineId String
+  issueLineId      String                  @map("allocationLineId")
   itemId           String
-  quantity         Decimal              @db.Decimal(18, 6)
+  quantity         Decimal                 @db.Decimal(18, 6)
+  disposition      ReturnDisposition       @default(REPLACEMENT_REQUIRED)
   remarks          String?
-  createdAt        DateTime             @default(now())
-  demandReturn     DemandReturn         @relation(fields: [returnId], references: [id], onDelete: Cascade)
-  allocationLine   DemandAllocationLine @relation(fields: [allocationLineId], references: [id], onDelete: Restrict)
-  item             Item                 @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  createdAt        DateTime                @default(now())
+  demandReturn     DemandReturn            @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  issueLine        DemandIssueLine         @relation(fields: [issueLineId], references: [id], onDelete: Restrict)
+  item             Item                    @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  approvalRevision DemandApprovalRevision?
 
-  @@index([allocationLineId])
+  @@index([issueLineId])
   @@map("demand_return_lines")
+}
+
+model DemandApprovalRevision {
+  id                          String                     @id @default(cuid())
+  demandLineId                String
+  type                        DemandApprovalRevisionType
+  approvedQuantityDelta       Decimal                    @db.Decimal(18, 6)
+  fromStockQuantityDelta      Decimal                    @db.Decimal(18, 6)
+  forProcurementQuantityDelta Decimal                    @db.Decimal(18, 6)
+  returnLineId                String?                    @unique
+  sourceId                    String                     @unique
+  reason                      String
+  createdById                 String
+  createdAt                   DateTime                   @default(now())
+  demandLine                  DemandLine                 @relation(fields: [demandLineId], references: [id], onDelete: Restrict)
+  returnLine                  DemandReturnLine?          @relation(fields: [returnLineId], references: [id], onDelete: Restrict)
+  createdBy                   User                       @relation("ApprovalRevisionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([demandLineId, createdAt])
+  @@map("demand_approval_revisions")
 }
 
 model InventoryLedgerEntry {
