@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
-import { forbiddenResponse, getSession, hasRole, unauthorizedResponse } from "@/lib/auth-middleware"
+import { forbiddenResponse, getSession, hasPermission, unauthorizedResponse } from "@/lib/auth-middleware"
 import { apiError, DomainError } from "@/lib/inventory-service"
 import type { PurchaseRequestStatus } from "@prisma/client"
 
@@ -18,8 +18,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     if (!current) throw new DomainError("PURCHASE_NOT_FOUND", "Purchase request not found", 404)
     const target = next[current.status]
     if (!target || target !== body.status) throw new DomainError("INVALID_TRANSITION", "Only the next forward purchase stage is allowed")
-    if (target === "ORDERED" && !hasRole(session, "PURCHASE_APPROVER")) return forbiddenResponse("Only a purchase approver may approve an order")
-    if (target !== "ORDERED" && !hasRole(session, "INVENTORY_MANAGER")) return forbiddenResponse()
+    if (target === "ORDERED" && !hasPermission(session, "vault.purchasing.approve")) return forbiddenResponse("Only a purchase approver may approve an order")
+    if (target !== "ORDERED" && !hasPermission(session, "vault.purchasing.manage")) return forbiddenResponse()
     const now = new Date()
     const requestRecord = await db.$transaction(async tx => {
       const updated = await tx.purchaseRequest.updateMany({ where: { id, status: current.status }, data: {

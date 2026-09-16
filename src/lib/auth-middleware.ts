@@ -11,6 +11,8 @@ export interface AuthSession {
     name: string
     status: string
     role: UserRole
+    groups: Array<{ id: string; name: string }>
+    permissions: string[]
   }
 }
 
@@ -47,6 +49,7 @@ export async function getSession(request?: NextRequest): Promise<AuthSession | n
         name: true,
         status: true,
         role: true,
+        accessGroups: { include: { group: { include: { permissions: { select: { permissionKey: true } } } } } },
       },
     })
 
@@ -59,6 +62,8 @@ export async function getSession(request?: NextRequest): Promise<AuthSession | n
         name: user.name,
         status: user.status,
         role: user.role,
+        groups: user.accessGroups.map(membership => ({ id: membership.group.id, name: membership.group.name })),
+        permissions: [...new Set(user.accessGroups.flatMap(membership => membership.group.permissions.map(entry => entry.permissionKey)))],
       },
     }
   } catch {
@@ -77,6 +82,6 @@ export function forbiddenResponse(message = 'You do not have permission to perfo
   return Response.json({ error: message, code: 'FORBIDDEN' }, { status: 403 })
 }
 
-export function hasRole(session: AuthSession, ...roles: UserRole[]) {
-  return session.user.role === 'SUPER_ADMIN' || roles.includes(session.user.role)
+export function hasPermission(session: AuthSession, permission: string) {
+  return session.user.permissions.includes(permission)
 }

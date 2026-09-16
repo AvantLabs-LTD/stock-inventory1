@@ -114,6 +114,47 @@ model User {
   adjustmentsPosted    InventoryAdjustment[]    @relation("AdjustmentPostedBy")
   attachmentsUploaded  Attachment[]             @relation("AttachmentUploadedBy")
   auditLogs            AuditLog[]
+  accessGroups         UserAccessGroup[]
+}
+
+model Permission {
+  key         String                  @id
+  module      String
+  description String
+  groups      AccessGroupPermission[]
+
+  @@map("permissions")
+}
+
+model AccessGroup {
+  id          String                  @id
+  name        String                  @unique
+  description String
+  isSystem    Boolean                 @default(false)
+  permissions AccessGroupPermission[]
+  users       UserAccessGroup[]
+
+  @@map("access_groups")
+}
+
+model AccessGroupPermission {
+  groupId       String
+  permissionKey String
+  group         AccessGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  permission    Permission  @relation(fields: [permissionKey], references: [key], onDelete: Restrict)
+
+  @@id([groupId, permissionKey])
+  @@map("access_group_permissions")
+}
+
+model UserAccessGroup {
+  userId  String
+  groupId String
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group   AccessGroup @relation(fields: [groupId], references: [id], onDelete: Restrict)
+
+  @@id([userId, groupId])
+  @@map("user_access_groups")
 }
 
 model DepartmentTag {

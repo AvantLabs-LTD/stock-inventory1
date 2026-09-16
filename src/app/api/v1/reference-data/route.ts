@@ -1,9 +1,9 @@
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
-import { getSession, unauthorizedResponse } from "@/lib/auth-middleware"
+import { forbiddenResponse, getSession, hasPermission, unauthorizedResponse } from "@/lib/auth-middleware"
 
 export async function GET(request: NextRequest) {
-  if (!await getSession(request)) return unauthorizedResponse()
+  const session = await getSession(request); if (!session) return unauthorizedResponse(); if (!hasPermission(session, "vault.reference.view")) return forbiddenResponse()
   const [itemCategories, departments, projects, vendors] = await Promise.all([
     db.itemCategory.findMany({ include: { parent: true }, orderBy: [{ discipline: "asc" }, { sortOrder: "asc" }, { name: "asc" }] }),
     db.departmentTag.findMany({ orderBy: { name: "asc" } }),

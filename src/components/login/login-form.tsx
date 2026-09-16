@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Package } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 
 const MAX_RETRIES = 3
@@ -80,10 +79,10 @@ export function LoginForm() {
         {/* Brand */}
         <div className="mb-8 flex flex-col items-center">
           <div className="flex size-16 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg mb-4">
-            <Package className="size-8" />
+            <span className="text-3xl font-bold">F</span>
           </div>
-          <h1 className="text-2xl font-bold tracking-tight">InventoryPro</h1>
-          <p className="text-sm text-muted-foreground mt-1">Inventory Management System</p>
+          <h1 className="text-2xl font-bold tracking-tight">Flux</h1>
+          <p className="text-sm text-muted-foreground mt-1">Enterprise workspace</p>
         </div>
 
         <Card className="border-0 shadow-xl">
@@ -144,7 +143,7 @@ export function LoginForm() {
         </Card>
 
         <p className="mt-6 text-center text-xs text-muted-foreground">
-          InventoryPro ERP &copy; {new Date().getFullYear()}
+          Flux ERP &copy; {new Date().getFullYear()}
         </p>
       </div>
     </div>

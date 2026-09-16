@@ -2,8 +2,8 @@ import type { Metadata } from "next"
 import "./globals.css"
 
 export const metadata: Metadata = {
-  title: "Store Portal",
-  description: "Demand, inventory and purchasing visibility in one operational system.",
+  title: "Flux ERP",
+  description: "Flux enterprise workspace for Vault, Cargo, Orders, People and Ledger.",
 }
 
 export default function RootLayout({

@@ -1,12 +1,13 @@
 import { NextRequest } from "next/server"
 import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
-import { getSession, unauthorizedResponse } from "@/lib/auth-middleware"
+import { forbiddenResponse, getSession, hasPermission, unauthorizedResponse } from "@/lib/auth-middleware"
 import { apiError, createDemand } from "@/lib/inventory-service"
 
 export async function GET(request: NextRequest) {
   const session = await getSession(request)
   if (!session) return unauthorizedResponse()
+  if (!hasPermission(session, "vault.demands.view")) return forbiddenResponse()
   const mine = request.nextUrl.searchParams.get("mine") === "true"
   const state = request.nextUrl.searchParams.get("state")
   const demands = await db.demand.findMany({
@@ -23,6 +24,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const session = await getSession(request)
   if (!session) return unauthorizedResponse()
+  if (!hasPermission(session, "vault.demands.create")) return forbiddenResponse()
   try {
     const body = await request.json()
     const demand = await createDemand({ ...body, requestedById: session.user.id })

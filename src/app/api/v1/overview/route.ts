@@ -1,9 +1,10 @@
 import { NextRequest } from "next/server"
 import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
-import { getSession, unauthorizedResponse } from "@/lib/auth-middleware"
+import { forbiddenResponse, getSession, hasPermission, unauthorizedResponse } from "@/lib/auth-middleware"
 export async function GET(request: NextRequest) {
   const session = await getSession(request); if (!session) return unauthorizedResponse()
+  if (!hasPermission(session, "vault.overview.view")) return forbiddenResponse()
   const [items, demands, mine, purchases, stock, quantities] = await Promise.all([
     db.item.count({ where: { status: "ACTIVE" } }), db.demand.count({ where: { state: { in: ["SUBMITTED", "ACTIVE"] } } }),
     db.demand.count({ where: { requestedById: session.user.id, state: { in: ["SUBMITTED", "ACTIVE"] } } }),

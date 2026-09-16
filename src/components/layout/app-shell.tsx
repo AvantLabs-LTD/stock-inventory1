@@ -14,13 +14,14 @@ import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Toaster } from "@/components/ui/sonner"
 import { ThemeProvider } from "@/components/theme-provider"
+import { FluxHome, PlannedModule } from "@/components/layout/flux-home"
 
 function LoadingScreen() {
   return (
     <div className="flex min-h-screen items-center justify-center">
       <div className="space-y-4 text-center">
         <div className="flex size-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground font-bold mx-auto">
-          IP
+          F
         </div>
         <Skeleton className="h-4 w-48 mx-auto" />
         <p className="text-sm text-muted-foreground">Loading...</p>
@@ -31,8 +32,23 @@ function LoadingScreen() {
 
 function PageContent() {
   const currentPage = useAppStore((s) => s.currentPage)
+  const permissions = useAuthStore(state => state.user?.permissions || [])
+
+  const required: Partial<Record<typeof currentPage, string>> = {
+    dashboard: "vault.overview.view", items: "vault.catalogue.view", demands: "vault.demands.view",
+    inventory: "vault.stock.view", purchasing: "vault.purchasing.view",
+    users: "flux.users.manage", "reference-data": "vault.reference.manage",
+  }
+  if (required[currentPage] && !permissions.includes(required[currentPage])) {
+    return <div className="p-8 text-sm text-muted-foreground">You do not have access to Vault.</div>
+  }
 
   switch (currentPage) {
+    case 'flux': return <FluxHome />
+    case 'cargo': return <PlannedModule name="Cargo" />
+    case 'orders': return <PlannedModule name="Orders" />
+    case 'people': return <PlannedModule name="People" />
+    case 'ledger': return <PlannedModule name="Ledger" />
     case 'items':
       return <ItemsPage />
     case 'demands':
@@ -46,18 +62,25 @@ function PageContent() {
     case 'users':
       return <UsersPage />
     case 'dashboard':
-    default:
       return <OverviewPage />
+    default:
+      return <FluxHome />
   }
 }
 
 function AppContent() {
   const { user, isLoading, fetchUser } = useAuthStore()
+  const syncFromLocation = useAppStore(state => state.syncFromLocation)
   const [changePasswordOpen, setChangePasswordOpen] = useState(false)
 
   useEffect(() => {
     fetchUser()
   }, [fetchUser])
+  useEffect(() => {
+    syncFromLocation()
+    window.addEventListener("popstate", syncFromLocation)
+    return () => window.removeEventListener("popstate", syncFromLocation)
+  }, [syncFromLocation])
 
   if (isLoading) return <LoadingScreen />
 

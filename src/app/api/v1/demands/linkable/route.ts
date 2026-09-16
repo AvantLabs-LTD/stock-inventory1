@@ -1,10 +1,10 @@
 import { NextRequest } from "next/server"
 import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
-import { getSession, unauthorizedResponse } from "@/lib/auth-middleware"
+import { forbiddenResponse, getSession, hasPermission, unauthorizedResponse } from "@/lib/auth-middleware"
 
 export async function GET(request: NextRequest) {
-  if (!await getSession(request)) return unauthorizedResponse()
+  const session = await getSession(request); if (!session) return unauthorizedResponse(); if (!hasPermission(session, "vault.demands.view")) return forbiddenResponse()
   const itemId = request.nextUrl.searchParams.get("itemId") || undefined
   const query = request.nextUrl.searchParams.get("q")?.trim()
   const rows = await db.$queryRaw<Array<Record<string, Prisma.Decimal | string | Date | null>>>(Prisma.sql`

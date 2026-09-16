@@ -5,6 +5,8 @@ export interface User {
   email: string
   name: string
   role: 'SUPER_ADMIN' | 'INVENTORY_MANAGER' | 'PURCHASE_APPROVER' | 'USER'
+  groups: Array<{ id: string; name: string }>
+  permissions: string[]
 }
 
 interface AuthState {

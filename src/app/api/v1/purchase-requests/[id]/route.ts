@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server"
 import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
-import { forbiddenResponse, getSession, hasRole, unauthorizedResponse } from "@/lib/auth-middleware"
+import { forbiddenResponse, getSession, hasPermission, unauthorizedResponse } from "@/lib/auth-middleware"
 import { apiError, DomainError, normalizeName } from "@/lib/inventory-service"
 
 const detailInclude = {
@@ -16,7 +16,7 @@ const detailInclude = {
 } as const
 
 export async function GET(request: NextRequest, context: { params: Promise<{ id: string }> }) {
-  if (!await getSession(request)) return unauthorizedResponse()
+  const session = await getSession(request); if (!session) return unauthorizedResponse(); if (!hasPermission(session, "vault.purchasing.view")) return forbiddenResponse()
   const { id } = await context.params
   const purchase = await db.purchaseRequest.findUnique({ where: { id }, include: detailInclude })
   if (!purchase) return Response.json({ error: "Purchase request not found" }, { status: 404 })
@@ -46,7 +46,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
 export async function PATCH(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const session = await getSession(request)
   if (!session) return unauthorizedResponse()
-  if (!hasRole(session, "INVENTORY_MANAGER")) return forbiddenResponse()
+  if (!hasPermission(session, "vault.purchasing.manage")) return forbiddenResponse()
   try {
     const { id } = await context.params
     const body = await request.json()

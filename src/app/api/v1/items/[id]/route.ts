@@ -1,10 +1,10 @@
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
-import { forbiddenResponse, getSession, hasRole, unauthorizedResponse } from "@/lib/auth-middleware"
+import { forbiddenResponse, getSession, hasPermission, unauthorizedResponse } from "@/lib/auth-middleware"
 import { apiError } from "@/lib/inventory-service"
 
 export async function GET(request: NextRequest, context: { params: Promise<{ id: string }> }) {
-  if (!await getSession(request)) return unauthorizedResponse()
+  const session = await getSession(request); if (!session) return unauthorizedResponse(); if (!hasPermission(session, "vault.catalogue.view")) return forbiddenResponse()
   const { id } = await context.params
   const item = await db.item.findUnique({ where: { id }, include: {
     balance: true, category: { include: { parent: true } },
@@ -21,7 +21,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
 export async function PATCH(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const session = await getSession(request)
   if (!session) return unauthorizedResponse()
-  if (!hasRole(session, "INVENTORY_MANAGER")) return forbiddenResponse()
+  if (!hasPermission(session, "vault.catalogue.manage")) return forbiddenResponse()
   try {
     const { id } = await context.params
     const body = await request.json()

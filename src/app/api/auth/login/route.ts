@@ -16,6 +16,7 @@ export async function POST(request: NextRequest) {
 
     const user = await db.user.findUnique({
       where: { email: email.toLowerCase().trim() },
+      include: { accessGroups: { include: { group: { include: { permissions: { select: { permissionKey: true } } } } } } },
     })
 
     if (!user) {
@@ -52,6 +53,8 @@ export async function POST(request: NextRequest) {
         email: user.email,
         name: user.name,
         role: user.role,
+        groups: user.accessGroups.map(membership => ({ id: membership.group.id, name: membership.group.name })),
+        permissions: [...new Set(user.accessGroups.flatMap(membership => membership.group.permissions.map(entry => entry.permissionKey)))],
       },
     })
 

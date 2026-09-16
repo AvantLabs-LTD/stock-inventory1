@@ -1,11 +1,11 @@
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
-import { forbiddenResponse, getSession, hasRole, unauthorizedResponse } from "@/lib/auth-middleware"
+import { forbiddenResponse, getSession, hasPermission, unauthorizedResponse } from "@/lib/auth-middleware"
 import { apiError, DomainError } from "@/lib/inventory-service"
 export async function PATCH(request: NextRequest, context: { params: Promise<{ lineId: string }> }) {
   const session = await getSession(request)
   if (!session) return unauthorizedResponse()
-  if (!hasRole(session, "INVENTORY_MANAGER")) return forbiddenResponse()
+  if (!hasPermission(session, "vault.demands.manage")) return forbiddenResponse()
   try {
     const { lineId } = await context.params; const body = await request.json()
     const existing = await db.demandLine.findUnique({ where: { id: lineId }, include: { reservations: true, issueLines: true } })

@@ -1,16 +1,16 @@
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
-import { forbiddenResponse, getSession, hasRole, unauthorizedResponse } from "@/lib/auth-middleware"
+import { forbiddenResponse, getSession, hasPermission, unauthorizedResponse } from "@/lib/auth-middleware"
 import { MAX_UPLOAD_BYTES } from "@/lib/upload-limits"
 import { apiError, DomainError } from "@/lib/inventory-service"
 const allowed = new Set(["application/pdf","image/png","image/jpeg","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"])
 export async function GET(request:NextRequest,context:{params:Promise<{id:string}>}) {
-  if(!await getSession(request))return unauthorizedResponse();const {id}=await context.params
+  const session = await getSession(request); if (!session) return unauthorizedResponse(); if (!hasPermission(session, "vault.documents.view")) return forbiddenResponse();const {id}=await context.params
   return Response.json({attachments:await db.attachment.findMany({where:{purchaseRequestId:id},select:{id:true,kind:true,fileName:true,contentType:true,sizeBytes:true,createdAt:true,uploadedBy:{select:{name:true}}},orderBy:{createdAt:"desc"}})})
 }
 export async function POST(request:NextRequest,context:{params:Promise<{id:string}>}) {
   const session=await getSession(request);if(!session)return unauthorizedResponse()
-  if(!hasRole(session,"INVENTORY_MANAGER"))return forbiddenResponse()
+  if(!hasPermission(session,"vault.documents.manage"))return forbiddenResponse()
   try{const {id}=await context.params;const form=await request.formData();const file=form.get("file")
     if(!(file instanceof File))throw new DomainError("FILE_REQUIRED","Select a file")
     if(file.size<=0||file.size>MAX_UPLOAD_BYTES)throw new DomainError("FILE_TOO_LARGE","File must be between 1 byte and 5 MB",413)

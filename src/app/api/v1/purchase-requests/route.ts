@@ -1,13 +1,13 @@
 import { NextRequest } from "next/server"
 import { Prisma, ProcurementType } from "@prisma/client"
 import { db } from "@/lib/db"
-import { forbiddenResponse, getSession, hasRole, unauthorizedResponse } from "@/lib/auth-middleware"
+import { forbiddenResponse, getSession, hasPermission, unauthorizedResponse } from "@/lib/auth-middleware"
 import { apiError, DomainError, normalizeName } from "@/lib/inventory-service"
 import { createIncompleteItem } from "@/lib/item-service"
 import { validateDemandCoverage } from "@/lib/purchase-service"
 
 export async function GET(request: NextRequest) {
-  if (!await getSession(request)) return unauthorizedResponse()
+  const session = await getSession(request); if (!session) return unauthorizedResponse(); if (!hasPermission(session, "vault.purchasing.view")) return forbiddenResponse()
   const requests = await db.purchaseRequest.findMany({ include: {
     vendor: true, createdBy: { select: { id: true, name: true } },
     lines: { include: { item: { include: { category: true } }, demandLinks: { include: { demandLine: { include: { demand: { include: { departmentTag: true, requestedBy: { select: { name: true } } } }, projectTag: true } } } }, receiptLines: true } },
@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const session = await getSession(request); if (!session) return unauthorizedResponse()
-  if (!hasRole(session, "INVENTORY_MANAGER")) return forbiddenResponse()
+  if (!hasPermission(session, "vault.purchasing.manage")) return forbiddenResponse()
   try {
     const body = await request.json()
     if (!body.lines?.length) throw new DomainError("PURCHASE_LINES_REQUIRED", "At least one purchase row is required")

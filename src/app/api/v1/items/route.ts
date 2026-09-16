@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server"
 import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
-import { forbiddenResponse, getSession, hasRole, unauthorizedResponse } from "@/lib/auth-middleware"
+import { forbiddenResponse, getSession, hasPermission, unauthorizedResponse } from "@/lib/auth-middleware"
 import { apiError } from "@/lib/inventory-service"
 import { tokenizeItemSearch } from "@/lib/item-search"
 import { createCatalogueItem } from "@/lib/item-service"
@@ -34,7 +34,7 @@ async function categoryDescendants(input: { id?: string; query?: string }) {
 }
 
 export async function GET(request: NextRequest) {
-  if (!await getSession(request)) return unauthorizedResponse()
+  const session = await getSession(request); if (!session) return unauthorizedResponse(); if (!hasPermission(session, "vault.catalogue.view")) return forbiddenResponse()
   const q = request.nextUrl.searchParams.get("q")?.trim()
   const rootCategoryId = request.nextUrl.searchParams.get("rootCategoryId") || undefined
   const categoryId = request.nextUrl.searchParams.get("categoryId") || undefined
@@ -122,7 +122,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const session = await getSession(request)
   if (!session) return unauthorizedResponse()
-  if (!hasRole(session, "INVENTORY_MANAGER")) return forbiddenResponse()
+  if (!hasPermission(session, "vault.catalogue.manage")) return forbiddenResponse()
   try {
     const body = await request.json()
     if (!body.title?.trim() || !["MECHANICAL", "ELECTRONICS"].includes(body.discipline)) {

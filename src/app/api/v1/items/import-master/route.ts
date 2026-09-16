@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server"
 import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
-import { forbiddenResponse, getSession, hasRole, unauthorizedResponse } from "@/lib/auth-middleware"
+import { forbiddenResponse, getSession, hasPermission, unauthorizedResponse } from "@/lib/auth-middleware"
 import { apiError, DomainError, normalizeName } from "@/lib/inventory-service"
 import { parseInventoryMaster } from "@/lib/inventory-master-import"
 import { reconciliationFileHash } from "@/lib/inventory-master-reconciliation"
@@ -21,7 +21,7 @@ async function workbookBuffer(value: FormDataEntryValue | null, fieldName: strin
 export async function POST(request: NextRequest) {
   const session = await getSession(request)
   if (!session) return unauthorizedResponse()
-  if (!hasRole(session, "INVENTORY_MANAGER")) return forbiddenResponse()
+  if (!hasPermission(session, "vault.catalogue.import")) return forbiddenResponse()
   try {
     const form = await request.formData()
     const mode = String(form.get("mode") || "preview")

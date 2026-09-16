@@ -17,6 +17,7 @@ import {
 import { Separator } from '@/components/ui/separator'
 import { SidebarTrigger } from '@/components/ui/sidebar'
 import { useAuthStore } from '@/stores/auth-store'
+import { useAppStore } from '@/stores/app-store'
 
 interface TopBarProps {
   onChangePassword?: () => void
@@ -25,6 +26,7 @@ interface TopBarProps {
 export function TopBar({ onChangePassword }: TopBarProps) {
   const { setTheme, theme } = useTheme()
   const { user, logout } = useAuthStore()
+  const currentPage = useAppStore(state => state.currentPage)
   const mounted = useSyncExternalStore(() => () => {}, () => true, () => false)
   if (!user) return null
 
@@ -35,7 +37,7 @@ export function TopBar({ onChangePassword }: TopBarProps) {
       <SidebarTrigger className="-ml-1" />
       <Separator orientation="vertical" className="mr-2 h-4" />
       <div className="flex-1 text-sm font-medium text-muted-foreground">
-        Store Management
+        {currentPage === 'flux' ? 'Flux ERP' : ['cargo', 'orders', 'people', 'ledger'].includes(currentPage) ? `Flux · ${currentPage[0].toUpperCase()}${currentPage.slice(1)}` : 'Flux · Vault'}
       </div>
       {mounted && (
         <Button variant="ghost" size="icon" className="size-8" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>

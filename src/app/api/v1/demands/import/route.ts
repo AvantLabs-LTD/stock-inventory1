@@ -2,12 +2,13 @@ import { NextRequest } from "next/server"
 import * as XLSX from "xlsx"
 import { ProcurementType } from "@prisma/client"
 import { db } from "@/lib/db"
-import { getSession, unauthorizedResponse } from "@/lib/auth-middleware"
+import { forbiddenResponse, getSession, hasPermission, unauthorizedResponse } from "@/lib/auth-middleware"
 import { apiError, createDemand, DomainError, normalizeName } from "@/lib/inventory-service"
 import { MAX_UPLOAD_BYTES } from "@/lib/upload-limits"
 
 export async function POST(request: NextRequest) {
   const session = await getSession(request); if (!session) return unauthorizedResponse()
+  if (!hasPermission(session, "vault.demands.create")) return forbiddenResponse()
   try {
     const form = await request.formData(); const file = form.get("file")
     if (!(file instanceof File)) throw new DomainError("FILE_REQUIRED", "Select an .xlsx file")

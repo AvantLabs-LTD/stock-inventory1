@@ -12,7 +12,7 @@ async function main() {
     throw new Error('SEED_ADMIN_EMAIL, SEED_ADMIN_NAME, and a SEED_ADMIN_PASSWORD of at least 12 characters are required')
   }
 
-  await prisma.user.upsert({
+  const user = await prisma.user.upsert({
     where: { email },
     update: { name, status: 'ACTIVE', role: 'SUPER_ADMIN' },
     create: {
@@ -22,6 +22,11 @@ async function main() {
       status: 'ACTIVE',
       role: 'SUPER_ADMIN',
     },
+  })
+  await prisma.userAccessGroup.upsert({
+    where: { userId_groupId: { userId: user.id, groupId: 'flux_admin' } },
+    update: {},
+    create: { userId: user.id, groupId: 'flux_admin' },
   })
 }
 

@@ -20,7 +20,7 @@ const prisma = new PrismaClient()
 try {
   const existing = await prisma.user.findUnique({ where: { email } })
   if (!existing) {
-    await prisma.user.create({
+    const created = await prisma.user.create({
       data: {
         email,
         name,
@@ -29,11 +29,17 @@ try {
         role: 'SUPER_ADMIN',
       },
     })
+    await prisma.userAccessGroup.create({ data: { userId: created.id, groupId: 'flux_admin' } })
     console.log(`Created bootstrap administrator: ${email}`)
   } else {
     if (existing.role !== 'SUPER_ADMIN') {
       await prisma.user.update({ where: { id: existing.id }, data: { role: 'SUPER_ADMIN', status: 'ACTIVE' } })
     }
+    await prisma.userAccessGroup.upsert({
+      where: { userId_groupId: { userId: existing.id, groupId: 'flux_admin' } },
+      update: {},
+      create: { userId: existing.id, groupId: 'flux_admin' },
+    })
     console.log(`Bootstrap administrator already exists: ${email}`)
   }
 } finally {
