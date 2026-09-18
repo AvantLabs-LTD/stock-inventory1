@@ -1,11 +1,12 @@
 // Read-only inspection of a PakLogix SQLite snapshot and its uploads directory.
-// Usage: node scripts/cargo-import-preflight.mjs <snapshot-directory>
+// Usage: node scripts/cargo-import-preflight.mjs <snapshot-directory> [--defer-missing-photos]
 import { createHash } from "node:crypto"
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
 import { resolve, relative, sep, join } from "node:path"
 import { execFileSync } from "node:child_process"
 
 const root = resolve(process.argv[2] || "")
+const deferMissingPhotos = process.argv.includes("--defer-missing-photos")
 if (!process.argv[2] || !existsSync(join(root, "custom.db")) || !existsSync(join(root, "uploads"))) {
   throw new Error("Pass a snapshot directory containing custom.db and uploads/")
 }
@@ -53,6 +54,12 @@ for (const photo of photos) {
   photoHashes.push({ sourceId: photo.id, sha256: createHash("sha256").update(readFileSync(candidate)).digest("hex"), bytes })
 }
 const unreferencedUploads = walk(uploadRoot).filter(path => !referencedPaths.has(resolve(path))).map(path => relative(root, path).replaceAll(sep, "/"))
+const repairManifestPath = join(root, "missing-photos.csv")
+const manifestPhotoIds = existsSync(repairManifestPath)
+  ? readFileSync(repairManifestPath, "utf8").trim().split(/\r?\n/).slice(1).map(line => line.split(",")[1])
+  : []
+const missingPhotoIds = missingPhotos.map(photo => photo.sourceId).sort()
+const manifestMatches = manifestPhotoIds.length === missingPhotoIds.length && manifestPhotoIds.sort().every((id, index) => id === missingPhotoIds[index])
 const groupingCandidates = query(`SELECT TRIM("trackingNumber") AS tracking, COUNT(*) AS packageCount
   FROM "Package" WHERE "trackingNumber" IS NOT NULL AND TRIM("trackingNumber") <> ''
   GROUP BY TRIM("trackingNumber") HAVING COUNT(*) > 1 ORDER BY packageCount DESC`)
@@ -68,11 +75,11 @@ const report = {
   sqlite: { integrity: integrity[0]?.integrity_check, foreignKeyViolations: foreignKeys.length },
   counts, statuses: statuses.map(row => ({ ...row, cargoStage: statusMap[row.status] || null })),
   latestStatusMismatches: latestMismatch,
-  photos: { referenced: photos.length, verified: photoHashes.length, missing: missingPhotos, outsideLimit: oversizedPhotos, unreferencedUploadCount: unreferencedUploads.length, unreferencedUploads, hashes: photoHashes },
+  photos: { referenced: photos.length, verified: photoHashes.length, missing: missingPhotos, outsideLimit: oversizedPhotos, deferredByOperator: deferMissingPhotos, repairManifestMatches: manifestMatches, unreferencedUploadCount: unreferencedUploads.length, unreferencedUploads, hashes: photoHashes },
   groupingCandidates,
   tracking: { exactPackageTrackingMatches: trackingMatches, amountsWithoutExplicitCurrency: ambiguousTrackingCharges },
   invoices: { count: invoiceLinkage.count, linkedToTracking: invoiceLinkage.linked || 0 },
-  readyForImportRehearsal: integrity[0]?.integrity_check === "ok" && foreignKeys.length === 0 && !missingPhotos.length && !oversizedPhotos.length && !latestMismatch.length && !unmappedStatuses.length,
+  readyForImportRehearsal: integrity[0]?.integrity_check === "ok" && foreignKeys.length === 0 && (!missingPhotos.length || (deferMissingPhotos && manifestMatches)) && !oversizedPhotos.length && !latestMismatch.length && !unmappedStatuses.length,
 }
 process.stdout.write(JSON.stringify(report, null, 2) + "\n")
 if (!report.readyForImportRehearsal) process.exitCode = 2
