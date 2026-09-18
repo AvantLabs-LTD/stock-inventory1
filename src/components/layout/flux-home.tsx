@@ -8,7 +8,7 @@ import { Card, CardContent } from "@/components/ui/card"
 
 const modules: Array<{ page: AppPage; title: string; subtitle: string; icon: typeof Boxes; permission?: string; available: boolean }> = [
   { page: "dashboard", title: "Vault", subtitle: "Inventory, stock movements and demands", icon: Boxes, permission: "vault.overview.view", available: true },
-  { page: "cargo", title: "Cargo", subtitle: "Packages and shipment journeys", icon: Package, available: false },
+  { page: "cargo", title: "Cargo", subtitle: "Packages and shipment journeys", icon: Package, permission: "cargo.view", available: true },
   { page: "orders", title: "Orders", subtitle: "Procurement", icon: ShoppingCart, available: false },
   { page: "people", title: "People", subtitle: "HR", icon: Users, available: false },
   { page: "ledger", title: "Ledger", subtitle: "Finance", icon: Wallet, available: false },

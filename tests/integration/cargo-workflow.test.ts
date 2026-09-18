@@ -1,0 +1,70 @@
+import test from "node:test"
+import assert from "node:assert/strict"
+import { PrismaClient } from "@prisma/client"
+import { CargoError, cargoReport, cargoShipmentDetail, executeCargoAction } from "../../src/lib/cargo-service"
+
+const enabled = Boolean(process.env.DATABASE_URL)
+const prisma = new PrismaClient()
+
+test("Cargo shipment identity, journey locking, costs and cross-shipment links", { skip: !enabled }, async () => {
+  const suffix = Date.now().toString()
+  const user = await prisma.user.create({ data: { email: `cargo-${suffix}@test.local`, name: "Cargo Test", password: "not-used" } })
+  const actor = { id: user.id, name: user.name }
+  const first = await executeCargoAction("package.create", { route: "DIRECT", weight: 2.5, length: 10, width: 20, height: 30 }, actor)
+  assert.ok(first && "shipmentId" in first)
+  const firstShipmentId = String(first.shipmentId)
+  const second = await executeCargoAction("shipment.create", { route: "DIRECT" }, actor)
+  assert.ok(second && "id" in second)
+  const secondShipmentId = String(second.id)
+  const shared = await executeCargoAction("package.create", { shipmentId: firstShipmentId }, actor)
+  assert.ok(shared && "id" in shared)
+  const item = await executeCargoAction("item.save", { packageId: String(shared.id), description: "Part", quantity: 4 }, actor)
+  assert.ok(item && "id" in item)
+
+  const invoice = await executeCargoAction("invoice.save", { shipmentId: firstShipmentId, packageId: String(shared.id), currency: "USD", totalAmount: 120, invoiceNo: "I-1" }, actor)
+  assert.ok(invoice && "id" in invoice)
+  const charge = await executeCargoAction("charge.save", { shipmentId: firstShipmentId, invoiceId: String(invoice.id), category: "INTERNATIONAL_FREIGHT", amount: 100, currency: "USD", pkrEquivalent: 28000, pkrNote: "Bank settlement" }, actor)
+  assert.ok(charge && "id" in charge)
+  const detail = await cargoShipmentDetail(firstShipmentId, ["cargo.view", "cargo.costs.view", "cargo.documents.view"])
+  assert.equal(detail?.packages.length, 2)
+  assert.equal(detail?.charges?.[0].amount.toString(), "100")
+  assert.equal(detail?.invoices?.[0].totalAmount?.toString(), "120")
+  assert.equal((await cargoShipmentDetail(firstShipmentId, ["cargo.view"]))?.charges, undefined)
+  const report = await cargoReport(true)
+  assert.ok(report.charges.some(row => row.category === "INTERNATIONAL_FREIGHT" && row.currency === "USD" && Number(row.amount) >= 100))
+  assert.deepEqual((await cargoReport(false)).charges, [])
+
+  await assert.rejects(executeCargoAction("invoice.save", { shipmentId: secondShipmentId, packageId: String(shared.id), currency: "USD", totalAmount: 1 }, actor))
+  await assert.rejects(executeCargoAction("package.reassign", { id: String(shared.id), shipmentId: secondShipmentId }, actor), (error: unknown) => error instanceof CargoError && error.code === "PACKAGE_HAS_HISTORY")
+  await executeCargoAction("milestone.post", { shipmentId: secondShipmentId, stage: "IN_INTERNATIONAL_TRANSIT", occurredAt: new Date(Date.now() + 1000).toISOString() }, actor)
+  await assert.rejects(executeCargoAction("package.reassign", { id: String(first.id), shipmentId: secondShipmentId }, actor), (error: unknown) => error instanceof CargoError && error.code === "JOURNEY_LOCKED")
+  await assert.rejects(executeCargoAction("milestone.post", { shipmentId: secondShipmentId, stage: "CUSTOMS_CLEARED", occurredAt: new Date(Date.now() + 2000).toISOString() }, actor), (error: unknown) => error instanceof CargoError && error.code === "INVALID_STAGE")
+  assert.equal(await prisma.cargoMilestone.count({ where: { shipmentId: secondShipmentId } }), 2)
+  assert.ok(await prisma.auditLog.count({ where: { userId: user.id, action: { startsWith: "CARGO_" } } }) >= 6)
+})
+
+test("forwarded routes require correct warehouse and advance through source", { skip: !enabled }, async () => {
+  const suffix = Date.now().toString()
+  const user = await prisma.user.create({ data: { email: `cargo-forward-${suffix}@test.local`, name: "Cargo Test", password: "not-used" } })
+  const actor = { id: user.id, name: user.name }
+  const forwarder = await executeCargoAction("reference.create", { kind: "forwarder", name: `Forwarder ${suffix}` }, actor)
+  const other = await executeCargoAction("reference.create", { kind: "forwarder", name: `Other ${suffix}` }, actor)
+  assert.ok(forwarder && "id" in forwarder && other && "id" in other)
+  const warehouse = await executeCargoAction("reference.create", { kind: "warehouse", name: `Warehouse ${suffix}`, forwarderId: String(forwarder.id) }, actor)
+  assert.ok(warehouse && "id" in warehouse)
+  await assert.rejects(executeCargoAction("shipment.create", { route: "FORWARDED", forwarderId: String(other.id), sourceWarehouseId: String(warehouse.id) }, actor))
+  const shipment = await executeCargoAction("shipment.create", { route: "FORWARDED", forwarderId: String(forwarder.id), sourceWarehouseId: String(warehouse.id) }, actor)
+  assert.ok(shipment && "id" in shipment)
+  const autoSelected = await executeCargoAction("shipment.create", { route: "FORWARDED", forwarderId: String(forwarder.id) }, actor)
+  assert.ok(autoSelected && "sourceWarehouseId" in autoSelected)
+  assert.equal(autoSelected.sourceWarehouseId, warehouse.id)
+  const movable = await executeCargoAction("package.create", { shipmentId: String(shipment.id) }, actor)
+  assert.ok(movable && "id" in movable)
+  await executeCargoAction("package.reassign", { id: String(movable.id), shipmentId: String(autoSelected.id) }, actor)
+  assert.equal((await prisma.cargoPackage.findUniqueOrThrow({ where: { id: String(movable.id) } })).shipmentId, autoSelected.id)
+  await assert.rejects(executeCargoAction("milestone.post", { shipmentId: String(shipment.id), stage: "IN_INTERNATIONAL_TRANSIT", occurredAt: new Date(Date.now() + 1000).toISOString() }, actor))
+  await executeCargoAction("milestone.post", { shipmentId: String(shipment.id), stage: "TO_SOURCE_WAREHOUSE", occurredAt: new Date(Date.now() + 1000).toISOString() }, actor)
+  assert.equal((await prisma.cargoMilestone.findMany({ where: { shipmentId: String(shipment.id) }, orderBy: { sequence: "asc" } })).at(-1)?.stage, "TO_SOURCE_WAREHOUSE")
+  await executeCargoAction("tracking.save", { shipmentId: String(autoSelected.id), kind: "SOURCE_INLAND", trackingNumber: "CN-1" }, actor)
+  await assert.rejects(executeCargoAction("package.reassign", { id: String(movable.id), shipmentId: String(shipment.id) }, actor), (error: unknown) => error instanceof CargoError && error.code === "JOURNEY_LOCKED")
+})

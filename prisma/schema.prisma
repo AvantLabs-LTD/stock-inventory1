@@ -86,6 +86,49 @@ enum AttachmentKind {
   OTHER
 }
 
+enum CargoRoute {
+  DIRECT
+  FORWARDED
+}
+
+enum CargoStage {
+  AT_VENDOR
+  TO_SOURCE_WAREHOUSE
+  AT_SOURCE_WAREHOUSE
+  IN_INTERNATIONAL_TRANSIT
+  ARRIVED_IN_COUNTRY
+  CUSTOMS_PENDING
+  CUSTOMS_CLEARED
+  OUT_FOR_DELIVERY
+  RECEIVED
+}
+
+enum CargoLegKind {
+  SOURCE_INLAND
+  INTERNATIONAL
+  CUSTOMS
+  DESTINATION_INLAND
+}
+
+enum CargoChargeCategory {
+  SOURCE_INLAND
+  INTERNATIONAL_FREIGHT
+  CUSTOMS_DUTY
+  CUSTOMS_CLEARANCE
+  DESTINATION_INLAND
+  HANDLING
+  OTHER
+}
+
+enum CargoFileKind {
+  CONTENT_PHOTO
+  CARTON_PHOTO
+  INVOICE
+  RECEIPT
+  SHIPPING_DOCUMENT
+  OTHER
+}
+
 model User {
   id                   String                   @id @default(cuid())
   email                String                   @unique
@@ -115,6 +158,11 @@ model User {
   attachmentsUploaded  Attachment[]             @relation("AttachmentUploadedBy")
   auditLogs            AuditLog[]
   accessGroups         UserAccessGroup[]
+  cargoShipmentsCreated CargoShipment[]          @relation("CargoShipmentCreatedBy")
+  cargoMilestonesPosted CargoMilestone[]         @relation("CargoMilestonePostedBy")
+  cargoInvoicesCreated  CargoInvoice[]           @relation("CargoInvoiceCreatedBy")
+  cargoChargesCreated   CargoCharge[]            @relation("CargoChargeCreatedBy")
+  cargoFilesUploaded    CargoFile[]              @relation("CargoFileUploadedBy")
 }
 
 model Permission {
@@ -222,6 +270,7 @@ model Vendor {
   updatedAt        DateTime          @updatedAt
   demandLines      DemandLine[]
   purchaseRequests PurchaseRequest[]
+  cargoPackages    CargoPackage[]
 
   @@index([name])
   @@map("vendors")
@@ -647,4 +696,244 @@ model AuditLog {
 
   @@index([date])
   @@map("audit_logs")
+}
+
+// Cargo owns shipment journeys. Packages are physical cartons; every package
+// belongs to exactly one shipment, including when it is the only carton.
+model CargoForwarder {
+  id             String                 @id @default(cuid())
+  name           String
+  normalizedName String                 @unique
+  contactPerson  String?
+  phone          String?
+  email          String?
+  notes          String?
+  status         RecordStatus           @default(ACTIVE)
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+  warehouses     CargoSourceWarehouse[]
+  shipments      CargoShipment[]
+
+  @@map("cargo_forwarders")
+}
+
+model CargoSourceWarehouse {
+  id             String          @id @default(cuid())
+  forwarderId    String
+  name           String
+  normalizedName String
+  address        String?
+  notes          String?
+  status         RecordStatus    @default(ACTIVE)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  forwarder      CargoForwarder  @relation(fields: [forwarderId], references: [id], onDelete: Restrict)
+  shipments      CargoShipment[]
+
+  @@unique([forwarderId, normalizedName])
+  @@unique([id, forwarderId])
+  @@map("cargo_source_warehouses")
+}
+
+model CargoCourier {
+  id             String       @id @default(cuid())
+  name           String
+  normalizedName String       @unique
+  code           String?      @unique
+  phone          String?
+  website        String?
+  notes          String?
+  status         RecordStatus @default(ACTIVE)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  trackingLegs   CargoTrackingLeg[]
+
+  @@map("cargo_couriers")
+}
+
+model CargoShipment {
+  id                String                @id @default(cuid())
+  shipmentNo        String                @unique
+  route             CargoRoute
+  forwarderId       String?
+  sourceWarehouseId String?
+  createdById       String
+  notes             String?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  forwarder         CargoForwarder?       @relation(fields: [forwarderId], references: [id], onDelete: Restrict)
+  sourceWarehouse   CargoSourceWarehouse? @relation(fields: [sourceWarehouseId, forwarderId], references: [id, forwarderId], onDelete: Restrict)
+  createdBy         User                  @relation("CargoShipmentCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  packages          CargoPackage[]
+  milestones        CargoMilestone[]
+  trackingLegs      CargoTrackingLeg[]
+  invoices          CargoInvoice[]
+  charges           CargoCharge[]
+  files             CargoFile[]
+
+  @@index([forwarderId])
+  @@index([sourceWarehouseId])
+  @@map("cargo_shipments")
+}
+
+model CargoPackage {
+  id             String             @id @default(cuid())
+  packageNo      String             @unique
+  shipmentId     String
+  vendorId       String?
+  weight         Decimal?           @db.Decimal(12, 3)
+  verifiedWeight Decimal?           @db.Decimal(12, 3)
+  length         Decimal?           @db.Decimal(12, 2)
+  width          Decimal?           @db.Decimal(12, 2)
+  height         Decimal?           @db.Decimal(12, 2)
+  notes          String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  shipment       CargoShipment      @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  vendor         Vendor?            @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  items          CargoPackageItem[]
+  invoices       CargoInvoice[]
+  charges        CargoCharge[]
+  files          CargoFile[]
+
+  @@index([shipmentId])
+  @@unique([id, shipmentId])
+  @@index([vendorId])
+  @@map("cargo_packages")
+}
+
+model CargoPackageItem {
+  id          String       @id @default(cuid())
+  packageId   String
+  description String
+  quantity    Decimal      @db.Decimal(18, 3)
+  notes       String?
+  sortOrder   Int          @default(0)
+  createdAt   DateTime     @default(now())
+  package     CargoPackage @relation(fields: [packageId], references: [id], onDelete: Restrict)
+
+  @@index([packageId, sortOrder])
+  @@map("cargo_package_items")
+}
+
+model CargoMilestone {
+  id          String        @id @default(cuid())
+  shipmentId  String
+  sequence    Int
+  stage       CargoStage
+  occurredAt  DateTime
+  location    String?
+  remarks     String?
+  postedById  String?
+  createdAt   DateTime      @default(now())
+  shipment    CargoShipment @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  postedBy    User?         @relation("CargoMilestonePostedBy", fields: [postedById], references: [id], onDelete: SetNull)
+
+  @@unique([shipmentId, sequence])
+  @@index([stage, occurredAt])
+  @@map("cargo_milestones")
+}
+
+model CargoTrackingLeg {
+  id             String        @id @default(cuid())
+  shipmentId     String
+  sequence       Int
+  kind           CargoLegKind
+  courierId      String?
+  trackingNumber String?
+  dispatchedAt   DateTime?
+  arrivedAt      DateTime?
+  remarks        String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  shipment       CargoShipment @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  courier        CargoCourier? @relation(fields: [courierId], references: [id], onDelete: Restrict)
+  invoices       CargoInvoice[]
+  charges        CargoCharge[]
+
+  @@unique([shipmentId, sequence])
+  @@unique([id, shipmentId])
+  @@index([courierId])
+  @@index([trackingNumber])
+  @@map("cargo_tracking_legs")
+}
+
+model CargoInvoice {
+  id            String            @id @default(cuid())
+  shipmentId    String
+  packageId     String?
+  trackingLegId String?
+  invoiceNo     String?
+  sourceName    String?
+  invoiceDate   DateTime?
+  totalAmount   Decimal?          @db.Decimal(18, 4)
+  currency      String            @default("PKR") @db.VarChar(3)
+  notes         String?
+  createdById   String
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  shipment      CargoShipment     @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  package       CargoPackage?     @relation(fields: [packageId, shipmentId], references: [id, shipmentId], onDelete: Restrict)
+  trackingLeg   CargoTrackingLeg? @relation(fields: [trackingLegId, shipmentId], references: [id, shipmentId], onDelete: Restrict)
+  createdBy     User              @relation("CargoInvoiceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  charges       CargoCharge[]
+  files         CargoFile[]
+
+  @@index([shipmentId])
+  @@index([packageId])
+  @@index([trackingLegId])
+  @@unique([id, shipmentId])
+  @@map("cargo_invoices")
+}
+
+model CargoCharge {
+  id             String              @id @default(cuid())
+  shipmentId     String
+  packageId      String?
+  trackingLegId  String?
+  invoiceId      String?
+  category       CargoChargeCategory
+  amount         Decimal             @db.Decimal(18, 4)
+  currency       String              @db.VarChar(3)
+  pkrEquivalent  Decimal?            @db.Decimal(18, 4)
+  pkrNote        String?
+  remarks        String?
+  createdById    String
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  shipment       CargoShipment       @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  package        CargoPackage?       @relation(fields: [packageId, shipmentId], references: [id, shipmentId], onDelete: Restrict)
+  trackingLeg    CargoTrackingLeg?   @relation(fields: [trackingLegId, shipmentId], references: [id, shipmentId], onDelete: Restrict)
+  invoice        CargoInvoice?       @relation(fields: [invoiceId, shipmentId], references: [id, shipmentId], onDelete: Restrict)
+  createdBy      User                @relation("CargoChargeCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([shipmentId])
+  @@index([packageId])
+  @@index([trackingLegId])
+  @@index([invoiceId])
+  @@map("cargo_charges")
+}
+
+model CargoFile {
+  id           String        @id @default(cuid())
+  shipmentId   String
+  packageId    String?
+  invoiceId    String?
+  kind         CargoFileKind
+  fileName     String
+  contentType  String
+  sizeBytes    Int
+  sha256       String
+  data         Bytes
+  uploadedById String
+  createdAt    DateTime      @default(now())
+  shipment     CargoShipment @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  package      CargoPackage? @relation(fields: [packageId, shipmentId], references: [id, shipmentId], onDelete: Restrict)
+  invoice      CargoInvoice? @relation(fields: [invoiceId, shipmentId], references: [id, shipmentId], onDelete: Restrict)
+  uploadedBy   User          @relation("CargoFileUploadedBy", fields: [uploadedById], references: [id], onDelete: Restrict)
+
+  @@index([shipmentId, kind])
+  @@index([packageId])
+  @@index([invoiceId])
+  @@map("cargo_files")
 }

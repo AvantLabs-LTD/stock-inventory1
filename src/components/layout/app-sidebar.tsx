@@ -38,7 +38,7 @@ export function AppSidebar() {
         {vaultItems.filter((item) => allowed(item.permission)).map((item) => <SidebarMenuItem key={item.page}><SidebarMenuButton isActive={current === item.page} tooltip={item.title} onClick={() => go(item.page)}><item.icon className="size-4"/><span>{item.title}</span></SidebarMenuButton></SidebarMenuItem>)}
       </SidebarMenu></SidebarGroup>}
       <SidebarGroup><SidebarGroupLabel>Modules</SidebarGroupLabel><SidebarMenu>
-        <SidebarMenuItem><SidebarMenuButton isActive={current === "cargo"} tooltip="Cargo · Logistics" onClick={() => go("cargo")}><Package className="size-4"/><span>Cargo <span className="text-xs text-muted-foreground">planned</span></span></SidebarMenuButton></SidebarMenuItem>
+        {allowed("cargo.view") && <SidebarMenuItem><SidebarMenuButton isActive={current === "cargo"} tooltip="Cargo · Logistics" onClick={() => go("cargo")}><Package className="size-4"/><span>Cargo</span></SidebarMenuButton></SidebarMenuItem>}
         <SidebarMenuItem><SidebarMenuButton isActive={current === "orders"} tooltip="Orders · Procurement" onClick={() => go("orders")}><ShoppingCart className="size-4"/><span>Orders <span className="text-xs text-muted-foreground">planned</span></span></SidebarMenuButton></SidebarMenuItem>
       </SidebarMenu></SidebarGroup>
       {(allowed("flux.users.manage") || allowed("vault.reference.manage")) && <SidebarGroup><SidebarGroupLabel>Administration</SidebarGroupLabel><SidebarMenu>

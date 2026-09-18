@@ -24,6 +24,12 @@ COPY scripts ./scripts
 RUN chmod +x /usr/local/bin/migrate-and-bootstrap
 ENTRYPOINT ["migrate-and-bootstrap"]
 
+FROM prisma-client AS integration-tester
+COPY . .
+COPY docker/integration-test-entrypoint.sh /usr/local/bin/integration-test-entrypoint
+RUN chmod +x /usr/local/bin/integration-test-entrypoint
+ENTRYPOINT ["integration-test-entrypoint"]
+
 FROM node:22-alpine AS runner
 WORKDIR /app
 

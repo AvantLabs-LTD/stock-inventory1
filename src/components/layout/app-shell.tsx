@@ -15,6 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Toaster } from "@/components/ui/sonner"
 import { ThemeProvider } from "@/components/theme-provider"
 import { FluxHome, PlannedModule } from "@/components/layout/flux-home"
+import { CargoPage } from "@/components/cargo/cargo-page"
 
 function LoadingScreen() {
   return (
@@ -38,6 +39,7 @@ function PageContent() {
     dashboard: "vault.overview.view", items: "vault.catalogue.view", demands: "vault.demands.view",
     inventory: "vault.stock.view", purchasing: "vault.purchasing.view",
     users: "flux.users.manage", "reference-data": "vault.reference.manage",
+    cargo: "cargo.view",
   }
   if (required[currentPage] && !permissions.includes(required[currentPage])) {
     return <div className="p-8 text-sm text-muted-foreground">You do not have access to Vault.</div>
@@ -45,7 +47,7 @@ function PageContent() {
 
   switch (currentPage) {
     case 'flux': return <FluxHome />
-    case 'cargo': return <PlannedModule name="Cargo" />
+    case 'cargo': return <CargoPage />
     case 'orders': return <PlannedModule name="Orders" />
     case 'people': return <PlannedModule name="People" />
     case 'ledger': return <PlannedModule name="Ledger" />

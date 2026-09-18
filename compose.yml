@@ -72,6 +72,24 @@ services:
     volumes:
       - runtime-secrets:/run/app-secrets:ro
 
+  test:
+    profiles: ["test"]
+    build:
+      context: .
+      target: integration-tester
+    restart: "no"
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      DATABASE_HOST: database
+      DATABASE_NAME: ${TEST_DATABASE_NAME:-}
+      DATABASE_USER: store_app
+      DATABASE_PASSWORD_FILE: /run/app-secrets/postgres_password
+      NODE_ENV: test
+    volumes:
+      - runtime-secrets:/run/app-secrets:ro
+
   app:
     build:
       context: .
