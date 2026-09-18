@@ -30,6 +30,13 @@ COPY docker/integration-test-entrypoint.sh /usr/local/bin/integration-test-entry
 RUN chmod +x /usr/local/bin/integration-test-entrypoint
 ENTRYPOINT ["integration-test-entrypoint"]
 
+FROM prisma-client AS cargo-importer
+RUN apk add --no-cache sqlite
+COPY scripts ./scripts
+COPY docker/cargo-import-entrypoint.sh /usr/local/bin/cargo-import-entrypoint
+RUN chmod +x /usr/local/bin/cargo-import-entrypoint
+ENTRYPOINT ["cargo-import-entrypoint"]
+
 FROM node:22-alpine AS runner
 WORKDIR /app
 

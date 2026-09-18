@@ -38,22 +38,30 @@ const photos = query('SELECT id, "packageId", url, type FROM "PackagePhoto" ORDE
 const uploadRoot = resolve(root, "uploads")
 const missingPhotos = []
 const oversizedPhotos = []
+const invalidPhotos = []
 const photoHashes = []
 const referencedPaths = new Set()
 for (const photo of photos) {
   const relativeUrl = String(photo.url || "").replace(/^\/+/, "")
   const candidate = resolve(root, relativeUrl)
   const inside = candidate.startsWith(uploadRoot + sep)
-  if (!inside || !existsSync(candidate)) {
+  if (!inside) {
+    invalidPhotos.push({ sourceId: photo.id, reason: "UNSAFE_PATH" })
+    continue
+  }
+  if (!existsSync(candidate)) {
     missingPhotos.push({ sourceId: photo.id, packageId: photo.packageId, url: photo.url })
     continue
   }
+  const file = readFileSync(candidate)
   const bytes = statSync(candidate).size
   if (bytes < 1 || bytes > 5 * 1024 * 1024) oversizedPhotos.push({ sourceId: photo.id, bytes })
+  if (!file.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) && !file.subarray(0, 3).equals(Buffer.from([255, 216, 255]))) invalidPhotos.push({ sourceId: photo.id, reason: "UNSUPPORTED_SIGNATURE" })
   referencedPaths.add(candidate)
-  photoHashes.push({ sourceId: photo.id, sha256: createHash("sha256").update(readFileSync(candidate)).digest("hex"), bytes })
+  photoHashes.push({ sourceId: photo.id, sha256: createHash("sha256").update(file).digest("hex"), bytes })
 }
 const unreferencedUploads = walk(uploadRoot).filter(path => !referencedPaths.has(resolve(path))).map(path => relative(root, path).replaceAll(sep, "/"))
+const unreferencedUploadHashes = unreferencedUploads.map(path => ({ path, bytes: statSync(join(root, path)).size, sha256: createHash("sha256").update(readFileSync(join(root, path))).digest("hex") }))
 const repairManifestPath = join(root, "missing-photos.csv")
 const manifestPhotoIds = existsSync(repairManifestPath)
   ? readFileSync(repairManifestPath, "utf8").trim().split(/\r?\n/).slice(1).map(line => line.split(",")[1])
@@ -75,11 +83,11 @@ const report = {
   sqlite: { integrity: integrity[0]?.integrity_check, foreignKeyViolations: foreignKeys.length },
   counts, statuses: statuses.map(row => ({ ...row, cargoStage: statusMap[row.status] || null })),
   latestStatusMismatches: latestMismatch,
-  photos: { referenced: photos.length, verified: photoHashes.length, missing: missingPhotos, outsideLimit: oversizedPhotos, deferredByOperator: deferMissingPhotos, repairManifestMatches: manifestMatches, unreferencedUploadCount: unreferencedUploads.length, unreferencedUploads, hashes: photoHashes },
+  photos: { referenced: photos.length, verified: photoHashes.length, missing: missingPhotos, outsideLimit: oversizedPhotos, invalid: invalidPhotos, deferredByOperator: deferMissingPhotos, repairManifestMatches: manifestMatches, unreferencedUploadCount: unreferencedUploads.length, unreferencedUploads, unreferencedUploadHashes, hashes: photoHashes },
   groupingCandidates,
   tracking: { exactPackageTrackingMatches: trackingMatches, amountsWithoutExplicitCurrency: ambiguousTrackingCharges },
   invoices: { count: invoiceLinkage.count, linkedToTracking: invoiceLinkage.linked || 0 },
-  readyForImportRehearsal: integrity[0]?.integrity_check === "ok" && foreignKeys.length === 0 && (!missingPhotos.length || (deferMissingPhotos && manifestMatches)) && !oversizedPhotos.length && !latestMismatch.length && !unmappedStatuses.length,
+  readyForImportRehearsal: integrity[0]?.integrity_check === "ok" && foreignKeys.length === 0 && (!missingPhotos.length || (deferMissingPhotos && manifestMatches)) && !oversizedPhotos.length && !invalidPhotos.length && !latestMismatch.length && !unmappedStatuses.length,
 }
 process.stdout.write(JSON.stringify(report, null, 2) + "\n")
 if (!report.readyForImportRehearsal) process.exitCode = 2

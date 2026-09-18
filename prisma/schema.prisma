@@ -770,6 +770,7 @@ model CargoShipment {
   invoices          CargoInvoice[]
   charges           CargoCharge[]
   files             CargoFile[]
+  legacyEvents      CargoLegacyEvent[]
 
   @@index([forwarderId])
   @@index([sourceWarehouseId])
@@ -795,6 +796,7 @@ model CargoPackage {
   invoices       CargoInvoice[]
   charges        CargoCharge[]
   files          CargoFile[]
+  legacyEvents  CargoLegacyEvent[]
 
   @@index([shipmentId])
   @@unique([id, shipmentId])
@@ -936,4 +938,40 @@ model CargoFile {
   @@index([packageId])
   @@index([invoiceId])
   @@map("cargo_files")
+}
+
+// Historical source events are kept verbatim. They do not independently
+// advance a Cargo shipment's canonical journey stage.
+model CargoLegacyEvent {
+  id           String        @id
+  shipmentId   String
+  packageId    String
+  rawStatus    String
+  description  String?
+  location     String?
+  sourceUserId String?
+  occurredAt   DateTime
+  shipment     CargoShipment @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  package      CargoPackage  @relation(fields: [packageId, shipmentId], references: [id, shipmentId], onDelete: Restrict)
+
+  @@index([shipmentId, occurredAt])
+  @@map("cargo_legacy_events")
+}
+
+// The only authoritative correspondence between PakLogix IDs and Flux IDs.
+// A null target and reviewReason is an explicit unresolved import item.
+model CargoImportRecord {
+  sourceType   String
+  sourceId     String
+  sourceHash   String   @db.VarChar(64)
+  targetType   String?
+  targetId     String?
+  sourceFacts  Json?
+  reviewReason String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@id([sourceType, sourceId])
+  @@index([reviewReason])
+  @@map("cargo_import_records")
 }

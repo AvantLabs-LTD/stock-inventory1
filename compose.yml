@@ -90,6 +90,24 @@ services:
     volumes:
       - runtime-secrets:/run/app-secrets:ro
 
+  import-cargo:
+    profiles: ["import"]
+    build:
+      context: .
+      target: cargo-importer
+    restart: "no"
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      DATABASE_HOST: database
+      DATABASE_NAME: ${CARGO_IMPORT_DATABASE_NAME:-}
+      DATABASE_USER: store_app
+      DATABASE_PASSWORD_FILE: /run/app-secrets/postgres_password
+      IMPORT_ACTOR_EMAIL: ${IMPORT_ACTOR_EMAIL:-}
+    volumes:
+      - runtime-secrets:/run/app-secrets:ro
+
   app:
     build:
       context: .

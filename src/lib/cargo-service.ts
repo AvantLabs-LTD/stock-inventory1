@@ -177,11 +177,11 @@ export async function executeCargoAction(action: string, raw: unknown, actor: Ac
         const v = z.object({ shipmentId: id, stage: z.nativeEnum(CargoStage), occurredAt: date, location: optionalText, remarks: optionalText }).parse(raw)
         const shipment = await tx.cargoShipment.findUniqueOrThrow({ where: { id: v.shipmentId }, include: { milestones: { orderBy: { sequence: "desc" }, take: 1 } } })
         const previous = shipment.milestones[0]
-        if (!previous || !nextStage[previous.stage].includes(v.stage)) throw new CargoError("INVALID_STAGE", "Invalid Cargo journey transition", 409)
-        if (shipment.route === "DIRECT" && v.stage === "TO_SOURCE_WAREHOUSE") throw new CargoError("INVALID_ROUTE", "Direct route bypasses source warehouse")
-        if (shipment.route === "FORWARDED" && previous.stage === "AT_VENDOR" && v.stage !== "TO_SOURCE_WAREHOUSE") throw new CargoError("INVALID_ROUTE", "Forwarded route first travels to source warehouse")
-        if (v.occurredAt < previous.occurredAt) throw new CargoError("INVALID_DATE", "Journey date cannot precede the previous milestone")
-        const row = await tx.cargoMilestone.create({ data: { shipmentId: v.shipmentId, sequence: previous.sequence + 1, stage: v.stage, occurredAt: v.occurredAt, location: v.location, remarks: v.remarks, postedById: actor.id } })
+        if (previous && !nextStage[previous.stage].includes(v.stage)) throw new CargoError("INVALID_STAGE", "Invalid Cargo journey transition", 409)
+        if (shipment.route === "DIRECT" && ["TO_SOURCE_WAREHOUSE", "AT_SOURCE_WAREHOUSE"].includes(v.stage)) throw new CargoError("INVALID_ROUTE", "Direct route bypasses source warehouse")
+        if (shipment.route === "FORWARDED" && previous?.stage === "AT_VENDOR" && v.stage !== "TO_SOURCE_WAREHOUSE") throw new CargoError("INVALID_ROUTE", "Forwarded route first travels to source warehouse")
+        if (previous && v.occurredAt < previous.occurredAt) throw new CargoError("INVALID_DATE", "Journey date cannot precede the previous milestone")
+        const row = await tx.cargoMilestone.create({ data: { shipmentId: v.shipmentId, sequence: previous ? previous.sequence + 1 : 0, stage: v.stage, occurredAt: v.occurredAt, location: v.location, remarks: v.remarks, postedById: actor.id } })
         await audit(tx, actor, "CARGO_MILESTONE_POST", "CargoMilestone", row.id, v)
         return row
       }
@@ -231,7 +231,7 @@ export async function executeCargoAction(action: string, raw: unknown, actor: Ac
 
 export async function listCargoShipments(limit = 50, cursor?: string) {
   const rows = await db.cargoShipment.findMany({ take: Math.min(Math.max(limit, 1), 100), ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}), orderBy: { id: "desc" }, select: { id: true, shipmentNo: true, route: true, notes: true, createdAt: true, forwarder: { select: { name: true } }, sourceWarehouse: { select: { name: true } }, _count: { select: { packages: true } }, milestones: { orderBy: { sequence: "desc" }, take: 1, select: { stage: true, occurredAt: true } } } })
-  return rows.map(row => ({ ...row, stage: row.milestones[0]?.stage ?? "AT_VENDOR", milestones: undefined }))
+  return rows.map(row => ({ ...row, stage: row.milestones[0]?.stage ?? "NEEDS_REVIEW", milestones: undefined }))
 }
 
 export async function cargoShipmentDetail(id: string, permissions: string[]) {
@@ -241,6 +241,7 @@ export async function cargoShipmentDetail(id: string, permissions: string[]) {
     forwarder: true, sourceWarehouse: true, createdBy: { select: { name: true } },
     packages: { include: { vendor: { select: { id: true, name: true } }, items: { orderBy: { sortOrder: "asc" } } }, orderBy: { packageNo: "asc" } },
     milestones: { orderBy: { sequence: "asc" } }, trackingLegs: { include: { courier: { select: { name: true } } }, orderBy: { sequence: "asc" } },
+    legacyEvents: { orderBy: { occurredAt: "asc" } },
     invoices: costs ? { orderBy: { createdAt: "asc" } } : false,
     charges: costs ? { orderBy: { createdAt: "asc" } } : false,
     files: docs ? { select: { id: true, packageId: true, invoiceId: true, kind: true, fileName: true, contentType: true, sizeBytes: true, sha256: true, createdAt: true }, orderBy: { createdAt: "asc" } } : false,
@@ -252,9 +253,9 @@ export async function cargoReport(includeCosts: boolean) {
     db.cargoShipment.count(),
     db.cargoPackage.count(),
     db.$queryRaw<Array<{ stage: string; count: number }>>(Prisma.sql`
-      SELECT latest.stage::text AS stage, COUNT(*)::int AS count
+      SELECT COALESCE(latest.stage::text, 'NEEDS_REVIEW') AS stage, COUNT(*)::int AS count
       FROM cargo_shipments AS shipment
-      JOIN LATERAL (
+      LEFT JOIN LATERAL (
         SELECT milestone.stage FROM cargo_milestones AS milestone
         WHERE milestone."shipmentId" = shipment.id
         ORDER BY milestone.sequence DESC LIMIT 1
