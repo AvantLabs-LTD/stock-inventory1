@@ -3,8 +3,10 @@ import { cookies } from 'next/headers'
 import { verifySessionToken, COOKIE_NAME, type SessionPayload } from '@/lib/auth'
 import { db } from '@/lib/db'
 import type { UserRole } from '@prisma/client'
+import { verifyServiceToken } from '@/lib/service-tokens'
 
 export interface AuthSession {
+  credential: { type: 'session' } | { type: 'service_token'; id: string; name: string }
   user: {
     id: string
     email: string
@@ -22,6 +24,19 @@ export interface AuthSession {
  */
 export async function getSession(request?: NextRequest): Promise<AuthSession | null> {
   try {
+    const authorization = request?.headers.get('authorization')
+    if (authorization) {
+      if (!authorization.startsWith('Bearer ')) return null
+      const record = await verifyServiceToken(authorization.slice(7).trim())
+      if (!record) return null
+      const livePermissions = new Set(record.user.accessGroups.flatMap(membership => membership.group.permissions.map(entry => entry.permissionKey)))
+      return { credential: { type: 'service_token', id: record.id, name: record.name }, user: {
+        id: record.user.id, email: record.user.email, name: record.user.name,
+        status: record.user.status, role: record.user.role,
+        groups: record.user.accessGroups.map(membership => ({ id: membership.group.id, name: membership.group.name })),
+        permissions: record.scopes.filter(scope => livePermissions.has(scope)),
+      } }
+    }
     let token: string | undefined
 
     if (request) {
@@ -56,6 +71,7 @@ export async function getSession(request?: NextRequest): Promise<AuthSession | n
     if (!user || user.status !== 'ACTIVE') return null
 
     return {
+      credential: { type: 'session' },
       user: {
         id: user.id,
         email: user.email,
@@ -75,7 +91,7 @@ export async function getSession(request?: NextRequest): Promise<AuthSession | n
  * Helper to create a JSON 401 response.
  */
 export function unauthorizedResponse(message = 'Unauthorized') {
-  return Response.json({ error: message }, { status: 401 })
+  return Response.json({ error: message, code: 'UNAUTHORIZED' }, { status: 401 })
 }
 
 export function forbiddenResponse(message = 'You do not have permission to perform this action') {

@@ -16,6 +16,12 @@ test("Cargo shipment identity, journey locking, costs and cross-shipment links",
   const second = await executeCargoAction("shipment.create", { route: "DIRECT" }, actor)
   assert.ok(second && "id" in second)
   const secondShipmentId = String(second.id)
+  const retryKey = `cargo-create-${suffix}`
+  const retryable = await executeCargoAction("shipment.create", { route: "DIRECT" }, actor, retryKey)
+  const repeated = await executeCargoAction("shipment.create", { route: "DIRECT" }, actor, retryKey)
+  assert.equal(repeated.id, retryable.id)
+  await assert.rejects(executeCargoAction("shipment.create", { route: "FORWARDED" }, actor, retryKey), (error: unknown) => error instanceof CargoError && error.code === "IDEMPOTENCY_KEY_CONFLICT")
+  assert.equal(await prisma.cargoRequestKey.count({ where: { actorId: user.id, key: retryKey } }), 1)
   const shared = await executeCargoAction("package.create", { shipmentId: firstShipmentId }, actor)
   assert.ok(shared && "id" in shared)
   const item = await executeCargoAction("item.save", { packageId: String(shared.id), description: "Part", quantity: 4 }, actor)

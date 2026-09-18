@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { CargoChargeCategory, CargoLegKind, CargoRoute, CargoStage, Prisma, RecordStatus } from "@prisma/client"
 import { z } from "zod"
 import { db } from "@/lib/db"
@@ -22,9 +22,20 @@ const id = z.string().trim().min(1).max(100)
 const text = z.string().trim().min(1).max(500)
 const optionalText = z.string().trim().max(4000).nullish().transform(v => v || null)
 const optionalId = id.nullish().transform(v => v || null)
-const positive = z.coerce.number().finite().positive()
-const nonnegative = z.coerce.number().finite().min(0)
-const optionalPositive = z.coerce.number().finite().positive().nullish().transform(v => v ?? null)
+function decimal(scale: number, integerDigits: number, allowZero = false) {
+  const input = z.union([z.string().trim(), z.number().finite().transform(String)])
+  return input.refine(value => {
+    if (!/^\d+(?:\.\d+)?$/.test(value)) return false
+    const [integer, fraction = ""] = value.split(".")
+    if (integer.replace(/^0+/, "").length > integerDigits || fraction.length > scale) return false
+    return allowZero || new Prisma.Decimal(value).gt(0)
+  }, { message: `Use a ${allowZero ? "nonnegative" : "positive"} decimal with at most ${scale} decimal places` }).transform(value => new Prisma.Decimal(value))
+}
+const quantity = decimal(3, 15)
+const weight = decimal(3, 9).nullish().transform(value => value ?? null)
+const dimension = decimal(2, 10).nullish().transform(value => value ?? null)
+const moneyPositive = decimal(4, 14)
+const moneyNonnegative = decimal(4, 14, true).nullish().transform(value => value ?? null)
 const currency = z.string().trim().regex(/^[A-Z]{3}$/, "Use a three-letter uppercase currency code")
 const date = z.coerce.date()
 const optionalDate = z.coerce.date().nullish().transform(v => v ?? null)
@@ -69,10 +80,13 @@ const nextStage: Record<CargoStage, CargoStage[]> = {
   RECEIVED: [],
 }
 
-export async function executeCargoAction(action: string, raw: unknown, actor: Actor) {
-  if (!(action in cargoActionPermission)) throw new CargoError("UNKNOWN_ACTION", "Unknown Cargo action", 404)
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try { return await db.$transaction(async tx => {
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical)
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, entry]) => [key, canonical(entry)]))
+  return value
+}
+
+async function performCargoAction(tx: Tx, action: string, raw: unknown, actor: Actor) {
     switch (action) {
       case "reference.create": {
         const v = z.object({ kind: z.enum(["forwarder", "warehouse", "courier"]), name: text, forwarderId: optionalId, code: optionalText, address: optionalText, notes: optionalText }).parse(raw)
@@ -120,7 +134,7 @@ export async function executeCargoAction(action: string, raw: unknown, actor: Ac
         return row
       }
       case "package.create": {
-        const v = z.object({ shipmentId: optionalId, route: z.nativeEnum(CargoRoute).optional(), forwarderId: optionalId, sourceWarehouseId: optionalId, vendorId: optionalId, weight: optionalPositive, verifiedWeight: optionalPositive, length: optionalPositive, width: optionalPositive, height: optionalPositive, notes: optionalText }).parse(raw)
+        const v = z.object({ shipmentId: optionalId, route: z.nativeEnum(CargoRoute).optional(), forwarderId: optionalId, sourceWarehouseId: optionalId, vendorId: optionalId, weight, verifiedWeight: weight, length: dimension, width: dimension, height: dimension, notes: optionalText }).parse(raw)
         let shipmentId = v.shipmentId
         if (!shipmentId) {
           if (!v.route) throw new CargoError("ROUTE_REQUIRED", "Choose a route")
@@ -138,7 +152,7 @@ export async function executeCargoAction(action: string, raw: unknown, actor: Ac
         return row
       }
       case "package.update": {
-        const v = z.object({ id, vendorId: optionalId, weight: optionalPositive, verifiedWeight: optionalPositive, length: optionalPositive, width: optionalPositive, height: optionalPositive, notes: optionalText }).parse(raw)
+        const v = z.object({ id, vendorId: optionalId, weight, verifiedWeight: weight, length: dimension, width: dimension, height: dimension, notes: optionalText }).parse(raw)
         const old = await tx.cargoPackage.findUniqueOrThrow({ where: { id: v.id } })
         const row = await tx.cargoPackage.update({ where: { id: v.id }, data: { vendorId: v.vendorId, weight: v.weight, verifiedWeight: v.verifiedWeight, length: v.length, width: v.width, height: v.height, notes: v.notes } })
         await audit(tx, actor, "CARGO_PACKAGE_UPDATE", "CargoPackage", row.id, { before: old, after: v })
@@ -159,7 +173,7 @@ export async function executeCargoAction(action: string, raw: unknown, actor: Ac
         return updated
       }
       case "item.save": {
-        const v = z.object({ id: optionalId, packageId: id, description: text, quantity: positive, notes: optionalText, sortOrder: z.coerce.number().int().min(0).default(0) }).parse(raw)
+        const v = z.object({ id: optionalId, packageId: id, description: text, quantity, notes: optionalText, sortOrder: z.coerce.number().int().min(0).default(0) }).parse(raw)
         const old = v.id ? await tx.cargoPackageItem.findUniqueOrThrow({ where: { id: v.id } }) : null
         if (old && old.packageId !== v.packageId) throw new CargoError("PACKAGE_MISMATCH", "Packing item belongs to another package")
         const row = old ? await tx.cargoPackageItem.update({ where: { id: old.id }, data: { description: v.description, quantity: v.quantity, notes: v.notes, sortOrder: v.sortOrder } }) : await tx.cargoPackageItem.create({ data: { packageId: v.packageId, description: v.description, quantity: v.quantity, notes: v.notes, sortOrder: v.sortOrder } })
@@ -201,7 +215,7 @@ export async function executeCargoAction(action: string, raw: unknown, actor: Ac
         return row
       }
       case "invoice.save": {
-        const v = z.object({ id: optionalId, shipmentId: id, packageId: optionalId, trackingLegId: optionalId, invoiceNo: optionalText, sourceName: optionalText, invoiceDate: optionalDate, totalAmount: nonnegative.nullish().transform(x => x ?? null), currency, notes: optionalText }).parse(raw)
+        const v = z.object({ id: optionalId, shipmentId: id, packageId: optionalId, trackingLegId: optionalId, invoiceNo: optionalText, sourceName: optionalText, invoiceDate: optionalDate, totalAmount: moneyNonnegative, currency, notes: optionalText }).parse(raw)
         const old = v.id ? await tx.cargoInvoice.findUniqueOrThrow({ where: { id: v.id } }) : null
         if (old && old.shipmentId !== v.shipmentId) throw new CargoError("SHIPMENT_MISMATCH", "Invoice belongs to another shipment")
         const data = { packageId: v.packageId, trackingLegId: v.trackingLegId, invoiceNo: v.invoiceNo, sourceName: v.sourceName, invoiceDate: v.invoiceDate, totalAmount: v.totalAmount, currency: v.currency, notes: v.notes }
@@ -210,7 +224,7 @@ export async function executeCargoAction(action: string, raw: unknown, actor: Ac
         return row
       }
       case "charge.save": {
-        const v = z.object({ id: optionalId, shipmentId: id, packageId: optionalId, trackingLegId: optionalId, invoiceId: optionalId, category: z.nativeEnum(CargoChargeCategory), amount: positive, currency, pkrEquivalent: nonnegative.nullish().transform(x => x ?? null), pkrNote: optionalText, remarks: optionalText }).parse(raw)
+        const v = z.object({ id: optionalId, shipmentId: id, packageId: optionalId, trackingLegId: optionalId, invoiceId: optionalId, category: z.nativeEnum(CargoChargeCategory), amount: moneyPositive, currency, pkrEquivalent: moneyNonnegative, pkrNote: optionalText, remarks: optionalText }).parse(raw)
         if (v.pkrEquivalent !== null && !v.pkrNote) throw new CargoError("PKR_NOTE_REQUIRED", "Explain the manual PKR comparison")
         const old = v.id ? await tx.cargoCharge.findUniqueOrThrow({ where: { id: v.id } }) : null
         if (old && old.shipmentId !== v.shipmentId) throw new CargoError("SHIPMENT_MISMATCH", "Charge belongs to another shipment")
@@ -219,10 +233,39 @@ export async function executeCargoAction(action: string, raw: unknown, actor: Ac
         await audit(tx, actor, "CARGO_CHARGE_SAVE", "CargoCharge", row.id, { before: old, after: v })
         return row
       }
+      default: throw new CargoError("UNKNOWN_ACTION", "Unknown Cargo action", 404)
     }
+}
+
+export async function executeCargoAction(action: string, raw: unknown, actor: Actor, idempotencyKey?: string) {
+  if (!(action in cargoActionPermission)) throw new CargoError("UNKNOWN_ACTION", "Unknown Cargo action", 404)
+  const key = idempotencyKey?.trim()
+  if (key && !/^[A-Za-z0-9._:-]{8,120}$/.test(key)) throw new CargoError("INVALID_IDEMPOTENCY_KEY", "Use an 8–120 character idempotency key")
+  const requestHash = createHash("sha256").update(JSON.stringify(canonical({ action, data: raw }))).digest("hex")
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try { return await db.$transaction(async tx => {
+      if (key) {
+        const previous = await tx.cargoRequestKey.findUnique({ where: { actorId_key: { actorId: actor.id, key } } })
+        if (previous) {
+          if (previous.requestHash !== requestHash) throw new CargoError("IDEMPOTENCY_KEY_CONFLICT", "This key was used for different Cargo input", 409)
+          if (previous.response === null) throw new CargoError("IDEMPOTENCY_IN_PROGRESS", "Request is still being committed; retry shortly", 409)
+          return previous.response as { id: string }
+        }
+        await tx.cargoRequestKey.create({ data: { actorId: actor.id, key, action, requestHash } })
+      }
+      const result = await performCargoAction(tx, action, raw, actor)
+      if (key) await tx.cargoRequestKey.update({ where: { actorId_key: { actorId: actor.id, key } }, data: { response: JSON.parse(JSON.stringify(result)) } })
+      return result
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }) }
     catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034" && attempt < 2) continue
+      if (key && error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        const previous = await db.cargoRequestKey.findUnique({ where: { actorId_key: { actorId: actor.id, key } } })
+        if (previous) {
+          if (previous.requestHash !== requestHash) throw new CargoError("IDEMPOTENCY_KEY_CONFLICT", "This key was used for different Cargo input", 409)
+          if (previous.response !== null) return previous.response as { id: string }
+        }
+      }
       throw error
     }
   }
@@ -230,8 +273,9 @@ export async function executeCargoAction(action: string, raw: unknown, actor: Ac
 }
 
 export async function listCargoShipments(limit = 50, cursor?: string) {
-  const rows = await db.cargoShipment.findMany({ take: Math.min(Math.max(limit, 1), 100), ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}), orderBy: { id: "desc" }, select: { id: true, shipmentNo: true, route: true, notes: true, createdAt: true, forwarder: { select: { name: true } }, sourceWarehouse: { select: { name: true } }, _count: { select: { packages: true } }, milestones: { orderBy: { sequence: "desc" }, take: 1, select: { stage: true, occurredAt: true } } } })
-  return rows.map(row => ({ ...row, stage: row.milestones[0]?.stage ?? "NEEDS_REVIEW", milestones: undefined }))
+  const rows = await db.cargoShipment.findMany({ take: limit + 1, ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}), orderBy: { id: "desc" }, select: { id: true, shipmentNo: true, route: true, notes: true, createdAt: true, forwarder: { select: { name: true } }, sourceWarehouse: { select: { name: true } }, _count: { select: { packages: true } }, milestones: { orderBy: { sequence: "desc" }, take: 1, select: { stage: true, occurredAt: true } } } })
+  const page = rows.slice(0, limit)
+  return { shipments: page.map(row => ({ ...row, stage: row.milestones[0]?.stage ?? "NEEDS_REVIEW", milestones: undefined })), nextCursor: rows.length > limit ? page.at(-1)?.id ?? null : null }
 }
 
 export async function cargoShipmentDetail(id: string, permissions: string[]) {

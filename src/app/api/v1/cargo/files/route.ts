@@ -35,9 +35,22 @@ export async function POST(request: NextRequest) {
     if ((kind === "CONTENT_PHOTO" || kind === "CARTON_PHOTO") && !packageId) throw new CargoError("PACKAGE_REQUIRED", "Choose a package for its photo")
     const fileName = file.name.replace(/[^a-zA-Z0-9._ -]/g, "_").slice(0, 180) || "file"
     const sha256 = createHash("sha256").update(bytes).digest("hex")
+    const key = request.headers.get("idempotency-key")?.trim()
+    if (key && !/^[A-Za-z0-9._:-]{8,120}$/.test(key)) throw new CargoError("INVALID_IDEMPOTENCY_KEY", "Use an 8–120 character idempotency key")
+    const requestHash = createHash("sha256").update(JSON.stringify({ shipmentId, packageId, invoiceId, kind, fileName, contentType, sha256 })).digest("hex")
     const record = await db.$transaction(async tx => {
+      if (key) {
+        const previous = await tx.cargoRequestKey.findUnique({ where: { actorId_key: { actorId: session.user.id, key } } })
+        if (previous) {
+          if (previous.requestHash !== requestHash) throw new CargoError("IDEMPOTENCY_KEY_CONFLICT", "This key was used for different Cargo input", 409)
+          if (previous.response === null) throw new CargoError("IDEMPOTENCY_IN_PROGRESS", "Request is still being committed; retry shortly", 409)
+          return previous.response
+        }
+        await tx.cargoRequestKey.create({ data: { actorId: session.user.id, key, action: "file.upload", requestHash } })
+      }
       const row = await tx.cargoFile.create({ data: { shipmentId, packageId, invoiceId, kind, fileName, contentType, sizeBytes: bytes.length, sha256, data: bytes, uploadedById: session.user.id }, select: { id: true, shipmentId: true, packageId: true, invoiceId: true, kind: true, fileName: true, contentType: true, sizeBytes: true, sha256: true, createdAt: true } })
-      await tx.auditLog.create({ data: { userId: session.user.id, userName: session.user.name, action: "CARGO_FILE_UPLOAD", entityType: "CargoFile", entityId: row.id, details: JSON.stringify({ shipmentId, packageId, invoiceId, kind, fileName, sizeBytes: bytes.length, sha256 }) } })
+      await tx.auditLog.create({ data: { userId: session.user.id, userName: session.credential.type === "service_token" ? `${session.user.name} (API: ${session.credential.name})` : session.user.name, action: "CARGO_FILE_UPLOAD", entityType: "CargoFile", entityId: row.id, details: JSON.stringify({ shipmentId, packageId, invoiceId, kind, fileName, sizeBytes: bytes.length, sha256 }) } })
+      if (key) await tx.cargoRequestKey.update({ where: { actorId_key: { actorId: session.user.id, key } }, data: { response: JSON.parse(JSON.stringify(row)) } })
       return row
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     return Response.json({ file: record }, { status: 201 })

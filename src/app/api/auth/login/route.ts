@@ -9,7 +9,7 @@ export async function POST(request: NextRequest) {
 
     if (!email || !password) {
       return NextResponse.json(
-        { error: 'Email and password are required' },
+        { code: 'INVALID_INPUT', error: 'Email and password are required' },
         { status: 400 }
       )
     }
@@ -21,14 +21,14 @@ export async function POST(request: NextRequest) {
 
     if (!user) {
       return NextResponse.json(
-        { error: 'Invalid email or password' },
+        { code: 'INVALID_CREDENTIALS', error: 'Invalid email or password' },
         { status: 401 }
       )
     }
 
     if (user.status !== 'ACTIVE') {
       return NextResponse.json(
-        { error: 'Account is inactive. Please contact an administrator.' },
+        { code: 'ACCOUNT_INACTIVE', error: 'Account is inactive. Please contact an administrator.' },
         { status: 403 }
       )
     }
@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
     const isValid = await verifyPassword(password, user.password)
     if (!isValid) {
       return NextResponse.json(
-        { error: 'Invalid email or password' },
+        { code: 'INVALID_CREDENTIALS', error: 'Invalid email or password' },
         { status: 401 }
       )
     }
@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Login error:', error)
     return NextResponse.json(
-      { error: 'An unexpected error occurred' },
+      { code: 'INTERNAL_ERROR', error: 'An unexpected error occurred' },
       { status: 500 }
     )
   }

@@ -163,6 +163,37 @@ model User {
   cargoInvoicesCreated  CargoInvoice[]           @relation("CargoInvoiceCreatedBy")
   cargoChargesCreated   CargoCharge[]            @relation("CargoChargeCreatedBy")
   cargoFilesUploaded    CargoFile[]              @relation("CargoFileUploadedBy")
+  serviceTokens         ServiceToken[]
+  cargoRequestKeys      CargoRequestKey[]
+}
+
+model ServiceToken {
+  id         String    @id
+  userId     String
+  name       String
+  tokenHash  String    @unique @db.VarChar(64)
+  scopes     String[]
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+  user       User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId, revokedAt])
+  @@map("service_tokens")
+}
+
+model CargoRequestKey {
+  actorId     String
+  key         String
+  action      String
+  requestHash String   @db.VarChar(64)
+  response    Json?
+  createdAt   DateTime @default(now())
+  actor       User     @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@id([actorId, key])
+  @@map("cargo_request_keys")
 }
 
 model Permission {
