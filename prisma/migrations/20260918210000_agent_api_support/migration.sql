@@ -11,7 +11,7 @@ CREATE TABLE "service_tokens" (
   "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "lastUsedAt" TIMESTAMP(3),
   CONSTRAINT "service_tokens_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE,
-  CONSTRAINT "service_tokens_scopes_check" CHECK (array_length("scopes", 1) > 0),
+  CONSTRAINT "service_tokens_scopes_check" CHECK (cardinality("scopes") > 0),
   CONSTRAINT "service_tokens_hash_check" CHECK ("tokenHash" ~ '^[a-f0-9]{64}$')
 );
 CREATE UNIQUE INDEX "service_tokens_tokenHash_key" ON "service_tokens"("tokenHash");

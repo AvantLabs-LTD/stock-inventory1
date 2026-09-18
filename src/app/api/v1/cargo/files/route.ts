@@ -38,7 +38,8 @@ export async function POST(request: NextRequest) {
     const key = request.headers.get("idempotency-key")?.trim()
     if (key && !/^[A-Za-z0-9._:-]{8,120}$/.test(key)) throw new CargoError("INVALID_IDEMPOTENCY_KEY", "Use an 8–120 character idempotency key")
     const requestHash = createHash("sha256").update(JSON.stringify({ shipmentId, packageId, invoiceId, kind, fileName, contentType, sha256 })).digest("hex")
-    const record = await db.$transaction(async tx => {
+    let record
+    try { record = await db.$transaction(async tx => {
       if (key) {
         const previous = await tx.cargoRequestKey.findUnique({ where: { actorId_key: { actorId: session.user.id, key } } })
         if (previous) {
@@ -52,7 +53,15 @@ export async function POST(request: NextRequest) {
       await tx.auditLog.create({ data: { userId: session.user.id, userName: session.credential.type === "service_token" ? `${session.user.name} (API: ${session.credential.name})` : session.user.name, action: "CARGO_FILE_UPLOAD", entityType: "CargoFile", entityId: row.id, details: JSON.stringify({ shipmentId, packageId, invoiceId, kind, fileName, sizeBytes: bytes.length, sha256 }) } })
       if (key) await tx.cargoRequestKey.update({ where: { actorId_key: { actorId: session.user.id, key } }, data: { response: JSON.parse(JSON.stringify(row)) } })
       return row
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }) }
+    catch (error) {
+      if (key && error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        const previous = await db.cargoRequestKey.findUnique({ where: { actorId_key: { actorId: session.user.id, key } } })
+        if (previous?.requestHash === requestHash && previous.response !== null) return Response.json({ file: previous.response }, { status: 201 })
+        if (previous) throw new CargoError("IDEMPOTENCY_KEY_CONFLICT", "This key was used for different Cargo input", 409)
+      }
+      throw error
+    }
     return Response.json({ file: record }, { status: 201 })
   } catch (error) { return cargoApiError(error) }
 }
