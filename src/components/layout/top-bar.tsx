@@ -37,7 +37,7 @@ export function TopBar({ onChangePassword }: TopBarProps) {
       <SidebarTrigger className="-ml-1" />
       <Separator orientation="vertical" className="mr-2 h-4" />
       <div className="flex-1 text-sm font-medium text-muted-foreground">
-        {currentPage === 'flux' ? 'Flux ERP' : ['cargo', 'orders', 'people', 'ledger'].includes(currentPage) ? `Flux · ${currentPage[0].toUpperCase()}${currentPage.slice(1)}` : 'Flux · Vault'}
+        {currentPage === 'flux' ? 'Flux ERP' : currentPage.startsWith('cargo') ? 'Flux · Cargo' : ['orders', 'people', 'ledger'].includes(currentPage) ? `Flux · ${currentPage[0].toUpperCase()}${currentPage.slice(1)}` : currentPage === 'users' ? 'Flux · Administration' : 'Flux · Vault'}
       </div>
       {mounted && (
         <Button variant="ghost" size="icon" className="size-8" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>

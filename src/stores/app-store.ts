@@ -3,6 +3,12 @@ import { create } from 'zustand'
 export type AppPage =
   | 'flux'
   | 'cargo'
+  | 'cargo-shipments'
+  | 'cargo-packages'
+  | 'cargo-tracking'
+  | 'cargo-finance'
+  | 'cargo-management'
+  | 'cargo-reports'
   | 'orders'
   | 'people'
   | 'ledger'
@@ -15,7 +21,10 @@ export type AppPage =
   | 'users'
 
 export const pagePaths: Record<AppPage, string> = {
-  flux: '/', cargo: '/cargo', orders: '/orders', people: '/people', ledger: '/ledger',
+  flux: '/', cargo: '/cargo', 'cargo-shipments': '/cargo/shipments',
+  'cargo-packages': '/cargo/packages', 'cargo-tracking': '/cargo/tracking',
+  'cargo-finance': '/cargo/finance', 'cargo-management': '/cargo/management',
+  'cargo-reports': '/cargo/reports', orders: '/orders', people: '/people', ledger: '/ledger',
   dashboard: '/vault', items: '/vault/inventory', demands: '/vault/demands',
   purchasing: '/vault/legacy-purchasing', inventory: '/vault/movements',
   'reference-data': '/flux/admin/reference-data', users: '/flux/admin/users',

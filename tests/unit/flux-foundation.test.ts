@@ -16,9 +16,19 @@ test("legacy role is a compatibility projection of group membership", () => {
   assert.equal(legacyRoleForGroups(["viewer"]), "USER")
 })
 
-test("every Flux and Vault navigation target survives a direct URL", () => {
+test("every Flux module navigation target survives a direct URL", () => {
   for (const [page, path] of Object.entries(pagePaths)) {
     assert.equal(pageFromPath(path), page)
     assert.equal(pageFromPath(`${path}/`), page)
   }
+})
+
+test("Cargo sections have distinct, shareable routes", () => {
+  assert.equal(pagePaths.cargo, "/cargo")
+  assert.equal(pagePaths["cargo-shipments"], "/cargo/shipments")
+  assert.equal(pagePaths["cargo-packages"], "/cargo/packages")
+  assert.equal(pagePaths["cargo-tracking"], "/cargo/tracking")
+  assert.equal(pagePaths["cargo-finance"], "/cargo/finance")
+  assert.equal(pagePaths["cargo-management"], "/cargo/management")
+  assert.equal(pagePaths["cargo-reports"], "/cargo/reports")
 })

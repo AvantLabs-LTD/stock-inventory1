@@ -1,16 +1,29 @@
 "use client"
 
-import { Boxes, ClipboardList, Gauge, Package, Settings2, ShoppingCart, Users, Warehouse } from "lucide-react"
+import { BarChart3, Boxes, ClipboardList, ContactRound, Gauge, Layers3, Package, Settings2, ShoppingCart, Truck, Users, Wallet, Warehouse } from "lucide-react"
 import { useAuthStore } from "@/stores/auth-store"
 import { useAppStore, type AppPage } from "@/stores/app-store"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarRail, useSidebar } from "@/components/ui/sidebar"
 
-const vaultItems: Array<{ title: string; page: AppPage; permission: string; icon: React.ElementType }> = [
+type NavItem = { title: string; page: AppPage; permission: string; icon: React.ElementType }
+
+const vaultItems: NavItem[] = [
   { title: "Overview", page: "dashboard", permission: "vault.overview.view", icon: Gauge },
   { title: "Inventory", page: "items", permission: "vault.catalogue.view", icon: Boxes },
-  { title: "Stock Movements", page: "inventory", permission: "vault.stock.view", icon: Warehouse },
+  { title: "Stock movements", page: "inventory", permission: "vault.stock.view", icon: Warehouse },
   { title: "Demands", page: "demands", permission: "vault.demands.view", icon: ClipboardList },
+  { title: "Reference data", page: "reference-data", permission: "vault.reference.manage", icon: Settings2 },
+]
+
+const cargoItems: NavItem[] = [
+  { title: "Overview", page: "cargo", permission: "cargo.view", icon: Gauge },
+  { title: "Shipments", page: "cargo-shipments", permission: "cargo.view", icon: Truck },
+  { title: "Packages", page: "cargo-packages", permission: "cargo.view", icon: Package },
+  { title: "Journey & tracking", page: "cargo-tracking", permission: "cargo.view", icon: Layers3 },
+  { title: "Costs & invoices", page: "cargo-finance", permission: "cargo.costs.view", icon: Wallet },
+  { title: "Partners", page: "cargo-management", permission: "cargo.view", icon: ContactRound },
+  { title: "Reports", page: "cargo-reports", permission: "cargo.view", icon: BarChart3 },
 ]
 
 export function AppSidebar() {
@@ -22,6 +35,7 @@ export function AppSidebar() {
   const allowed = (permission: string) => user.permissions?.includes(permission) ?? false
   const go = (page: AppPage) => { navigate(page); setOpenMobile(false) }
   const initials = user.name.split(" ").map((x) => x[0]).join("").slice(0, 2).toUpperCase()
+  const navGroup = (items: NavItem[]) => <SidebarMenu>{items.filter(item => allowed(item.permission)).map(item => <SidebarMenuItem key={item.page}><SidebarMenuButton isActive={current === item.page} tooltip={item.title} onClick={() => go(item.page)}><item.icon className="size-4"/><span>{item.title}</span></SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu>
 
   return <Sidebar collapsible="icon">
     <SidebarHeader className="border-b px-4 py-3">
@@ -34,16 +48,15 @@ export function AppSidebar() {
       <SidebarGroup><SidebarGroupLabel>Workspace</SidebarGroupLabel><SidebarMenu>
         <SidebarMenuItem><SidebarMenuButton isActive={current === "flux"} tooltip="Flux home" onClick={() => go("flux")}><Gauge className="size-4"/><span>Flux home</span></SidebarMenuButton></SidebarMenuItem>
       </SidebarMenu></SidebarGroup>
-      {vaultItems.some((item) => allowed(item.permission)) && <SidebarGroup><SidebarGroupLabel>Vault · Store</SidebarGroupLabel><SidebarMenu>
-        {vaultItems.filter((item) => allowed(item.permission)).map((item) => <SidebarMenuItem key={item.page}><SidebarMenuButton isActive={current === item.page} tooltip={item.title} onClick={() => go(item.page)}><item.icon className="size-4"/><span>{item.title}</span></SidebarMenuButton></SidebarMenuItem>)}
-      </SidebarMenu></SidebarGroup>}
-      <SidebarGroup><SidebarGroupLabel>Modules</SidebarGroupLabel><SidebarMenu>
-        {allowed("cargo.view") && <SidebarMenuItem><SidebarMenuButton isActive={current === "cargo"} tooltip="Cargo · Logistics" onClick={() => go("cargo")}><Package className="size-4"/><span>Cargo</span></SidebarMenuButton></SidebarMenuItem>}
+      {vaultItems.some(item => allowed(item.permission)) && <SidebarGroup><SidebarGroupLabel>Vault <span className="ml-1 text-[10px] font-normal normal-case tracking-normal text-muted-foreground">Store</span></SidebarGroupLabel>{navGroup(vaultItems)}</SidebarGroup>}
+      {cargoItems.some(item => allowed(item.permission)) && <SidebarGroup><SidebarGroupLabel>Cargo <span className="ml-1 text-[10px] font-normal normal-case tracking-normal text-muted-foreground">Logistics</span></SidebarGroupLabel>{navGroup(cargoItems)}</SidebarGroup>}
+      <SidebarGroup><SidebarGroupLabel>Planned modules</SidebarGroupLabel><SidebarMenu>
         <SidebarMenuItem><SidebarMenuButton isActive={current === "orders"} tooltip="Orders · Procurement" onClick={() => go("orders")}><ShoppingCart className="size-4"/><span>Orders <span className="text-xs text-muted-foreground">planned</span></span></SidebarMenuButton></SidebarMenuItem>
+        <SidebarMenuItem><SidebarMenuButton isActive={current === "people"} tooltip="People · HR" onClick={() => go("people")}><Users className="size-4"/><span>People <span className="text-xs text-muted-foreground">planned</span></span></SidebarMenuButton></SidebarMenuItem>
+        <SidebarMenuItem><SidebarMenuButton isActive={current === "ledger"} tooltip="Ledger · Finance" onClick={() => go("ledger")}><Wallet className="size-4"/><span>Ledger <span className="text-xs text-muted-foreground">planned</span></span></SidebarMenuButton></SidebarMenuItem>
       </SidebarMenu></SidebarGroup>
-      {(allowed("flux.users.manage") || allowed("vault.reference.manage")) && <SidebarGroup><SidebarGroupLabel>Administration</SidebarGroupLabel><SidebarMenu>
-        {allowed("flux.users.manage") && <SidebarMenuItem><SidebarMenuButton isActive={current === "users"} tooltip="Users & access" onClick={() => go("users")}><Users className="size-4"/><span>Users & access</span></SidebarMenuButton></SidebarMenuItem>}
-        {allowed("vault.reference.manage") && <SidebarMenuItem><SidebarMenuButton isActive={current === "reference-data"} tooltip="Vault reference data" onClick={() => go("reference-data")}><Settings2 className="size-4"/><span>Vault reference data</span></SidebarMenuButton></SidebarMenuItem>}
+      {allowed("flux.users.manage") && <SidebarGroup><SidebarGroupLabel>Administration</SidebarGroupLabel><SidebarMenu>
+        <SidebarMenuItem><SidebarMenuButton isActive={current === "users"} tooltip="Users & access" onClick={() => go("users")}><Users className="size-4"/><span>Users & access</span></SidebarMenuButton></SidebarMenuItem>
       </SidebarMenu></SidebarGroup>}
     </SidebarContent>
     <SidebarFooter className="border-t p-2"><div className="flex items-center gap-3 px-2 py-1.5"><Avatar className="size-8"><AvatarFallback>{initials}</AvatarFallback></Avatar><div className="min-w-0 group-data-[collapsible=icon]:hidden"><div className="truncate text-sm font-medium">{user.name}</div><div className="truncate text-[10px] text-muted-foreground">{user.groups?.map(group => group.name).join(", ") || "Flux user"}</div></div></div></SidebarFooter><SidebarRail/>

@@ -39,15 +39,23 @@ function PageContent() {
     dashboard: "vault.overview.view", items: "vault.catalogue.view", demands: "vault.demands.view",
     inventory: "vault.stock.view", purchasing: "vault.purchasing.view",
     users: "flux.users.manage", "reference-data": "vault.reference.manage",
-    cargo: "cargo.view",
+    cargo: "cargo.view", "cargo-shipments": "cargo.view", "cargo-packages": "cargo.view",
+    "cargo-tracking": "cargo.view", "cargo-finance": "cargo.costs.view",
+    "cargo-management": "cargo.view", "cargo-reports": "cargo.view",
   }
   if (required[currentPage] && !permissions.includes(required[currentPage])) {
-    return <div className="p-8 text-sm text-muted-foreground">You do not have access to Vault.</div>
+    return <div className="p-8 text-sm text-muted-foreground">You do not have access to this section.</div>
   }
 
   switch (currentPage) {
     case 'flux': return <FluxHome />
     case 'cargo': return <CargoPage />
+    case 'cargo-shipments': return <CargoPage />
+    case 'cargo-packages': return <CargoPage />
+    case 'cargo-tracking': return <CargoPage />
+    case 'cargo-finance': return <CargoPage />
+    case 'cargo-management': return <CargoPage />
+    case 'cargo-reports': return <CargoPage />
     case 'orders': return <PlannedModule name="Orders" />
     case 'people': return <PlannedModule name="People" />
     case 'ledger': return <PlannedModule name="Ledger" />
