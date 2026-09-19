@@ -1,6 +1,6 @@
 "use client"
 
-import { BarChart3, Boxes, ClipboardList, ContactRound, Gauge, Layers3, Package, Settings2, ShoppingCart, Truck, Users, Wallet, Warehouse } from "lucide-react"
+import { Boxes, ClipboardList, Gauge, Package, Settings2, ShoppingCart, Truck, Users, Wallet, Warehouse } from "lucide-react"
 import { useAuthStore } from "@/stores/auth-store"
 import { useAppStore, type AppPage } from "@/stores/app-store"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -17,13 +17,8 @@ const vaultItems: NavItem[] = [
 ]
 
 const cargoItems: NavItem[] = [
-  { title: "Overview", page: "cargo", permission: "cargo.view", icon: Gauge },
   { title: "Shipments", page: "cargo-shipments", permission: "cargo.view", icon: Truck },
   { title: "Packages", page: "cargo-packages", permission: "cargo.view", icon: Package },
-  { title: "Journey & tracking", page: "cargo-tracking", permission: "cargo.view", icon: Layers3 },
-  { title: "Costs & invoices", page: "cargo-finance", permission: "cargo.costs.view", icon: Wallet },
-  { title: "Partners", page: "cargo-management", permission: "cargo.view", icon: ContactRound },
-  { title: "Reports", page: "cargo-reports", permission: "cargo.view", icon: BarChart3 },
 ]
 
 export function AppSidebar() {
@@ -35,7 +30,8 @@ export function AppSidebar() {
   const allowed = (permission: string) => user.permissions?.includes(permission) ?? false
   const go = (page: AppPage) => { navigate(page); setOpenMobile(false) }
   const initials = user.name.split(" ").map((x) => x[0]).join("").slice(0, 2).toUpperCase()
-  const navGroup = (items: NavItem[]) => <SidebarMenu>{items.filter(item => allowed(item.permission)).map(item => <SidebarMenuItem key={item.page}><SidebarMenuButton isActive={current === item.page} tooltip={item.title} onClick={() => go(item.page)}><item.icon className="size-4"/><span>{item.title}</span></SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu>
+  const isActive = (page: AppPage) => current === page || (page === "cargo-shipments" && ["cargo", "cargo-tracking", "cargo-finance", "cargo-management", "cargo-reports"].includes(current))
+  const navGroup = (items: NavItem[]) => <SidebarMenu>{items.filter(item => allowed(item.permission)).map(item => <SidebarMenuItem key={item.page}><SidebarMenuButton isActive={isActive(item.page)} tooltip={item.title} onClick={() => go(item.page)}><item.icon className="size-4"/><span>{item.title}</span></SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu>
 
   return <Sidebar collapsible="icon">
     <SidebarHeader className="border-b px-4 py-3">

@@ -278,6 +278,37 @@ export async function listCargoShipments(limit = 50, cursor?: string) {
   return { shipments: page.map(row => ({ ...row, stage: row.milestones[0]?.stage ?? "NEEDS_REVIEW", milestones: undefined })), nextCursor: rows.length > limit ? page.at(-1)?.id ?? null : null }
 }
 
+export async function listCargoPackages(limit = 50, cursor?: string) {
+  const rows = await db.cargoPackage.findMany({
+    take: limit + 1,
+    ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+    orderBy: { id: "desc" },
+    select: {
+      id: true, packageNo: true, shipmentId: true, weight: true, verifiedWeight: true, createdAt: true,
+      vendor: { select: { id: true, name: true } },
+      shipment: {
+        select: {
+          shipmentNo: true, route: true,
+          forwarder: { select: { name: true } },
+          milestones: { orderBy: { sequence: "desc" }, take: 1, select: { stage: true } },
+        },
+      },
+      _count: { select: { items: true, files: true } },
+    },
+  })
+  const page = rows.slice(0, limit)
+  return {
+    packages: page.map(row => ({
+      ...row,
+      stage: row.shipment.milestones[0]?.stage ?? "NEEDS_REVIEW",
+      shipment: { ...row.shipment, milestones: undefined },
+      weight: row.weight?.toString() ?? null,
+      verifiedWeight: row.verifiedWeight?.toString() ?? null,
+    })),
+    nextCursor: rows.length > limit ? page.at(-1)?.id ?? null : null,
+  }
+}
+
 export async function cargoShipmentDetail(id: string, permissions: string[]) {
   const costs = permissions.includes("cargo.costs.view")
   const docs = permissions.includes("cargo.documents.view")

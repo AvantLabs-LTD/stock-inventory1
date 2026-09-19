@@ -12,6 +12,7 @@ An interactive administrator with flux.users.manage can POST /api/v1/service-tok
 | --- | --- | --- |
 | GET /api/v1/cargo?view=shipments&limit=50 | shipments array and nextCursor | cargo.view |
 | GET /api/v1/cargo?view=shipments&limit=50&cursor=... | Next page | cargo.view |
+| GET /api/v1/cargo?view=packages&limit=50&cursor=... | Package register with shipment context and nextCursor | cargo.view |
 | GET /api/v1/cargo?view=shipment&id=... | shipment detail | cargo.view |
 | GET /api/v1/cargo?view=references | Forwarders, couriers, vendors | cargo.view |
 | GET /api/v1/cargo?view=report | Stage, route, and charge totals | cargo.view; charges need cargo.costs.view |

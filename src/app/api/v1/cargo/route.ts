@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { forbiddenResponse, getSession, hasPermission, unauthorizedResponse } from "@/lib/auth-middleware"
-import { cargoActionPermission, cargoApiError, cargoReport, cargoShipmentDetail, executeCargoAction, listCargoShipments } from "@/lib/cargo-service"
+import { cargoActionPermission, cargoApiError, cargoReport, cargoShipmentDetail, executeCargoAction, listCargoPackages, listCargoShipments } from "@/lib/cargo-service"
 import { z } from "zod"
 
 export async function GET(request: NextRequest) {
@@ -17,6 +17,13 @@ export async function GET(request: NextRequest) {
       const cursor = request.nextUrl.searchParams.get("cursor") || undefined
       if (cursor && !(await db.cargoShipment.findUnique({ where: { id: cursor }, select: { id: true } }))) return Response.json({ code: "INVALID_CURSOR", error: "Cursor does not reference a shipment" }, { status: 400 })
       return Response.json(await listCargoShipments(parsed.data, cursor))
+    }
+    if (view === "packages") {
+      const parsed = z.coerce.number().int().min(1).max(100).safeParse(request.nextUrl.searchParams.get("limit") || 50)
+      if (!parsed.success) return Response.json({ code: "INVALID_LIMIT", error: "Limit must be an integer from 1 to 100" }, { status: 400 })
+      const cursor = request.nextUrl.searchParams.get("cursor") || undefined
+      if (cursor && !(await db.cargoPackage.findUnique({ where: { id: cursor }, select: { id: true } }))) return Response.json({ code: "INVALID_CURSOR", error: "Cursor does not reference a package" }, { status: 400 })
+      return Response.json(await listCargoPackages(parsed.data, cursor))
     }
     if (view === "report") return Response.json({ report: await cargoReport(hasPermission(session, "cargo.costs.view")) })
     if (view === "shipment") {
