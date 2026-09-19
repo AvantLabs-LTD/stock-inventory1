@@ -16,6 +16,7 @@ import { Toaster } from "@/components/ui/sonner"
 import { ThemeProvider } from "@/components/theme-provider"
 import { FluxHome, PlannedModule } from "@/components/layout/flux-home"
 import { CargoPage } from "@/components/cargo/cargo-page"
+import { OrdersPage } from "@/components/orders/orders-page"
 
 function LoadingScreen() {
   return (
@@ -42,6 +43,7 @@ function PageContent() {
     cargo: "cargo.view", "cargo-shipments": "cargo.view", "cargo-packages": "cargo.view",
     "cargo-tracking": "cargo.view", "cargo-finance": "cargo.costs.view",
     "cargo-management": "cargo.view", "cargo-reports": "cargo.view",
+    orders: "orders.view",
   }
   if (required[currentPage] && !permissions.includes(required[currentPage])) {
     return <div className="p-8 text-sm text-muted-foreground">You do not have access to this section.</div>
@@ -56,7 +58,7 @@ function PageContent() {
     case 'cargo-finance': return <CargoPage />
     case 'cargo-management': return <CargoPage />
     case 'cargo-reports': return <CargoPage />
-    case 'orders': return <PlannedModule name="Orders" />
+    case 'orders': return <OrdersPage />
     case 'people': return <PlannedModule name="People" />
     case 'ledger': return <PlannedModule name="Ledger" />
     case 'items':

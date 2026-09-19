@@ -46,8 +46,10 @@ export function AppSidebar() {
       </SidebarMenu></SidebarGroup>
       {vaultItems.some(item => allowed(item.permission)) && <SidebarGroup><SidebarGroupLabel>Vault <span className="ml-1 text-[10px] font-normal normal-case tracking-normal text-muted-foreground">Store</span></SidebarGroupLabel>{navGroup(vaultItems)}</SidebarGroup>}
       {cargoItems.some(item => allowed(item.permission)) && <SidebarGroup><SidebarGroupLabel>Cargo <span className="ml-1 text-[10px] font-normal normal-case tracking-normal text-muted-foreground">Logistics</span></SidebarGroupLabel>{navGroup(cargoItems)}</SidebarGroup>}
+      {allowed("orders.view") && <SidebarGroup><SidebarGroupLabel>Orders <span className="ml-1 text-[10px] font-normal normal-case tracking-normal text-muted-foreground">Procurement</span></SidebarGroupLabel><SidebarMenu>
+        <SidebarMenuItem><SidebarMenuButton isActive={current === "orders"} tooltip="Orders" onClick={() => go("orders")}><ShoppingCart className="size-4"/><span>Orders</span></SidebarMenuButton></SidebarMenuItem>
+      </SidebarMenu></SidebarGroup>}
       <SidebarGroup><SidebarGroupLabel>Planned modules</SidebarGroupLabel><SidebarMenu>
-        <SidebarMenuItem><SidebarMenuButton isActive={current === "orders"} tooltip="Orders · Procurement" onClick={() => go("orders")}><ShoppingCart className="size-4"/><span>Orders <span className="text-xs text-muted-foreground">planned</span></span></SidebarMenuButton></SidebarMenuItem>
         <SidebarMenuItem><SidebarMenuButton isActive={current === "people"} tooltip="People · HR" onClick={() => go("people")}><Users className="size-4"/><span>People <span className="text-xs text-muted-foreground">planned</span></span></SidebarMenuButton></SidebarMenuItem>
         <SidebarMenuItem><SidebarMenuButton isActive={current === "ledger"} tooltip="Ledger · Finance" onClick={() => go("ledger")}><Wallet className="size-4"/><span>Ledger <span className="text-xs text-muted-foreground">planned</span></span></SidebarMenuButton></SidebarMenuItem>
       </SidebarMenu></SidebarGroup>

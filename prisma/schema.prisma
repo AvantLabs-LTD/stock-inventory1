@@ -129,6 +129,15 @@ enum CargoFileKind {
   OTHER
 }
 
+enum ProcurementOrderStatus {
+  DRAFT
+  PLACED
+  PAID
+  SUPPLIER_SHIPPED
+  CLOSED
+  CANCELLED
+}
+
 model User {
   id                   String                   @id @default(cuid())
   email                String                   @unique
@@ -165,6 +174,7 @@ model User {
   cargoFilesUploaded    CargoFile[]              @relation("CargoFileUploadedBy")
   serviceTokens         ServiceToken[]
   cargoRequestKeys      CargoRequestKey[]
+  procurementOrdersCreated ProcurementOrder[] @relation("ProcurementOrderCreatedBy")
 }
 
 model ServiceToken {
@@ -302,6 +312,7 @@ model Vendor {
   demandLines      DemandLine[]
   purchaseRequests PurchaseRequest[]
   cargoPackages    CargoPackage[]
+  procurementOrders ProcurementOrder[]
 
   @@index([name])
   @@map("vendors")
@@ -338,6 +349,7 @@ model Item {
   ledgerEntries          InventoryLedgerEntry[]
   purchaseLines          PurchaseRequestLine[]
   receiptLines           GoodsReceiptLine[]
+  procurementOrderLines  ProcurementOrderLine[]
   adjustmentLines        InventoryAdjustmentLine[]
 
   @@index([title])
@@ -993,6 +1005,61 @@ model CargoLegacyEvent {
 
 // The only authoritative correspondence between PakLogix IDs and Flux IDs.
 // A null target and reviewReason is an explicit unresolved import item.
+// Orders are generic supplier orders. Marketplace-specific fields are retained
+// only as source provenance, so the same model supports direct and agent orders.
+model ProcurementOrder {
+  id                String                 @id @default(cuid())
+  source            String
+  orderNo           String
+  status            ProcurementOrderStatus @default(DRAFT)
+  sourceStatus      String?
+  vendorId          String?
+  supplierName      String
+  submittedAt       DateTime?
+  currency          String                 @default("PKR") @db.VarChar(3)
+  paidAmount        Decimal?               @db.Decimal(14, 4)
+  shippingAmount    Decimal?               @db.Decimal(14, 4)
+  courierName       String?
+  trackingNumber    String?
+  notes             String?
+  sourceFileName    String?
+  sourcePayload     Json?
+  createdById       String
+  statusRecord      RecordStatus           @default(ACTIVE)
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+  vendor            Vendor?                @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  createdBy         User                   @relation("ProcurementOrderCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  lines             ProcurementOrderLine[]
+
+  @@unique([source, orderNo])
+  @@index([status, submittedAt])
+  @@index([vendorId])
+  @@index([trackingNumber])
+  @@map("procurement_orders")
+}
+
+model ProcurementOrderLine {
+  id          String             @id @default(cuid())
+  orderId     String
+  lineNo      Int
+  itemId      String?
+  description String
+  productUrl  String?
+  variant     String?
+  quantity    Decimal            @db.Decimal(14, 3)
+  unitPrice   Decimal?           @db.Decimal(14, 4)
+  notes       String?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  order       ProcurementOrder   @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  item        Item?              @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@unique([orderId, lineNo])
+  @@index([itemId])
+  @@map("procurement_order_lines")
+}
+
 model CargoImportRecord {
   sourceType   String
   sourceId     String
