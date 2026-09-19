@@ -49,7 +49,7 @@ CREATE TABLE "procurement_order_lines" (
   "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updatedAt" TIMESTAMP(3) NOT NULL,
   CONSTRAINT "procurement_order_lines_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "procurement_orders"("id") ON DELETE RESTRICT ON UPDATE CASCADE,
-  CONSTRAINT "procurement_order_lines_itemId_fkey" FOREIGN KEY ("itemId") REFERENCES "Item"("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT "procurement_order_lines_itemId_fkey" FOREIGN KEY ("itemId") REFERENCES "items"("id") ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT "procurement_order_lines_quantity_check" CHECK ("quantity" > 0),
   CONSTRAINT "procurement_order_lines_unitPrice_check" CHECK ("unitPrice" IS NULL OR "unitPrice" >= 0),
   CONSTRAINT "procurement_order_lines_orderId_lineNo_key" UNIQUE ("orderId", "lineNo")
