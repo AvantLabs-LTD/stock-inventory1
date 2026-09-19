@@ -43,3 +43,19 @@ Map the exported header values to `source = "Taobao"`, `orderNo`,
 
 Do not map `Transaction Completed` to stock receipt or Cargo received. It is
 only a Taobao platform state.
+
+## Importing an exported Taobao workbook
+
+Use the API-only importer from the Store repository. It reads the workbook,
+groups its product rows under their order reference, and preserves the
+marketplace status separately from the Flux order status:
+
+```sh
+python scripts/import-taobao-orders.py ../logix/orders/taobao-orders-translated-en.xlsx
+python scripts/import-taobao-orders.py ../logix/orders/taobao-orders-translated-en.xlsx --apply
+```
+
+The first command is a dry run. The apply command uses the configured local
+API client session and skips existing `Taobao` order references, so it is safe
+to re-run after an interrupted import. It never creates Vault stock movements,
+Cargo shipments, or goods receipts.
