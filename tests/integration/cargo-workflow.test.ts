@@ -97,7 +97,10 @@ test("forwarded routes require correct warehouse and advance through source", { 
   await executeCargoAction("milestone.post", { shipmentId: String(shipment.id), stage: "TO_SOURCE_WAREHOUSE", occurredAt: new Date(Date.now() + 1000).toISOString() }, actor)
   assert.equal((await prisma.cargoMilestone.findMany({ where: { shipmentId: String(shipment.id) }, orderBy: { sequence: "asc" } })).at(-1)?.stage, "TO_SOURCE_WAREHOUSE")
   await executeCargoAction("tracking.save", { shipmentId: String(autoSelected.id), kind: "SOURCE_INLAND", trackingNumber: "CN-1" }, actor)
-  await assert.rejects(executeCargoAction("package.reassign", { id: String(movable.id), shipmentId: String(shipment.id) }, actor), (error: unknown) => error instanceof CargoError && error.code === "JOURNEY_LOCKED")
+  await executeCargoAction("package.reassign", { id: String(movable.id), shipmentId: String(shipment.id) }, actor)
+  await executeCargoAction("milestone.post", { shipmentId: String(shipment.id), stage: "AT_SOURCE_WAREHOUSE", occurredAt: new Date(Date.now() + 2000).toISOString() }, actor)
+  await executeCargoAction("milestone.post", { shipmentId: String(shipment.id), stage: "IN_INTERNATIONAL_TRANSIT", occurredAt: new Date(Date.now() + 3000).toISOString() }, actor)
+  await assert.rejects(executeCargoAction("package.reassign", { id: String(movable.id), shipmentId: String(autoSelected.id) }, actor), (error: unknown) => error instanceof CargoError && error.code === "JOURNEY_LOCKED")
 })
 
 test("matching tracked shipments merge without losing package-linked history", { skip: !enabled }, async () => {

@@ -74,7 +74,7 @@ export const cargoActionPermission: Record<string, string> = {
   "shipment.create": "cargo.shipments.manage", "shipment.update": "cargo.shipments.manage", "shipment.merge": "cargo.shipments.manage", "shipment.archive": "cargo.shipments.manage", "shipment.delete": "cargo.shipments.manage",
   "package.create": "cargo.packages.manage", "package.update": "cargo.packages.manage", "package.reassign": "cargo.packages.manage", "package.archive": "cargo.packages.manage", "package.delete": "cargo.packages.manage",
   "item.save": "cargo.packages.manage", "item.remove": "cargo.packages.manage",
-  "milestone.post": "cargo.milestones.post", "tracking.save": "cargo.tracking.manage", "tracking.delete": "cargo.tracking.manage",
+  "milestone.post": "cargo.milestones.post", "journey.note": "cargo.milestones.post", "tracking.save": "cargo.tracking.manage", "tracking.delete": "cargo.tracking.manage",
   "invoice.save": "cargo.costs.manage", "invoice.delete": "cargo.costs.manage", "charge.save": "cargo.costs.manage", "charge.delete": "cargo.costs.manage",
   "file.delete": "cargo.documents.manage",
 }
@@ -90,6 +90,8 @@ const nextStage: Record<CargoStage, CargoStage[]> = {
   OUT_FOR_DELIVERY: [CargoStage.RECEIVED],
   RECEIVED: [],
 }
+const preInternationalStages = new Set<CargoStage>([CargoStage.AT_VENDOR, CargoStage.TO_SOURCE_WAREHOUSE, CargoStage.AT_SOURCE_WAREHOUSE])
+const customsStages = new Set<CargoStage>([CargoStage.CUSTOMS_PENDING, CargoStage.CUSTOMS_CLEARED])
 
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical)
@@ -135,15 +137,17 @@ async function performCargoAction(tx: Tx, action: string, raw: unknown, actor: A
         return row
       }
       case "shipment.update": {
-        const v = z.object({ id, shipmentNo: optionalIdentifier, notes: optionalText, forwarderId: optionalId, sourceWarehouseId: optionalId }).parse(raw)
+        const v = z.object({ id, shipmentNo: optionalIdentifier, route: z.nativeEnum(CargoRoute).optional(), notes: optionalText, forwarderId: optionalId, sourceWarehouseId: optionalId }).parse(raw)
         const old = await tx.cargoShipment.findUniqueOrThrow({ where: { id: v.id }, include: { milestones: true, trackingLegs: true } })
-        const journeyLocked = old.milestones.length > 1 || old.trackingLegs.length > 0
-        if (journeyLocked && (v.forwarderId !== old.forwarderId || v.sourceWarehouseId !== old.sourceWarehouseId)) throw new CargoError("JOURNEY_LOCKED", "Route and source warehouse are locked after journey or tracking starts")
-        if (old.route === "DIRECT" && (v.forwarderId || v.sourceWarehouseId)) throw new CargoError("INVALID_ROUTE", "Direct courier route cannot use a source warehouse")
-        if (old.route === "FORWARDED" && !v.forwarderId) throw new CargoError("FORWARDER_REQUIRED", "Choose a forwarder")
+        const currentStage = old.milestones.reduce((latest, milestone) => milestone.sequence > latest.sequence ? milestone : latest, old.milestones[0])?.stage
+        const journeyLocked = !preInternationalStages.has(currentStage || CargoStage.IN_INTERNATIONAL_TRANSIT)
+        const route = v.route || old.route
+        if (journeyLocked && (route !== old.route || v.forwarderId !== old.forwarderId || v.sourceWarehouseId !== old.sourceWarehouseId)) throw new CargoError("JOURNEY_LOCKED", "Route and source warehouse are locked after international transit begins")
+        if (route === "DIRECT" && (v.forwarderId || v.sourceWarehouseId)) throw new CargoError("INVALID_ROUTE", "Direct courier route cannot use a source warehouse")
+        if (route === "FORWARDED" && !v.forwarderId) throw new CargoError("FORWARDER_REQUIRED", "Choose a forwarder")
         const warehouseId = journeyLocked ? old.sourceWarehouseId : await sourceWarehouse(tx, v.forwarderId, v.sourceWarehouseId)
         const shipmentNo = await uniqueCargoNumber(tx, "shipment", v.shipmentNo || old.shipmentNo, v.id)
-        const row = await tx.cargoShipment.update({ where: { id: v.id }, data: { shipmentNo, notes: v.notes, forwarderId: v.forwarderId, sourceWarehouseId: warehouseId } })
+        const row = await tx.cargoShipment.update({ where: { id: v.id }, data: { shipmentNo, route, notes: v.notes, forwarderId: v.forwarderId, sourceWarehouseId: warehouseId } })
         await audit(tx, actor, "CARGO_SHIPMENT_UPDATE", "CargoShipment", row.id, { before: old, after: v })
         return row
       }
@@ -276,7 +280,7 @@ async function performCargoAction(tx: Tx, action: string, raw: unknown, actor: A
         const shipments = await tx.cargoShipment.findMany({ where: { id: { in: [row.shipmentId, v.shipmentId] } }, include: { milestones: true, trackingLegs: true, _count: { select: { packages: true, invoices: true, charges: true, files: true } } } })
         if (shipments.length !== 2) throw new CargoError("SHIPMENT_NOT_FOUND", "Destination shipment not found", 404)
         if (shipments.some(s => s.status !== "ACTIVE")) throw new CargoError("SHIPMENT_ARCHIVED", "Restore both shipments before reassigning a package", 409)
-        if (shipments.some(s => s.milestones.length > 1 || s.trackingLegs.length)) throw new CargoError("JOURNEY_LOCKED", "Package reassignment locks after first journey or tracking update", 409)
+        if (shipments.some(s => !preInternationalStages.has(s.milestones.reduce((latest, milestone) => milestone.sequence > latest.sequence ? milestone : latest, s.milestones[0])?.stage || CargoStage.IN_INTERNATIONAL_TRANSIT))) throw new CargoError("JOURNEY_LOCKED", "Package reassignment locks once either shipment enters international transit", 409)
         const source = shipments.find(s => s.id === row.shipmentId)!
         if (source._count.packages === 1 && (source._count.invoices || source._count.charges || source._count.files)) throw new CargoError("SHIPMENT_HAS_HISTORY", "The only carton cannot leave a shipment with financial or document history", 409)
         if (row.invoices.length || row.charges.length || row.files.length) throw new CargoError("PACKAGE_HAS_HISTORY", "Package-linked financial or document history prevents reassignment", 409)
@@ -299,22 +303,25 @@ async function performCargoAction(tx: Tx, action: string, raw: unknown, actor: A
         await audit(tx, actor, "CARGO_PACKING_ITEM_REMOVE", "CargoPackageItem", v.id, old)
         return { id: v.id }
       }
-      case "milestone.post": {
-        const v = z.object({ shipmentId: id, stage: z.nativeEnum(CargoStage), occurredAt: date, location: optionalText, remarks: optionalText, trackingNumber: optionalText, courierId: optionalId, trackingKind: z.nativeEnum(CargoLegKind).optional(), dispatchedAt: optionalDate, arrivedAt: optionalDate }).parse(raw)
+      case "milestone.post":
+      case "journey.note": {
+        const v = z.object({ shipmentId: id, stage: z.nativeEnum(CargoStage).optional(), occurredAt: date, location: optionalText, remarks: optionalText, trackingNumber: optionalText, courierId: optionalId, dispatchedAt: optionalDate, arrivedAt: optionalDate }).parse(raw)
         const shipment = await tx.cargoShipment.findUniqueOrThrow({ where: { id: v.shipmentId }, include: { milestones: { orderBy: { sequence: "desc" }, take: 1 } } })
         const previous = shipment.milestones[0]
-        if (previous && !nextStage[previous.stage].includes(v.stage)) throw new CargoError("INVALID_STAGE", "Invalid Cargo journey transition", 409)
-        if (shipment.route === "DIRECT" && ["TO_SOURCE_WAREHOUSE", "AT_SOURCE_WAREHOUSE"].includes(v.stage)) throw new CargoError("INVALID_ROUTE", "Direct route bypasses source warehouse")
-        if (shipment.route === "FORWARDED" && previous?.stage === "AT_VENDOR" && v.stage !== "TO_SOURCE_WAREHOUSE") throw new CargoError("INVALID_ROUTE", "Forwarded route first travels to source warehouse")
+        const stage = action === "journey.note" ? previous?.stage : v.stage
+        if (!stage) throw new CargoError("STAGE_REQUIRED", "A shipment needs a verified stage before an operational note can be added", 409)
+        if (action === "milestone.post" && previous && !nextStage[previous.stage].includes(stage)) throw new CargoError("INVALID_STAGE", "Invalid Cargo journey transition", 409)
+        if (shipment.route === "DIRECT" && ["TO_SOURCE_WAREHOUSE", "AT_SOURCE_WAREHOUSE"].includes(stage)) throw new CargoError("INVALID_ROUTE", "Direct route bypasses source warehouse")
+        if (action === "milestone.post" && shipment.route === "FORWARDED" && previous?.stage === "AT_VENDOR" && stage !== "TO_SOURCE_WAREHOUSE") throw new CargoError("INVALID_ROUTE", "Forwarded route first travels to source warehouse")
         if (previous && v.occurredAt < previous.occurredAt) throw new CargoError("INVALID_DATE", "Journey date cannot precede the previous milestone")
         if (v.dispatchedAt && v.arrivedAt && v.arrivedAt < v.dispatchedAt) throw new CargoError("INVALID_DATE", "Tracking arrival precedes dispatch")
-        if (v.trackingNumber && v.trackingKind === "SOURCE_INLAND" && shipment.route === "DIRECT") throw new CargoError("INVALID_ROUTE", "Direct route has no source inland leg")
-        const row = await tx.cargoMilestone.create({ data: { shipmentId: v.shipmentId, sequence: previous ? previous.sequence + 1 : 0, stage: v.stage, occurredAt: v.occurredAt, location: v.location, remarks: v.remarks, postedById: actor.id } })
-        if (v.trackingNumber) {
+        const row = await tx.cargoMilestone.create({ data: { shipmentId: v.shipmentId, sequence: previous ? previous.sequence + 1 : 0, stage, occurredAt: v.occurredAt, location: v.location, remarks: v.remarks, postedById: actor.id } })
+        if (action === "milestone.post" && v.trackingNumber) {
           const sequence = (await tx.cargoTrackingLeg.aggregate({ where: { shipmentId: v.shipmentId }, _max: { sequence: true } }))._max.sequence ?? -1
-          await tx.cargoTrackingLeg.create({ data: { shipmentId: v.shipmentId, sequence: sequence + 1, kind: v.trackingKind || "INTERNATIONAL", courierId: v.courierId, trackingNumber: v.trackingNumber, dispatchedAt: v.dispatchedAt || v.occurredAt, arrivedAt: v.arrivedAt, remarks: v.remarks } })
+          const kind = stage === CargoStage.TO_SOURCE_WAREHOUSE ? CargoLegKind.SOURCE_INLAND : customsStages.has(stage) ? CargoLegKind.CUSTOMS : stage === CargoStage.OUT_FOR_DELIVERY ? CargoLegKind.DESTINATION_INLAND : CargoLegKind.INTERNATIONAL
+          await tx.cargoTrackingLeg.create({ data: { shipmentId: v.shipmentId, sequence: sequence + 1, kind, courierId: v.courierId, trackingNumber: v.trackingNumber, dispatchedAt: v.dispatchedAt || v.occurredAt, arrivedAt: v.arrivedAt, remarks: v.remarks } })
         }
-        await audit(tx, actor, "CARGO_MILESTONE_POST", "CargoMilestone", row.id, v)
+        await audit(tx, actor, action === "journey.note" ? "CARGO_JOURNEY_NOTE" : "CARGO_MILESTONE_POST", "CargoMilestone", row.id, v)
         return row
       }
       case "tracking.save": {

@@ -33,7 +33,7 @@ POST /api/v1/cargo accepts a JSON object with action and data fields and returns
 | reference.create | kind (forwarder, warehouse, courier), name; warehouse needs forwarderId | cargo.reference.manage |
 | reference.update | kind, id, name, status; optional notes | cargo.reference.manage |
 | shipment.create | route and optional shipmentNo; forwarded needs forwarderId and possibly sourceWarehouseId | cargo.shipments.manage |
-| shipment.update | id, optional shipmentNo, forwarderId, sourceWarehouseId, notes; route/source lock after journey starts | cargo.shipments.manage |
+| shipment.update | id, optional shipmentNo, route, forwarderId, sourceWarehouseId, notes; route/source details lock once international transit begins | cargo.shipments.manage |
 | shipment.merge | targetShipmentId, sourceShipmentIds, trackingNumber; consolidates shipments only when route, source, stage, and the sole tracking leg agree | cargo.shipments.manage |
 | shipment.archive | id and archived boolean | cargo.shipments.manage |
 | shipment.delete | id; allowed only before packages or operational history exist | cargo.shipments.manage |
@@ -44,7 +44,8 @@ POST /api/v1/cargo accepts a JSON object with action and data fields and returns
 | package.delete | id; allowed only before contents, documents, costs, or imported history exist | cargo.packages.manage |
 | item.save | packageId, description, positive quantity; optional id to edit | cargo.packages.manage |
 | item.remove | id | cargo.packages.manage |
-| milestone.post | shipmentId, next valid stage, ISO occurredAt; optional location/remarks and optional trackingNumber/courierId/trackingKind to record tracking with the status update | cargo.milestones.post |
+| milestone.post | shipmentId, next valid stage, ISO occurredAt; optional location/remarks and optional trackingNumber/courierId to record tracking with the status update; the tracking leg is inferred from the stage | cargo.milestones.post |
+| journey.note | shipmentId, ISO occurredAt, required remarks, optional location; adds an immutable operational update without advancing status | cargo.milestones.post |
 | tracking.save | shipmentId, kind; optional id to edit, courier/tracking/dates/remarks | cargo.tracking.manage |
 | tracking.delete | id; allowed only when no invoice or charge still references the leg | cargo.tracking.manage |
 | invoice.save | shipmentId, uppercase three-letter currency; optional id, package/leg, total/date/issuer | cargo.costs.manage |
