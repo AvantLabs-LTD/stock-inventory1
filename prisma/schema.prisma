@@ -790,6 +790,7 @@ model CargoShipment {
   sourceWarehouseId String?
   createdById       String
   notes             String?
+  status            RecordStatus          @default(ACTIVE)
   createdAt         DateTime              @default(now())
   updatedAt         DateTime              @updatedAt
   forwarder         CargoForwarder?       @relation(fields: [forwarderId], references: [id], onDelete: Restrict)
@@ -819,6 +820,7 @@ model CargoPackage {
   width          Decimal?           @db.Decimal(12, 2)
   height         Decimal?           @db.Decimal(12, 2)
   notes          String?
+  status         RecordStatus       @default(ACTIVE)
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
   shipment       CargoShipment      @relation(fields: [shipmentId], references: [id], onDelete: Restrict)

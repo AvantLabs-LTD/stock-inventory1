@@ -31,4 +31,6 @@ test("Cargo sections have distinct, shareable routes", () => {
   assert.equal(pagePaths["cargo-finance"], "/cargo/finance")
   assert.equal(pagePaths["cargo-management"], "/cargo/management")
   assert.equal(pagePaths["cargo-reports"], "/cargo/reports")
+  assert.equal(pageFromPath("/cargo/shipments/shipment-123"), "cargo-shipments")
+  assert.equal(pageFromPath("/cargo/packages/package-123"), "cargo-packages")
 })

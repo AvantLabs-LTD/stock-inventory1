@@ -16,6 +16,11 @@ test("Cargo shipment identity, journey locking, costs and cross-shipment links",
   const second = await executeCargoAction("shipment.create", { route: "DIRECT" }, actor)
   assert.ok(second && "id" in second)
   const secondShipmentId = String(second.id)
+  const named = await executeCargoAction("shipment.create", { shipmentNo: `AL-2026-${suffix}`, route: "DIRECT" }, actor)
+  assert.equal((await prisma.cargoShipment.findUniqueOrThrow({ where: { id: String(named.id) } })).shipmentNo, `AL-2026-${suffix}`)
+  await assert.rejects(executeCargoAction("shipment.create", { shipmentNo: `al-2026-${suffix}`, route: "DIRECT" }, actor), (error: unknown) => error instanceof CargoError && error.code === "DUPLICATE_IDENTIFIER")
+  await executeCargoAction("shipment.archive", { id: String(named.id), archived: true }, actor)
+  assert.equal((await prisma.cargoShipment.findUniqueOrThrow({ where: { id: String(named.id) } })).status, "ARCHIVED")
   const retryKey = `cargo-create-${suffix}`
   const retryable = await executeCargoAction("shipment.create", { route: "DIRECT" }, actor, retryKey)
   const repeated = await executeCargoAction("shipment.create", { route: "DIRECT" }, actor, retryKey)
@@ -47,6 +52,11 @@ test("Cargo shipment identity, journey locking, costs and cross-shipment links",
   await assert.rejects(executeCargoAction("milestone.post", { shipmentId: secondShipmentId, stage: "CUSTOMS_CLEARED", occurredAt: new Date(Date.now() + 2000).toISOString() }, actor), (error: unknown) => error instanceof CargoError && error.code === "INVALID_STAGE")
   assert.equal(await prisma.cargoMilestone.count({ where: { shipmentId: secondShipmentId } }), 2)
   assert.ok(await prisma.auditLog.count({ where: { userId: user.id, action: { startsWith: "CARGO_" } } }) >= 6)
+
+  const disposable = await executeCargoAction("shipment.create", { shipmentNo: `DELETE-${suffix}`, route: "DIRECT" }, actor)
+  await executeCargoAction("shipment.delete", { id: String(disposable.id) }, actor)
+  assert.equal(await prisma.cargoShipment.findUnique({ where: { id: String(disposable.id) } }), null)
+  await assert.rejects(executeCargoAction("shipment.delete", { id: firstShipmentId }, actor), (error: unknown) => error instanceof CargoError && error.code === "SHIPMENT_HAS_HISTORY")
 })
 
 test("forwarded routes require correct warehouse and advance through source", { skip: !enabled }, async () => {

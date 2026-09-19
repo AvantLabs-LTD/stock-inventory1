@@ -22,6 +22,7 @@ const id = z.string().trim().min(1).max(100)
 const text = z.string().trim().min(1).max(500)
 const optionalText = z.string().trim().max(4000).nullish().transform(v => v || null)
 const optionalId = id.nullish().transform(v => v || null)
+const optionalIdentifier = z.string().trim().min(1).max(100).nullish().transform(v => v || null)
 function decimal(scale: number, integerDigits: number, allowZero = false) {
   const input = z.union([z.string().trim(), z.number().finite().transform(String)])
   return input.refine(value => {
@@ -59,10 +60,19 @@ async function sourceWarehouse(tx: Tx, forwarderId: string | null, selectedId: s
 
 function number(prefix: string) { return `${prefix}-${Date.now().toString(36).toUpperCase()}-${randomUUID().slice(0, 6).toUpperCase()}` }
 
+async function uniqueCargoNumber(tx: Tx, kind: "shipment" | "package", requested: string | null, currentId?: string) {
+  const value = requested || number(kind === "shipment" ? "CS" : "CP")
+  const duplicate = kind === "shipment"
+    ? await tx.cargoShipment.findFirst({ where: { shipmentNo: { equals: value, mode: "insensitive" }, ...(currentId ? { id: { not: currentId } } : {}) }, select: { id: true } })
+    : await tx.cargoPackage.findFirst({ where: { packageNo: { equals: value, mode: "insensitive" }, ...(currentId ? { id: { not: currentId } } : {}) }, select: { id: true } })
+  if (duplicate) throw new CargoError("DUPLICATE_IDENTIFIER", `A ${kind} named “${value}” already exists`, 409)
+  return value
+}
+
 export const cargoActionPermission: Record<string, string> = {
   "reference.create": "cargo.reference.manage", "reference.update": "cargo.reference.manage",
-  "shipment.create": "cargo.shipments.manage", "shipment.update": "cargo.shipments.manage",
-  "package.create": "cargo.packages.manage", "package.update": "cargo.packages.manage", "package.reassign": "cargo.packages.manage",
+  "shipment.create": "cargo.shipments.manage", "shipment.update": "cargo.shipments.manage", "shipment.archive": "cargo.shipments.manage", "shipment.delete": "cargo.shipments.manage",
+  "package.create": "cargo.packages.manage", "package.update": "cargo.packages.manage", "package.reassign": "cargo.packages.manage", "package.archive": "cargo.packages.manage", "package.delete": "cargo.packages.manage",
   "item.save": "cargo.packages.manage", "item.remove": "cargo.packages.manage",
   "milestone.post": "cargo.milestones.post", "tracking.save": "cargo.tracking.manage",
   "invoice.save": "cargo.costs.manage", "charge.save": "cargo.costs.manage",
@@ -114,49 +124,86 @@ async function performCargoAction(tx: Tx, action: string, raw: unknown, actor: A
         return row
       }
       case "shipment.create": {
-        const v = z.object({ route: z.nativeEnum(CargoRoute), forwarderId: optionalId, sourceWarehouseId: optionalId, notes: optionalText }).parse(raw)
+        const v = z.object({ shipmentNo: optionalIdentifier, route: z.nativeEnum(CargoRoute), forwarderId: optionalId, sourceWarehouseId: optionalId, notes: optionalText }).parse(raw)
         if (v.route === "DIRECT" && (v.forwarderId || v.sourceWarehouseId)) throw new CargoError("INVALID_ROUTE", "Direct courier route cannot use a source warehouse")
         if (v.route === "FORWARDED" && !v.forwarderId) throw new CargoError("FORWARDER_REQUIRED", "Choose a forwarder")
         const warehouseId = await sourceWarehouse(tx, v.forwarderId, v.sourceWarehouseId)
-        const row = await tx.cargoShipment.create({ data: { shipmentNo: number("CS"), route: v.route, forwarderId: v.forwarderId, sourceWarehouseId: warehouseId, notes: v.notes, createdById: actor.id, milestones: { create: { sequence: 0, stage: CargoStage.AT_VENDOR, occurredAt: new Date(), postedById: actor.id } } }, include: { milestones: true } })
+        const shipmentNo = await uniqueCargoNumber(tx, "shipment", v.shipmentNo)
+        const row = await tx.cargoShipment.create({ data: { shipmentNo, route: v.route, forwarderId: v.forwarderId, sourceWarehouseId: warehouseId, notes: v.notes, createdById: actor.id, milestones: { create: { sequence: 0, stage: CargoStage.AT_VENDOR, occurredAt: new Date(), postedById: actor.id } } }, include: { milestones: true } })
         await audit(tx, actor, "CARGO_SHIPMENT_CREATE", "CargoShipment", row.id, v)
         return row
       }
       case "shipment.update": {
-        const v = z.object({ id, notes: optionalText, forwarderId: optionalId, sourceWarehouseId: optionalId }).parse(raw)
+        const v = z.object({ id, shipmentNo: optionalIdentifier, notes: optionalText, forwarderId: optionalId, sourceWarehouseId: optionalId }).parse(raw)
         const old = await tx.cargoShipment.findUniqueOrThrow({ where: { id: v.id }, include: { milestones: true, trackingLegs: true } })
-        if (old.milestones.length > 1 || old.trackingLegs.length) throw new CargoError("JOURNEY_LOCKED", "Route and source warehouse are locked after journey or tracking starts")
+        const journeyLocked = old.milestones.length > 1 || old.trackingLegs.length > 0
+        if (journeyLocked && (v.forwarderId !== old.forwarderId || v.sourceWarehouseId !== old.sourceWarehouseId)) throw new CargoError("JOURNEY_LOCKED", "Route and source warehouse are locked after journey or tracking starts")
         if (old.route === "DIRECT" && (v.forwarderId || v.sourceWarehouseId)) throw new CargoError("INVALID_ROUTE", "Direct courier route cannot use a source warehouse")
         if (old.route === "FORWARDED" && !v.forwarderId) throw new CargoError("FORWARDER_REQUIRED", "Choose a forwarder")
-        const warehouseId = await sourceWarehouse(tx, v.forwarderId, v.sourceWarehouseId)
-        const row = await tx.cargoShipment.update({ where: { id: v.id }, data: { notes: v.notes, forwarderId: v.forwarderId, sourceWarehouseId: warehouseId } })
+        const warehouseId = journeyLocked ? old.sourceWarehouseId : await sourceWarehouse(tx, v.forwarderId, v.sourceWarehouseId)
+        const shipmentNo = await uniqueCargoNumber(tx, "shipment", v.shipmentNo || old.shipmentNo, v.id)
+        const row = await tx.cargoShipment.update({ where: { id: v.id }, data: { shipmentNo, notes: v.notes, forwarderId: v.forwarderId, sourceWarehouseId: warehouseId } })
         await audit(tx, actor, "CARGO_SHIPMENT_UPDATE", "CargoShipment", row.id, { before: old, after: v })
         return row
       }
       case "package.create": {
-        const v = z.object({ shipmentId: optionalId, route: z.nativeEnum(CargoRoute).optional(), forwarderId: optionalId, sourceWarehouseId: optionalId, vendorId: optionalId, weight, verifiedWeight: weight, length: dimension, width: dimension, height: dimension, notes: optionalText }).parse(raw)
+        const v = z.object({ packageNo: optionalIdentifier, shipmentNo: optionalIdentifier, shipmentId: optionalId, route: z.nativeEnum(CargoRoute).optional(), forwarderId: optionalId, sourceWarehouseId: optionalId, vendorId: optionalId, weight, verifiedWeight: weight, length: dimension, width: dimension, height: dimension, notes: optionalText }).parse(raw)
         let shipmentId = v.shipmentId
         if (!shipmentId) {
           if (!v.route) throw new CargoError("ROUTE_REQUIRED", "Choose a route")
           if (v.route === "DIRECT" && (v.forwarderId || v.sourceWarehouseId)) throw new CargoError("INVALID_ROUTE", "Direct courier route cannot use a source warehouse")
           if (v.route === "FORWARDED" && !v.forwarderId) throw new CargoError("FORWARDER_REQUIRED", "Choose a forwarder")
           const warehouseId = await sourceWarehouse(tx, v.forwarderId, v.sourceWarehouseId)
-          const shipment = await tx.cargoShipment.create({ data: { shipmentNo: number("CS"), route: v.route, forwarderId: v.forwarderId, sourceWarehouseId: warehouseId, createdById: actor.id, milestones: { create: { sequence: 0, stage: CargoStage.AT_VENDOR, occurredAt: new Date(), postedById: actor.id } } } })
+          const shipmentNo = await uniqueCargoNumber(tx, "shipment", v.shipmentNo)
+          const shipment = await tx.cargoShipment.create({ data: { shipmentNo, route: v.route, forwarderId: v.forwarderId, sourceWarehouseId: warehouseId, createdById: actor.id, milestones: { create: { sequence: 0, stage: CargoStage.AT_VENDOR, occurredAt: new Date(), postedById: actor.id } } } })
           shipmentId = shipment.id
         } else {
           const shipment = await tx.cargoShipment.findUniqueOrThrow({ where: { id: shipmentId }, include: { milestones: true, trackingLegs: true } })
+          if (shipment.status !== "ACTIVE") throw new CargoError("SHIPMENT_ARCHIVED", "Restore the shipment before adding packages", 409)
           if (shipment.milestones.length > 1 || shipment.trackingLegs.length) throw new CargoError("JOURNEY_LOCKED", "New cartons can only join an immature shipment")
         }
-        const row = await tx.cargoPackage.create({ data: { packageNo: number("CP"), shipmentId, vendorId: v.vendorId, weight: v.weight, verifiedWeight: v.verifiedWeight, length: v.length, width: v.width, height: v.height, notes: v.notes } })
+        const packageNo = await uniqueCargoNumber(tx, "package", v.packageNo)
+        const row = await tx.cargoPackage.create({ data: { packageNo, shipmentId, vendorId: v.vendorId, weight: v.weight, verifiedWeight: v.verifiedWeight, length: v.length, width: v.width, height: v.height, notes: v.notes } })
         await audit(tx, actor, "CARGO_PACKAGE_CREATE", "CargoPackage", row.id, v)
         return row
       }
       case "package.update": {
-        const v = z.object({ id, vendorId: optionalId, weight, verifiedWeight: weight, length: dimension, width: dimension, height: dimension, notes: optionalText }).parse(raw)
+        const v = z.object({ id, packageNo: optionalIdentifier, vendorId: optionalId, weight, verifiedWeight: weight, length: dimension, width: dimension, height: dimension, notes: optionalText }).parse(raw)
         const old = await tx.cargoPackage.findUniqueOrThrow({ where: { id: v.id } })
-        const row = await tx.cargoPackage.update({ where: { id: v.id }, data: { vendorId: v.vendorId, weight: v.weight, verifiedWeight: v.verifiedWeight, length: v.length, width: v.width, height: v.height, notes: v.notes } })
+        const packageNo = await uniqueCargoNumber(tx, "package", v.packageNo || old.packageNo, v.id)
+        const row = await tx.cargoPackage.update({ where: { id: v.id }, data: { packageNo, vendorId: v.vendorId, weight: v.weight, verifiedWeight: v.verifiedWeight, length: v.length, width: v.width, height: v.height, notes: v.notes } })
         await audit(tx, actor, "CARGO_PACKAGE_UPDATE", "CargoPackage", row.id, { before: old, after: v })
         return row
+      }
+      case "shipment.archive": {
+        const v = z.object({ id, archived: z.boolean().default(true) }).parse(raw)
+        const row = await tx.cargoShipment.update({ where: { id: v.id }, data: { status: v.archived ? "ARCHIVED" : "ACTIVE" } })
+        await audit(tx, actor, v.archived ? "CARGO_SHIPMENT_ARCHIVE" : "CARGO_SHIPMENT_RESTORE", "CargoShipment", row.id, v)
+        return row
+      }
+      case "shipment.delete": {
+        const v = z.object({ id }).parse(raw)
+        const row = await tx.cargoShipment.findUniqueOrThrow({ where: { id: v.id }, include: { milestones: true, _count: { select: { packages: true, trackingLegs: true, invoices: true, charges: true, files: true, legacyEvents: true } } } })
+        const hasHistory = row._count.packages || row._count.trackingLegs || row._count.invoices || row._count.charges || row._count.files || row._count.legacyEvents || row.milestones.length > 1
+        if (hasHistory) throw new CargoError("SHIPMENT_HAS_HISTORY", "Archive this shipment because it already has packages or operational history", 409)
+        await tx.cargoMilestone.deleteMany({ where: { shipmentId: row.id } })
+        await tx.cargoShipment.delete({ where: { id: row.id } })
+        await audit(tx, actor, "CARGO_SHIPMENT_DELETE", "CargoShipment", row.id, { shipmentNo: row.shipmentNo })
+        return { id: row.id }
+      }
+      case "package.archive": {
+        const v = z.object({ id, archived: z.boolean().default(true) }).parse(raw)
+        const row = await tx.cargoPackage.update({ where: { id: v.id }, data: { status: v.archived ? "ARCHIVED" : "ACTIVE" } })
+        await audit(tx, actor, v.archived ? "CARGO_PACKAGE_ARCHIVE" : "CARGO_PACKAGE_RESTORE", "CargoPackage", row.id, v)
+        return row
+      }
+      case "package.delete": {
+        const v = z.object({ id }).parse(raw)
+        const row = await tx.cargoPackage.findUniqueOrThrow({ where: { id: v.id }, include: { _count: { select: { items: true, invoices: true, charges: true, files: true, legacyEvents: true } } } })
+        if (row._count.items || row._count.invoices || row._count.charges || row._count.files || row._count.legacyEvents) throw new CargoError("PACKAGE_HAS_HISTORY", "Archive this package because it already has contents, documents, costs, or imported history", 409)
+        await tx.cargoPackage.delete({ where: { id: row.id } })
+        await audit(tx, actor, "CARGO_PACKAGE_DELETE", "CargoPackage", row.id, { packageNo: row.packageNo })
+        return { id: row.id, shipmentId: row.shipmentId }
       }
       case "package.reassign": {
         const v = z.object({ id, shipmentId: id }).parse(raw)
@@ -164,6 +211,7 @@ async function performCargoAction(tx: Tx, action: string, raw: unknown, actor: A
         if (row.shipmentId === v.shipmentId) return row
         const shipments = await tx.cargoShipment.findMany({ where: { id: { in: [row.shipmentId, v.shipmentId] } }, include: { milestones: true, trackingLegs: true, _count: { select: { packages: true, invoices: true, charges: true, files: true } } } })
         if (shipments.length !== 2) throw new CargoError("SHIPMENT_NOT_FOUND", "Destination shipment not found", 404)
+        if (shipments.some(s => s.status !== "ACTIVE")) throw new CargoError("SHIPMENT_ARCHIVED", "Restore both shipments before reassigning a package", 409)
         if (shipments.some(s => s.milestones.length > 1 || s.trackingLegs.length)) throw new CargoError("JOURNEY_LOCKED", "Package reassignment locks after first journey or tracking update", 409)
         const source = shipments.find(s => s.id === row.shipmentId)!
         if (source._count.packages === 1 && (source._count.invoices || source._count.charges || source._count.files)) throw new CargoError("SHIPMENT_HAS_HISTORY", "The only carton cannot leave a shipment with financial or document history", 409)
@@ -272,19 +320,63 @@ export async function executeCargoAction(action: string, raw: unknown, actor: Ac
   throw new CargoError("CONFLICT", "Concurrent Cargo update; retry", 409)
 }
 
-export async function listCargoShipments(limit = 50, cursor?: string) {
-  const rows = await db.cargoShipment.findMany({ take: limit + 1, ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}), orderBy: { id: "desc" }, select: { id: true, shipmentNo: true, route: true, notes: true, createdAt: true, forwarder: { select: { name: true } }, sourceWarehouse: { select: { name: true } }, _count: { select: { packages: true } }, milestones: { orderBy: { sequence: "desc" }, take: 1, select: { stage: true, occurredAt: true } } } })
-  const page = rows.slice(0, limit)
-  return { shipments: page.map(row => ({ ...row, stage: row.milestones[0]?.stage ?? "NEEDS_REVIEW", milestones: undefined })), nextCursor: rows.length > limit ? page.at(-1)?.id ?? null : null }
+type CargoListOptions = { limit?: number; page?: number; cursor?: string; q?: string; stage?: CargoStage | "NEEDS_REVIEW"; route?: CargoRoute; forwarderId?: string; sourceWarehouseId?: string; vendorId?: string; status?: RecordStatus }
+
+async function shipmentIdsAtStage(stage?: CargoStage | "NEEDS_REVIEW") {
+  if (!stage) return undefined
+  const rows = await db.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT shipment.id
+    FROM cargo_shipments AS shipment
+    LEFT JOIN LATERAL (
+      SELECT milestone.stage::text AS stage
+      FROM cargo_milestones AS milestone
+      WHERE milestone."shipmentId" = shipment.id
+      ORDER BY milestone.sequence DESC LIMIT 1
+    ) AS latest ON TRUE
+    WHERE COALESCE(latest.stage, 'NEEDS_REVIEW') = ${stage}
+  `)
+  return rows.map(row => row.id)
 }
 
-export async function listCargoPackages(limit = 50, cursor?: string) {
+export async function listCargoShipments(options: CargoListOptions = {}) {
+  const limit = options.limit ?? 50
+  const pageNumber = options.page ?? 1
+  const stageIds = await shipmentIdsAtStage(options.stage)
+  const where: Prisma.CargoShipmentWhereInput = {
+    status: options.status ?? "ACTIVE",
+    ...(options.q ? { OR: [{ shipmentNo: { contains: options.q, mode: "insensitive" } }, { notes: { contains: options.q, mode: "insensitive" } }] } : {}),
+    ...(options.route ? { route: options.route } : {}),
+    ...(options.forwarderId ? { forwarderId: options.forwarderId } : {}),
+    ...(options.sourceWarehouseId ? { sourceWarehouseId: options.sourceWarehouseId } : {}),
+    ...(options.vendorId ? { packages: { some: { vendorId: options.vendorId } } } : {}),
+    ...(stageIds ? { id: { in: stageIds } } : {}),
+  }
+  const [rows, total] = await Promise.all([
+    db.cargoShipment.findMany({ take: limit + (options.cursor ? 1 : 0), skip: options.cursor ? 1 : (pageNumber - 1) * limit, ...(options.cursor ? { cursor: { id: options.cursor } } : {}), where, orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { id: true, shipmentNo: true, route: true, status: true, notes: true, createdAt: true, forwarder: { select: { id: true, name: true } }, sourceWarehouse: { select: { id: true, name: true } }, _count: { select: { packages: true } }, milestones: { orderBy: { sequence: "desc" }, take: 1, select: { stage: true, occurredAt: true } } } }),
+    db.cargoShipment.count({ where }),
+  ])
+  const result = options.cursor ? rows.slice(0, limit) : rows
+  return { shipments: result.map(row => ({ ...row, stage: row.milestones[0]?.stage ?? "NEEDS_REVIEW", milestones: undefined })), total, page: pageNumber, pageSize: limit, pageCount: Math.ceil(total / limit), nextCursor: options.cursor && rows.length > limit ? result.at(-1)?.id ?? null : null }
+}
+
+export async function listCargoPackages(options: CargoListOptions = {}) {
+  const limit = options.limit ?? 50
+  const pageNumber = options.page ?? 1
+  const stageIds = await shipmentIdsAtStage(options.stage)
+  const where: Prisma.CargoPackageWhereInput = {
+    status: options.status ?? "ACTIVE",
+    ...(options.q ? { OR: [{ packageNo: { contains: options.q, mode: "insensitive" } }, { notes: { contains: options.q, mode: "insensitive" } }, { vendor: { name: { contains: options.q, mode: "insensitive" } } }, { shipment: { shipmentNo: { contains: options.q, mode: "insensitive" } } }] } : {}),
+    ...(options.vendorId ? { vendorId: options.vendorId } : {}),
+    ...(options.route || options.forwarderId || options.sourceWarehouseId || stageIds ? { shipment: { ...(options.route ? { route: options.route } : {}), ...(options.forwarderId ? { forwarderId: options.forwarderId } : {}), ...(options.sourceWarehouseId ? { sourceWarehouseId: options.sourceWarehouseId } : {}), ...(stageIds ? { id: { in: stageIds } } : {}) } } : {}),
+  }
   const rows = await db.cargoPackage.findMany({
-    take: limit + 1,
-    ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
-    orderBy: { id: "desc" },
+    take: limit + (options.cursor ? 1 : 0),
+    skip: options.cursor ? 1 : (pageNumber - 1) * limit,
+    ...(options.cursor ? { cursor: { id: options.cursor } } : {}),
+    where,
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     select: {
-      id: true, packageNo: true, shipmentId: true, weight: true, verifiedWeight: true, createdAt: true,
+      id: true, packageNo: true, shipmentId: true, status: true, weight: true, verifiedWeight: true, createdAt: true,
       vendor: { select: { id: true, name: true } },
       shipment: {
         select: {
@@ -296,17 +388,26 @@ export async function listCargoPackages(limit = 50, cursor?: string) {
       _count: { select: { items: true, files: true } },
     },
   })
-  const page = rows.slice(0, limit)
+  const total = await db.cargoPackage.count({ where })
+  const result = options.cursor ? rows.slice(0, limit) : rows
   return {
-    packages: page.map(row => ({
+    packages: result.map(row => ({
       ...row,
       stage: row.shipment.milestones[0]?.stage ?? "NEEDS_REVIEW",
       shipment: { ...row.shipment, milestones: undefined },
       weight: row.weight?.toString() ?? null,
       verifiedWeight: row.verifiedWeight?.toString() ?? null,
     })),
-    nextCursor: rows.length > limit ? page.at(-1)?.id ?? null : null,
+    total, page: pageNumber, pageSize: limit, pageCount: Math.ceil(total / limit),
+    nextCursor: options.cursor && rows.length > limit ? result.at(-1)?.id ?? null : null,
   }
+}
+
+export async function cargoNameSuggestions(kind: "shipment" | "package", q: string) {
+  if (!q.trim()) return []
+  return kind === "shipment"
+    ? (await db.cargoShipment.findMany({ where: { shipmentNo: { startsWith: q.trim(), mode: "insensitive" } }, orderBy: { createdAt: "desc" }, take: 8, select: { id: true, shipmentNo: true, createdAt: true } })).map(row => ({ id: row.id, value: row.shipmentNo, createdAt: row.createdAt }))
+    : (await db.cargoPackage.findMany({ where: { packageNo: { startsWith: q.trim(), mode: "insensitive" } }, orderBy: { createdAt: "desc" }, take: 8, select: { id: true, packageNo: true, createdAt: true } })).map(row => ({ id: row.id, value: row.packageNo, createdAt: row.createdAt }))
 }
 
 export async function cargoShipmentDetail(id: string, permissions: string[]) {
