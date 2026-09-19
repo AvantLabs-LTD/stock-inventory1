@@ -37,14 +37,14 @@ POST /api/v1/cargo accepts a JSON object with action and data fields and returns
 | shipment.merge | targetShipmentId, sourceShipmentIds, trackingNumber; consolidates shipments only when route, source, stage, and the sole tracking leg agree | cargo.shipments.manage |
 | shipment.archive | id and archived boolean | cargo.shipments.manage |
 | shipment.delete | id; allowed only before packages or operational history exist | cargo.shipments.manage |
-| package.create | Optional packageNo; existing shipmentId, or route plus optional shipmentNo and forwarder/warehouse for a new shipment | cargo.packages.manage |
+| package.create | Optional packageNo; existing shipmentId (including a shipment already in progress), or route plus optional shipmentNo and forwarder/warehouse for a new shipment | cargo.packages.manage |
 | package.update | id; optional packageNo, vendorId, weight, verifiedWeight, dimensions, notes | cargo.packages.manage |
 | package.reassign | id, destination shipmentId; only while both shipments are immature | cargo.packages.manage |
 | package.archive | id and archived boolean | cargo.packages.manage |
 | package.delete | id; allowed only before contents, documents, costs, or imported history exist | cargo.packages.manage |
 | item.save | packageId, description, positive quantity; optional id to edit | cargo.packages.manage |
 | item.remove | id | cargo.packages.manage |
-| milestone.post | shipmentId, next valid stage, ISO occurredAt; optional location/remarks | cargo.milestones.post |
+| milestone.post | shipmentId, next valid stage, ISO occurredAt; optional location/remarks and optional trackingNumber/courierId/trackingKind to record tracking with the status update | cargo.milestones.post |
 | tracking.save | shipmentId, kind; optional id to edit, courier/tracking/dates/remarks | cargo.tracking.manage |
 | tracking.delete | id; allowed only when no invoice or charge still references the leg | cargo.tracking.manage |
 | invoice.save | shipmentId, uppercase three-letter currency; optional id, package/leg, total/date/issuer | cargo.costs.manage |

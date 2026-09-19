@@ -48,6 +48,8 @@ test("Cargo shipment identity, journey locking, costs and cross-shipment links",
   await assert.rejects(executeCargoAction("invoice.save", { shipmentId: secondShipmentId, packageId: String(shared.id), currency: "USD", totalAmount: 1 }, actor))
   await assert.rejects(executeCargoAction("package.reassign", { id: String(shared.id), shipmentId: secondShipmentId }, actor), (error: unknown) => error instanceof CargoError && error.code === "PACKAGE_HAS_HISTORY")
   await executeCargoAction("milestone.post", { shipmentId: secondShipmentId, stage: "IN_INTERNATIONAL_TRANSIT", occurredAt: new Date(Date.now() + 1000).toISOString() }, actor)
+  const latePackage = await executeCargoAction("package.create", { shipmentId: secondShipmentId, packageNo: `LATE-${suffix}` }, actor)
+  assert.ok(latePackage && "id" in latePackage)
   await assert.rejects(executeCargoAction("package.reassign", { id: String(first.id), shipmentId: secondShipmentId }, actor), (error: unknown) => error instanceof CargoError && error.code === "JOURNEY_LOCKED")
   await assert.rejects(executeCargoAction("milestone.post", { shipmentId: secondShipmentId, stage: "CUSTOMS_CLEARED", occurredAt: new Date(Date.now() + 2000).toISOString() }, actor), (error: unknown) => error instanceof CargoError && error.code === "INVALID_STAGE")
   assert.equal(await prisma.cargoMilestone.count({ where: { shipmentId: secondShipmentId } }), 2)

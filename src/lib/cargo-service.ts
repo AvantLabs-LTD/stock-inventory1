@@ -225,7 +225,6 @@ async function performCargoAction(tx: Tx, action: string, raw: unknown, actor: A
         } else {
           const shipment = await tx.cargoShipment.findUniqueOrThrow({ where: { id: shipmentId }, include: { milestones: true, trackingLegs: true } })
           if (shipment.status !== "ACTIVE") throw new CargoError("SHIPMENT_ARCHIVED", "Restore the shipment before adding packages", 409)
-          if (shipment.milestones.length > 1 || shipment.trackingLegs.length) throw new CargoError("JOURNEY_LOCKED", "New cartons can only join an immature shipment")
         }
         const packageNo = await uniqueCargoNumber(tx, "package", v.packageNo)
         const row = await tx.cargoPackage.create({ data: { packageNo, shipmentId, vendorId: v.vendorId, weight: v.weight, verifiedWeight: v.verifiedWeight, length: v.length, width: v.width, height: v.height, notes: v.notes } })
@@ -301,14 +300,20 @@ async function performCargoAction(tx: Tx, action: string, raw: unknown, actor: A
         return { id: v.id }
       }
       case "milestone.post": {
-        const v = z.object({ shipmentId: id, stage: z.nativeEnum(CargoStage), occurredAt: date, location: optionalText, remarks: optionalText }).parse(raw)
+        const v = z.object({ shipmentId: id, stage: z.nativeEnum(CargoStage), occurredAt: date, location: optionalText, remarks: optionalText, trackingNumber: optionalText, courierId: optionalId, trackingKind: z.nativeEnum(CargoLegKind).optional(), dispatchedAt: optionalDate, arrivedAt: optionalDate }).parse(raw)
         const shipment = await tx.cargoShipment.findUniqueOrThrow({ where: { id: v.shipmentId }, include: { milestones: { orderBy: { sequence: "desc" }, take: 1 } } })
         const previous = shipment.milestones[0]
         if (previous && !nextStage[previous.stage].includes(v.stage)) throw new CargoError("INVALID_STAGE", "Invalid Cargo journey transition", 409)
         if (shipment.route === "DIRECT" && ["TO_SOURCE_WAREHOUSE", "AT_SOURCE_WAREHOUSE"].includes(v.stage)) throw new CargoError("INVALID_ROUTE", "Direct route bypasses source warehouse")
         if (shipment.route === "FORWARDED" && previous?.stage === "AT_VENDOR" && v.stage !== "TO_SOURCE_WAREHOUSE") throw new CargoError("INVALID_ROUTE", "Forwarded route first travels to source warehouse")
         if (previous && v.occurredAt < previous.occurredAt) throw new CargoError("INVALID_DATE", "Journey date cannot precede the previous milestone")
+        if (v.dispatchedAt && v.arrivedAt && v.arrivedAt < v.dispatchedAt) throw new CargoError("INVALID_DATE", "Tracking arrival precedes dispatch")
+        if (v.trackingNumber && v.trackingKind === "SOURCE_INLAND" && shipment.route === "DIRECT") throw new CargoError("INVALID_ROUTE", "Direct route has no source inland leg")
         const row = await tx.cargoMilestone.create({ data: { shipmentId: v.shipmentId, sequence: previous ? previous.sequence + 1 : 0, stage: v.stage, occurredAt: v.occurredAt, location: v.location, remarks: v.remarks, postedById: actor.id } })
+        if (v.trackingNumber) {
+          const sequence = (await tx.cargoTrackingLeg.aggregate({ where: { shipmentId: v.shipmentId }, _max: { sequence: true } }))._max.sequence ?? -1
+          await tx.cargoTrackingLeg.create({ data: { shipmentId: v.shipmentId, sequence: sequence + 1, kind: v.trackingKind || "INTERNATIONAL", courierId: v.courierId, trackingNumber: v.trackingNumber, dispatchedAt: v.dispatchedAt || v.occurredAt, arrivedAt: v.arrivedAt, remarks: v.remarks } })
+        }
         await audit(tx, actor, "CARGO_MILESTONE_POST", "CargoMilestone", row.id, v)
         return row
       }
@@ -447,11 +452,11 @@ export async function listCargoShipments(options: CargoListOptions = {}) {
     ...(stageIds ? { id: { in: stageIds } } : {}),
   }
   const [rows, total] = await Promise.all([
-    db.cargoShipment.findMany({ take: limit + (options.cursor ? 1 : 0), skip: options.cursor ? 1 : (pageNumber - 1) * limit, ...(options.cursor ? { cursor: { id: options.cursor } } : {}), where, orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { id: true, shipmentNo: true, route: true, status: true, notes: true, createdAt: true, forwarder: { select: { id: true, name: true } }, sourceWarehouse: { select: { id: true, name: true } }, _count: { select: { packages: true } }, milestones: { orderBy: { sequence: "desc" }, take: 1, select: { stage: true, occurredAt: true } } } }),
+    db.cargoShipment.findMany({ take: limit + (options.cursor ? 1 : 0), skip: options.cursor ? 1 : (pageNumber - 1) * limit, ...(options.cursor ? { cursor: { id: options.cursor } } : {}), where, orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { id: true, shipmentNo: true, route: true, status: true, notes: true, createdAt: true, forwarder: { select: { id: true, name: true } }, sourceWarehouse: { select: { id: true, name: true } }, _count: { select: { packages: true } }, milestones: { orderBy: { sequence: "desc" }, take: 1, select: { stage: true, occurredAt: true } }, trackingLegs: { orderBy: { sequence: "asc" }, select: { trackingNumber: true } } } }),
     db.cargoShipment.count({ where }),
   ])
   const result = options.cursor ? rows.slice(0, limit) : rows
-  return { shipments: result.map(row => ({ ...row, stage: row.milestones[0]?.stage ?? "NEEDS_REVIEW", milestones: undefined })), total, page: pageNumber, pageSize: limit, pageCount: Math.ceil(total / limit), nextCursor: options.cursor && rows.length > limit ? result.at(-1)?.id ?? null : null }
+  return { shipments: result.map(row => ({ ...row, stage: row.milestones[0]?.stage ?? "NEEDS_REVIEW", trackingNumbers: row.trackingLegs.map(leg => leg.trackingNumber).filter((value): value is string => !!value), milestones: undefined, trackingLegs: undefined })), total, page: pageNumber, pageSize: limit, pageCount: Math.ceil(total / limit), nextCursor: options.cursor && rows.length > limit ? result.at(-1)?.id ?? null : null }
 }
 
 export async function listCargoPackages(options: CargoListOptions = {}) {
@@ -477,6 +482,7 @@ export async function listCargoPackages(options: CargoListOptions = {}) {
         select: {
           shipmentNo: true, route: true,
           forwarder: { select: { name: true } },
+          trackingLegs: { orderBy: { sequence: "asc" }, select: { trackingNumber: true } },
           milestones: { orderBy: { sequence: "desc" }, take: 1, select: { stage: true } },
         },
       },
@@ -489,7 +495,7 @@ export async function listCargoPackages(options: CargoListOptions = {}) {
     packages: result.map(row => ({
       ...row,
       stage: row.shipment.milestones[0]?.stage ?? "NEEDS_REVIEW",
-      shipment: { ...row.shipment, milestones: undefined },
+      shipment: { ...row.shipment, trackingNumbers: row.shipment.trackingLegs.map(leg => leg.trackingNumber).filter((value): value is string => !!value), milestones: undefined, trackingLegs: undefined },
       weight: row.weight?.toString() ?? null,
       verifiedWeight: row.verifiedWeight?.toString() ?? null,
     })),
@@ -501,7 +507,7 @@ export async function listCargoPackages(options: CargoListOptions = {}) {
 export async function cargoNameSuggestions(kind: "shipment" | "package", q: string) {
   if (!q.trim()) return []
   return kind === "shipment"
-    ? (await db.cargoShipment.findMany({ where: { shipmentNo: { startsWith: q.trim(), mode: "insensitive" } }, orderBy: { createdAt: "desc" }, take: 8, select: { id: true, shipmentNo: true, createdAt: true } })).map(row => ({ id: row.id, value: row.shipmentNo, createdAt: row.createdAt }))
+    ? (await db.cargoShipment.findMany({ where: { shipmentNo: { startsWith: q.trim(), mode: "insensitive" } }, orderBy: { createdAt: "desc" }, take: 8, select: { id: true, shipmentNo: true, status: true, createdAt: true, milestones: { orderBy: { sequence: "desc" }, take: 1, select: { stage: true } } } })).map(row => ({ id: row.id, value: row.shipmentNo, status: row.status, stage: row.milestones[0]?.stage ?? "NEEDS_REVIEW", createdAt: row.createdAt }))
     : (await db.cargoPackage.findMany({ where: { packageNo: { startsWith: q.trim(), mode: "insensitive" } }, orderBy: { createdAt: "desc" }, take: 8, select: { id: true, packageNo: true, createdAt: true } })).map(row => ({ id: row.id, value: row.packageNo, createdAt: row.createdAt }))
 }
 
