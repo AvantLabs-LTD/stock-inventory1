@@ -101,7 +101,7 @@ test("matching tracked shipments merge without losing package-linked history", {
   assert.ok(invoice && "id" in invoice)
   const charge = await executeCargoAction("charge.save", { shipmentId: sourceShipmentId, packageId: sourcePackageId, trackingLegId: String(sourceTracking.id), invoiceId: String(invoice.id), category: "INTERNATIONAL_FREIGHT", amount: "25", currency: "USD" }, actor)
   assert.ok(charge && "id" in charge)
-  const file = await prisma.cargoFile.create({ data: { shipmentId: sourceShipmentId, packageId: sourcePackageId, invoiceId: String(invoice.id), kind: "CARTON_PHOTO", fileName: "carton.png", contentType: "image/png", sizeBytes: 3, sha256: "merge-test", data: Buffer.from("png"), uploadedById: user.id } })
+  const file = await prisma.cargoFile.create({ data: { shipmentId: sourceShipmentId, packageId: sourcePackageId, invoiceId: String(invoice.id), kind: "CARTON_PHOTO", fileName: "carton.png", contentType: "image/png", sizeBytes: 3, sha256: "a".repeat(64), data: Buffer.from("png"), uploadedById: user.id } })
   const legacyEvent = await prisma.cargoLegacyEvent.create({ data: { id: `merge-event-${suffix}`, shipmentId: sourceShipmentId, packageId: sourcePackageId, rawStatus: "RECEIVED", occurredAt: new Date() } })
   const key = `cargo-merge-${suffix}`
   const result = await executeCargoAction("shipment.merge", { targetShipmentId, sourceShipmentIds: [sourceShipmentId], trackingNumber: "SHARED-TRACKING" }, actor, key)

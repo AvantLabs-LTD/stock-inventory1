@@ -176,7 +176,7 @@ async function performCargoAction(tx: Tx, action: string, raw: unknown, actor: A
         const [invoices, charges, files, legacyEvents] = await Promise.all([
           tx.cargoInvoice.findMany({ where: { shipmentId: { in: sourceShipmentIds } } }),
           tx.cargoCharge.findMany({ where: { shipmentId: { in: sourceShipmentIds } } }),
-          tx.cargoFile.findMany({ where: { shipmentId: { in: sourceShipmentIds } }, select: { id: true, packageId: true, invoiceId: true } }),
+          tx.cargoFile.findMany({ where: { shipmentId: { in: sourceShipmentIds } } }),
           tx.cargoLegacyEvent.findMany({ where: { shipmentId: { in: sourceShipmentIds } } }),
         ])
 
@@ -184,17 +184,19 @@ async function performCargoAction(tx: Tx, action: string, raw: unknown, actor: A
         // within one shipment. Detach optional links while their owners move, then
         // restore them against the canonical target inside this serializable transaction.
         await tx.cargoCharge.updateMany({ where: { shipmentId: { in: sourceShipmentIds } }, data: { packageId: null, trackingLegId: null, invoiceId: null } })
-        await tx.cargoFile.updateMany({ where: { shipmentId: { in: sourceShipmentIds } }, data: { packageId: null, invoiceId: null } })
         await tx.cargoInvoice.updateMany({ where: { shipmentId: { in: sourceShipmentIds } }, data: { packageId: null, trackingLegId: null } })
+        // Package photos have a database constraint requiring packageId. Recreate
+        // the immutable rows with their original IDs after their packages move;
+        // doing this in the same transaction preserves atomic rollback.
+        await tx.cargoFile.deleteMany({ where: { shipmentId: { in: sourceShipmentIds } } })
         await tx.cargoLegacyEvent.deleteMany({ where: { shipmentId: { in: sourceShipmentIds } } })
         await tx.cargoPackage.updateMany({ where: { id: { in: packageIds } }, data: { shipmentId: target.id } })
         await tx.cargoInvoice.updateMany({ where: { shipmentId: { in: sourceShipmentIds } }, data: { shipmentId: target.id } })
         await tx.cargoCharge.updateMany({ where: { shipmentId: { in: sourceShipmentIds } }, data: { shipmentId: target.id } })
-        await tx.cargoFile.updateMany({ where: { shipmentId: { in: sourceShipmentIds } }, data: { shipmentId: target.id } })
 
         for (const invoice of invoices) await tx.cargoInvoice.update({ where: { id: invoice.id }, data: { packageId: invoice.packageId, trackingLegId: invoice.trackingLegId ? targetLeg.id : null } })
         for (const charge of charges) await tx.cargoCharge.update({ where: { id: charge.id }, data: { packageId: charge.packageId, trackingLegId: charge.trackingLegId ? targetLeg.id : null, invoiceId: charge.invoiceId } })
-        for (const file of files) await tx.cargoFile.update({ where: { id: file.id }, data: { packageId: file.packageId, invoiceId: file.invoiceId } })
+        if (files.length) await tx.cargoFile.createMany({ data: files.map(file => ({ ...file, shipmentId: target.id })) })
         if (legacyEvents.length) await tx.cargoLegacyEvent.createMany({ data: legacyEvents.map(event => ({ ...event, shipmentId: target.id })) })
 
         await tx.cargoTrackingLeg.deleteMany({ where: { id: { in: sourceTrackingIds } } })
