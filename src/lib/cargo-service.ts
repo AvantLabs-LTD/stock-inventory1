@@ -71,7 +71,7 @@ async function uniqueCargoNumber(tx: Tx, kind: "shipment" | "package", requested
 
 export const cargoActionPermission: Record<string, string> = {
   "reference.create": "cargo.reference.manage", "reference.update": "cargo.reference.manage",
-  "shipment.create": "cargo.shipments.manage", "shipment.update": "cargo.shipments.manage", "shipment.archive": "cargo.shipments.manage", "shipment.delete": "cargo.shipments.manage",
+  "shipment.create": "cargo.shipments.manage", "shipment.update": "cargo.shipments.manage", "shipment.merge": "cargo.shipments.manage", "shipment.archive": "cargo.shipments.manage", "shipment.delete": "cargo.shipments.manage",
   "package.create": "cargo.packages.manage", "package.update": "cargo.packages.manage", "package.reassign": "cargo.packages.manage", "package.archive": "cargo.packages.manage", "package.delete": "cargo.packages.manage",
   "item.save": "cargo.packages.manage", "item.remove": "cargo.packages.manage",
   "milestone.post": "cargo.milestones.post", "tracking.save": "cargo.tracking.manage",
@@ -145,6 +145,68 @@ async function performCargoAction(tx: Tx, action: string, raw: unknown, actor: A
         const row = await tx.cargoShipment.update({ where: { id: v.id }, data: { shipmentNo, notes: v.notes, forwarderId: v.forwarderId, sourceWarehouseId: warehouseId } })
         await audit(tx, actor, "CARGO_SHIPMENT_UPDATE", "CargoShipment", row.id, { before: old, after: v })
         return row
+      }
+      case "shipment.merge": {
+        const v = z.object({ targetShipmentId: id, sourceShipmentIds: z.array(id).min(1).max(99), trackingNumber: z.string().trim().min(1).max(200) }).parse(raw)
+        const sourceShipmentIds = [...new Set(v.sourceShipmentIds)]
+        if (sourceShipmentIds.length !== v.sourceShipmentIds.length) throw new CargoError("DUPLICATE_SOURCE", "Each source shipment may only be listed once")
+        if (sourceShipmentIds.includes(v.targetShipmentId)) throw new CargoError("INVALID_MERGE", "The target shipment cannot also be a source shipment")
+        const shipmentIds = [v.targetShipmentId, ...sourceShipmentIds]
+        const shipments = await tx.cargoShipment.findMany({
+          where: { id: { in: shipmentIds } },
+          include: {
+            packages: { select: { id: true, packageNo: true } },
+            milestones: { orderBy: { sequence: "asc" } },
+            trackingLegs: { orderBy: { sequence: "asc" } },
+          },
+        })
+        if (shipments.length !== shipmentIds.length) throw new CargoError("SHIPMENT_NOT_FOUND", "One or more merge shipments were not found", 404)
+        if (shipments.some(shipment => shipment.status !== "ACTIVE")) throw new CargoError("SHIPMENT_ARCHIVED", "Restore every shipment before merging", 409)
+        const target = shipments.find(shipment => shipment.id === v.targetShipmentId)!
+        const expectedTracking = v.trackingNumber.trim().toLocaleLowerCase()
+        const sameJourneyContext = shipments.every(shipment => shipment.route === target.route && shipment.forwarderId === target.forwarderId && shipment.sourceWarehouseId === target.sourceWarehouseId && shipment.milestones.at(-1)?.stage === target.milestones.at(-1)?.stage)
+        if (!sameJourneyContext) throw new CargoError("INCOMPATIBLE_SHIPMENTS", "Merged shipments must have the same route, forwarder, warehouse, and current journey stage", 409)
+        if (shipments.some(shipment => shipment.packages.length === 0)) throw new CargoError("EMPTY_SHIPMENT", "Every merged shipment must contain at least one package", 409)
+        const matchingLeg = (shipment: typeof target) => shipment.trackingLegs.filter(leg => leg.trackingNumber?.trim().toLocaleLowerCase() === expectedTracking)
+        if (shipments.some(shipment => matchingLeg(shipment).length !== 1 || shipment.trackingLegs.length !== 1)) throw new CargoError("TRACKING_MISMATCH", "Every merged shipment must have exactly one tracking leg matching the confirmed tracking number", 409)
+        const targetLeg = matchingLeg(target)[0]
+        const sourceTrackingIds = shipments.filter(shipment => shipment.id !== target.id).flatMap(shipment => shipment.trackingLegs.map(leg => leg.id))
+        const packages = shipments.filter(shipment => shipment.id !== target.id).flatMap(shipment => shipment.packages)
+        const packageIds = packages.map(row => row.id)
+        const [invoices, charges, files, legacyEvents] = await Promise.all([
+          tx.cargoInvoice.findMany({ where: { shipmentId: { in: sourceShipmentIds } } }),
+          tx.cargoCharge.findMany({ where: { shipmentId: { in: sourceShipmentIds } } }),
+          tx.cargoFile.findMany({ where: { shipmentId: { in: sourceShipmentIds } }, select: { id: true, packageId: true, invoiceId: true } }),
+          tx.cargoLegacyEvent.findMany({ where: { shipmentId: { in: sourceShipmentIds } } }),
+        ])
+
+        // Composite ownership keys keep package, invoice, leg, file, and charge links
+        // within one shipment. Detach optional links while their owners move, then
+        // restore them against the canonical target inside this serializable transaction.
+        await tx.cargoCharge.updateMany({ where: { shipmentId: { in: sourceShipmentIds } }, data: { packageId: null, trackingLegId: null, invoiceId: null } })
+        await tx.cargoFile.updateMany({ where: { shipmentId: { in: sourceShipmentIds } }, data: { packageId: null, invoiceId: null } })
+        await tx.cargoInvoice.updateMany({ where: { shipmentId: { in: sourceShipmentIds } }, data: { packageId: null, trackingLegId: null } })
+        await tx.cargoLegacyEvent.deleteMany({ where: { shipmentId: { in: sourceShipmentIds } } })
+        await tx.cargoPackage.updateMany({ where: { id: { in: packageIds } }, data: { shipmentId: target.id } })
+        await tx.cargoInvoice.updateMany({ where: { shipmentId: { in: sourceShipmentIds } }, data: { shipmentId: target.id } })
+        await tx.cargoCharge.updateMany({ where: { shipmentId: { in: sourceShipmentIds } }, data: { shipmentId: target.id } })
+        await tx.cargoFile.updateMany({ where: { shipmentId: { in: sourceShipmentIds } }, data: { shipmentId: target.id } })
+
+        for (const invoice of invoices) await tx.cargoInvoice.update({ where: { id: invoice.id }, data: { packageId: invoice.packageId, trackingLegId: invoice.trackingLegId ? targetLeg.id : null } })
+        for (const charge of charges) await tx.cargoCharge.update({ where: { id: charge.id }, data: { packageId: charge.packageId, trackingLegId: charge.trackingLegId ? targetLeg.id : null, invoiceId: charge.invoiceId } })
+        for (const file of files) await tx.cargoFile.update({ where: { id: file.id }, data: { packageId: file.packageId, invoiceId: file.invoiceId } })
+        if (legacyEvents.length) await tx.cargoLegacyEvent.createMany({ data: legacyEvents.map(event => ({ ...event, shipmentId: target.id })) })
+
+        await tx.cargoTrackingLeg.deleteMany({ where: { id: { in: sourceTrackingIds } } })
+        await tx.cargoMilestone.deleteMany({ where: { shipmentId: { in: sourceShipmentIds } } })
+        await tx.cargoShipment.deleteMany({ where: { id: { in: sourceShipmentIds } } })
+        const packageCount = await tx.cargoPackage.count({ where: { shipmentId: target.id } })
+        await audit(tx, actor, "CARGO_SHIPMENT_MERGE", "CargoShipment", target.id, {
+          trackingNumber: v.trackingNumber.trim(),
+          targetShipment: { id: target.id, shipmentNo: target.shipmentNo },
+          mergedShipments: shipments.filter(shipment => shipment.id !== target.id).map(shipment => ({ id: shipment.id, shipmentNo: shipment.shipmentNo, packages: shipment.packages.map(row => row.packageNo), milestone: shipment.milestones.at(-1)?.stage })),
+        })
+        return { id: target.id, shipmentNo: target.shipmentNo, trackingNumber: v.trackingNumber.trim(), packageCount, mergedShipmentIds: sourceShipmentIds }
       }
       case "package.create": {
         const v = z.object({ packageNo: optionalIdentifier, shipmentNo: optionalIdentifier, shipmentId: optionalId, route: z.nativeEnum(CargoRoute).optional(), forwarderId: optionalId, sourceWarehouseId: optionalId, vendorId: optionalId, weight, verifiedWeight: weight, length: dimension, width: dimension, height: dimension, notes: optionalText }).parse(raw)

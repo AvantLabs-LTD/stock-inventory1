@@ -34,6 +34,7 @@ POST /api/v1/cargo accepts a JSON object with action and data fields and returns
 | reference.update | kind, id, name, status; optional notes | cargo.reference.manage |
 | shipment.create | route and optional shipmentNo; forwarded needs forwarderId and possibly sourceWarehouseId | cargo.shipments.manage |
 | shipment.update | id, optional shipmentNo, forwarderId, sourceWarehouseId, notes; route/source lock after journey starts | cargo.shipments.manage |
+| shipment.merge | targetShipmentId, sourceShipmentIds, trackingNumber; consolidates shipments only when route, source, stage, and the sole tracking leg agree | cargo.shipments.manage |
 | shipment.archive | id and archived boolean | cargo.shipments.manage |
 | shipment.delete | id; allowed only before packages or operational history exist | cargo.shipments.manage |
 | package.create | Optional packageNo; existing shipmentId, or route plus optional shipmentNo and forwarder/warehouse for a new shipment | cargo.packages.manage |
@@ -49,6 +50,8 @@ POST /api/v1/cargo accepts a JSON object with action and data fields and returns
 | charge.save | shipmentId, category, positive amount, uppercase currency; optional id, package/leg/invoice, PKR comparison/note | cargo.costs.manage |
 
 Shipment and package names are optional; omitted names receive generated identifiers. Supplied names are unique case-insensitively. Send quantities and money as decimal strings. Packing quantities support 3 decimal places, weights 3, dimensions 2, and money 4. pkrEquivalent requires pkrNote. The server enforces transitions, route rules, shipment ownership, and permissions.
+
+`shipment.merge` is an auditable consolidation operation for shipments that were incorrectly split despite sharing one journey. The target shipment survives; source packages, package contents, photos/documents, costs, and legacy events are moved to it. Duplicate source tracking legs and shipment milestones are collapsed into the target journey, and the empty source shipment records are removed in the same serializable transaction. Use one idempotency key per merge group.
 
 POST /api/v1/cargo/files uses multipart fields file, shipmentId, kind, and optional packageId/invoiceId. It accepts signed PDF, PNG, or JPEG bytes up to 5 MB. Use an Idempotency-Key. Content and carton photos require a package.
 
