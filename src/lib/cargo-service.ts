@@ -74,8 +74,9 @@ export const cargoActionPermission: Record<string, string> = {
   "shipment.create": "cargo.shipments.manage", "shipment.update": "cargo.shipments.manage", "shipment.merge": "cargo.shipments.manage", "shipment.archive": "cargo.shipments.manage", "shipment.delete": "cargo.shipments.manage",
   "package.create": "cargo.packages.manage", "package.update": "cargo.packages.manage", "package.reassign": "cargo.packages.manage", "package.archive": "cargo.packages.manage", "package.delete": "cargo.packages.manage",
   "item.save": "cargo.packages.manage", "item.remove": "cargo.packages.manage",
-  "milestone.post": "cargo.milestones.post", "tracking.save": "cargo.tracking.manage",
-  "invoice.save": "cargo.costs.manage", "charge.save": "cargo.costs.manage",
+  "milestone.post": "cargo.milestones.post", "tracking.save": "cargo.tracking.manage", "tracking.delete": "cargo.tracking.manage",
+  "invoice.save": "cargo.costs.manage", "invoice.delete": "cargo.costs.manage", "charge.save": "cargo.costs.manage", "charge.delete": "cargo.costs.manage",
+  "file.delete": "cargo.documents.manage",
 }
 
 const nextStage: Record<CargoStage, CargoStage[]> = {
@@ -326,6 +327,14 @@ async function performCargoAction(tx: Tx, action: string, raw: unknown, actor: A
         await audit(tx, actor, "CARGO_TRACKING_SAVE", "CargoTrackingLeg", row.id, { before: old, after: v })
         return row
       }
+      case "tracking.delete": {
+        const v = z.object({ id }).parse(raw)
+        const old = await tx.cargoTrackingLeg.findUniqueOrThrow({ where: { id: v.id }, include: { _count: { select: { invoices: true, charges: true } } } })
+        if (old._count.invoices || old._count.charges) throw new CargoError("TRACKING_HAS_HISTORY", "Remove or relink its invoices and charges before deleting this tracking leg", 409)
+        await tx.cargoTrackingLeg.delete({ where: { id: old.id } })
+        await audit(tx, actor, "CARGO_TRACKING_DELETE", "CargoTrackingLeg", old.id, old)
+        return { id: old.id, shipmentId: old.shipmentId }
+      }
       case "invoice.save": {
         const v = z.object({ id: optionalId, shipmentId: id, packageId: optionalId, trackingLegId: optionalId, invoiceNo: optionalText, sourceName: optionalText, invoiceDate: optionalDate, totalAmount: moneyNonnegative, currency, notes: optionalText }).parse(raw)
         const old = v.id ? await tx.cargoInvoice.findUniqueOrThrow({ where: { id: v.id } }) : null
@@ -334,6 +343,14 @@ async function performCargoAction(tx: Tx, action: string, raw: unknown, actor: A
         const row = old ? await tx.cargoInvoice.update({ where: { id: old.id }, data }) : await tx.cargoInvoice.create({ data: { ...data, shipmentId: v.shipmentId, createdById: actor.id } })
         await audit(tx, actor, "CARGO_INVOICE_SAVE", "CargoInvoice", row.id, { before: old, after: v })
         return row
+      }
+      case "invoice.delete": {
+        const v = z.object({ id }).parse(raw)
+        const old = await tx.cargoInvoice.findUniqueOrThrow({ where: { id: v.id }, include: { _count: { select: { charges: true, files: true } } } })
+        if (old._count.charges || old._count.files) throw new CargoError("INVOICE_HAS_HISTORY", "Remove or relink its charges and files before deleting this invoice", 409)
+        await tx.cargoInvoice.delete({ where: { id: old.id } })
+        await audit(tx, actor, "CARGO_INVOICE_DELETE", "CargoInvoice", old.id, old)
+        return { id: old.id, shipmentId: old.shipmentId }
       }
       case "charge.save": {
         const v = z.object({ id: optionalId, shipmentId: id, packageId: optionalId, trackingLegId: optionalId, invoiceId: optionalId, category: z.nativeEnum(CargoChargeCategory), amount: moneyPositive, currency, pkrEquivalent: moneyNonnegative, pkrNote: optionalText, remarks: optionalText }).parse(raw)
@@ -344,6 +361,20 @@ async function performCargoAction(tx: Tx, action: string, raw: unknown, actor: A
         const row = old ? await tx.cargoCharge.update({ where: { id: old.id }, data }) : await tx.cargoCharge.create({ data: { ...data, shipmentId: v.shipmentId, createdById: actor.id } })
         await audit(tx, actor, "CARGO_CHARGE_SAVE", "CargoCharge", row.id, { before: old, after: v })
         return row
+      }
+      case "charge.delete": {
+        const v = z.object({ id }).parse(raw)
+        const old = await tx.cargoCharge.findUniqueOrThrow({ where: { id: v.id } })
+        await tx.cargoCharge.delete({ where: { id: old.id } })
+        await audit(tx, actor, "CARGO_CHARGE_DELETE", "CargoCharge", old.id, old)
+        return { id: old.id, shipmentId: old.shipmentId }
+      }
+      case "file.delete": {
+        const v = z.object({ id }).parse(raw)
+        const old = await tx.cargoFile.findUniqueOrThrow({ where: { id: v.id }, select: { id: true, shipmentId: true, packageId: true, invoiceId: true, kind: true, fileName: true, sha256: true } })
+        await tx.cargoFile.delete({ where: { id: old.id } })
+        await audit(tx, actor, "CARGO_FILE_DELETE", "CargoFile", old.id, old)
+        return { id: old.id, shipmentId: old.shipmentId }
       }
       default: throw new CargoError("UNKNOWN_ACTION", "Unknown Cargo action", 404)
     }

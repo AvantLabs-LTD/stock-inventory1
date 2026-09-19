@@ -46,8 +46,12 @@ POST /api/v1/cargo accepts a JSON object with action and data fields and returns
 | item.remove | id | cargo.packages.manage |
 | milestone.post | shipmentId, next valid stage, ISO occurredAt; optional location/remarks | cargo.milestones.post |
 | tracking.save | shipmentId, kind; optional id to edit, courier/tracking/dates/remarks | cargo.tracking.manage |
+| tracking.delete | id; allowed only when no invoice or charge still references the leg | cargo.tracking.manage |
 | invoice.save | shipmentId, uppercase three-letter currency; optional id, package/leg, total/date/issuer | cargo.costs.manage |
+| invoice.delete | id; allowed only when no charge or file still references the invoice | cargo.costs.manage |
 | charge.save | shipmentId, category, positive amount, uppercase currency; optional id, package/leg/invoice, PKR comparison/note | cargo.costs.manage |
+| charge.delete | id | cargo.costs.manage |
+| file.delete | id | cargo.documents.manage |
 
 Shipment and package names are optional; omitted names receive generated identifiers. Supplied names are unique case-insensitively. Send quantities and money as decimal strings. Packing quantities support 3 decimal places, weights 3, dimensions 2, and money 4. pkrEquivalent requires pkrNote. The server enforces transitions, route rules, shipment ownership, and permissions.
 
