@@ -20,7 +20,7 @@ export function FluxHome() {
   return <div className="space-y-6"><PageHeader title="Flux" description="One workspace for the operational modules of your ERP." icon={ClipboardList}/>
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{modules.map(module => {
       const allowed = !module.permission || permissions.includes(module.permission)
-      return <button key={module.page} type="button" onClick={() => navigate(module.page)} disabled={!allowed}
+      return <button key={module.page} type="button" onClick={() => navigate(module.page)} disabled={!allowed || !module.available} title={!module.available ? "This module is planned and has no operational workflow yet." : !allowed ? "You do not have access to this module." : undefined}
         className="text-left disabled:opacity-50"><Card className="h-full transition-colors hover:border-primary/50"><CardContent className="flex min-h-32 items-start gap-4 p-5"><div className="rounded-xl bg-primary/10 p-3"><module.icon className="size-5 text-primary"/></div><div><div className="flex items-center gap-2 font-semibold">{module.title}{!module.available&&<span className="rounded bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">Planned</span>}</div><div className="mt-1 text-sm text-muted-foreground">{module.subtitle}</div></div></CardContent></Card></button>
     })}</div>
   </div>
