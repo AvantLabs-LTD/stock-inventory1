@@ -107,15 +107,18 @@ export async function GET(request: NextRequest) {
     ORDER BY d."requestedAt",dl."sortOrder"
   `) : []
   const orderLines = itemIds.length ? await db.procurementOrderLine.findMany({
-    where: { itemId: { in: itemIds }, order: { statusRecord: "ACTIVE" } },
+    where: { itemId: { in: itemIds }, order: { statusRecord: "ACTIVE", status: { notIn: ["RECEIVED", "CANCELLED"] } } },
     select: { itemId: true, quantity: true, order: { select: { id: true, source: true, orderNo: true, status: true, submittedAt: true } } },
     orderBy: { order: { submittedAt: "desc" } },
   }) : []
   const byItem = new Map(operational.map(row => [row.itemId, row]))
   const sourcesByItem = new Map<string, typeof allocationSources>()
-  const ordersByItem = new Map<string, typeof orderLines>()
+  const ordersByItem = new Map<string, Array<{ itemId: string | null; quantity: Prisma.Decimal; order: { id: string; source: string; orderNo: string; status: string; submittedAt: Date | null } }>>()
   for (const source of allocationSources) sourcesByItem.set(source.itemId, [...(sourcesByItem.get(source.itemId) || []), source])
-  for (const line of orderLines) if (line.itemId) ordersByItem.set(line.itemId, [...(ordersByItem.get(line.itemId) || []), line])
+  for (const line of orderLines) if (line.itemId) {
+    const order = { ...line.order, status: line.order.status === "SUPPLIER_SHIPPED" ? "In transit" : line.order.status.replaceAll("_", " ") }
+    ordersByItem.set(line.itemId, [...(ordersByItem.get(line.itemId) || []), { ...line, order }])
+  }
   return Response.json({ items: items.map(i => ({
     ...i,
     free: Number(i.balance?.onHand || 0) - Number(i.balance?.reserved || 0),

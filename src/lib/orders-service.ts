@@ -35,6 +35,7 @@ export function ordersApiError(error: unknown) {
 export const ordersActionPermission: Record<string, string> = {
   "order.create": "orders.manage", "order.update": "orders.manage", "order.archive": "orders.manage", "order.delete": "orders.manage",
   "line.create": "orders.manage", "line.update": "orders.manage", "line.remove": "orders.manage",
+  "package-link.create": "orders.manage", "package-link.remove": "orders.manage",
 }
 
 const lineInput = z.object({ description: text, productUrl: z.string().trim().url().max(2000).nullish().transform(value => value || null), variant: optionalText, quantity, unitPrice: optionalAmount, notes: optionalText, itemId: optionalId })
@@ -55,7 +56,7 @@ export async function listOrders(options: { page: number; limit: number; q?: str
 }
 
 export async function orderDetail(id: string) {
-  return db.procurementOrder.findUnique({ where: { id }, include: { vendor: { select: { id: true, name: true, contactPerson: true, email: true, phone: true } }, lines: { orderBy: { lineNo: "asc" }, include: { item: { select: { id: true, code: true, title: true, specification: true, unit: true } } } } } })
+  return db.procurementOrder.findUnique({ where: { id }, include: { vendor: { select: { id: true, name: true, contactPerson: true, email: true, phone: true } }, lines: { orderBy: { lineNo: "asc" }, include: { item: { select: { id: true, code: true, title: true, description: true, specification: true, unit: true } } } }, packageLinks: { orderBy: { createdAt: "desc" }, include: { package: { select: { id: true, packageNo: true, status: true, shipment: { select: { id: true, shipmentNo: true } } } }, linkedBy: { select: { name: true } } } } } })
 }
 
 export async function executeOrdersAction(action: string, raw: unknown, actor: Actor) {
@@ -81,8 +82,9 @@ export async function executeOrdersAction(action: string, raw: unknown, actor: A
       }
       case "order.delete": {
         const value = z.object({ id }).parse(raw)
-        const row = await tx.procurementOrder.findUniqueOrThrow({ where: { id: value.id }, include: { _count: { select: { lines: true } } } })
+        const row = await tx.procurementOrder.findUniqueOrThrow({ where: { id: value.id }, include: { _count: { select: { lines: true, packageLinks: true } } } })
         if (row.status !== "DRAFT") throw new OrdersError("ORDER_NOT_DRAFT", "Only draft orders can be permanently deleted; archive other orders instead", 409)
+        if (row._count.packageLinks) throw new OrdersError("ORDER_HAS_PACKAGE_LINKS", "Remove linked cargo packages before permanently deleting this order", 409)
         await tx.procurementOrderLine.deleteMany({ where: { orderId: row.id } })
         await tx.procurementOrder.delete({ where: { id: row.id } })
         await audit(tx, actor, "ORDERS_ORDER_DELETE", row.id, { source: row.source, orderNo: row.orderNo, lineCount: row._count.lines })
@@ -105,6 +107,24 @@ export async function executeOrdersAction(action: string, raw: unknown, actor: A
         const value = z.object({ id }).parse(raw)
         const row = await tx.procurementOrderLine.delete({ where: { id: value.id } })
         await audit(tx, actor, "ORDERS_LINE_REMOVE", row.orderId, { lineId: row.id, description: row.description })
+        return { id: row.id, orderId: row.orderId }
+      }
+      case "package-link.create": {
+        const value = z.object({ orderId: id, packageId: id, remarks: optionalText }).parse(raw)
+        const [order, cargoPackage] = await Promise.all([tx.procurementOrder.findUnique({ where: { id: value.orderId }, select: { statusRecord: true } }), tx.cargoPackage.findUnique({ where: { id: value.packageId }, select: { status: true } })])
+        if (!order) throw new OrdersError("ORDER_NOT_FOUND", "Order not found", 404)
+        if (!cargoPackage) throw new OrdersError("PACKAGE_NOT_FOUND", "Cargo package not found", 404)
+        if (order.statusRecord !== "ACTIVE" || cargoPackage.status !== "ACTIVE") throw new OrdersError("LINK_INACTIVE_RECORD", "Restore both the order and package before linking", 409)
+        const row = await tx.procurementOrderPackage.create({ data: { ...value, linkedById: actor.id }, include: { package: { select: { id: true, packageNo: true, status: true, shipment: { select: { id: true, shipmentNo: true } } } }, linkedBy: { select: { name: true } } } })
+        await audit(tx, actor, "ORDERS_PACKAGE_LINK_CREATE", value.orderId, { packageId: value.packageId, remarks: value.remarks })
+        await tx.auditLog.create({ data: { userId: actor.id, userName: actor.name, action: "CARGO_ORDER_LINK_CREATE", entityType: "CargoPackage", entityId: value.packageId, details: JSON.stringify({ orderId: value.orderId, remarks: value.remarks }) } })
+        return row
+      }
+      case "package-link.remove": {
+        const value = z.object({ id }).parse(raw)
+        const row = await tx.procurementOrderPackage.delete({ where: { id: value.id } })
+        await audit(tx, actor, "ORDERS_PACKAGE_LINK_REMOVE", row.orderId, { packageId: row.packageId, remarks: row.remarks })
+        await tx.auditLog.create({ data: { userId: actor.id, userName: actor.name, action: "CARGO_ORDER_LINK_REMOVE", entityType: "CargoPackage", entityId: row.packageId, details: JSON.stringify({ orderId: row.orderId, remarks: row.remarks }) } })
         return { id: row.id, orderId: row.orderId }
       }
       default: throw new OrdersError("UNKNOWN_ACTION", "Unknown Orders action", 404)

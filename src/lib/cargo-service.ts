@@ -267,7 +267,8 @@ async function performCargoAction(tx: Tx, action: string, raw: unknown, actor: A
       }
       case "package.delete": {
         const v = z.object({ id }).parse(raw)
-        const row = await tx.cargoPackage.findUniqueOrThrow({ where: { id: v.id }, include: { _count: { select: { items: true, invoices: true, charges: true, files: true, legacyEvents: true } } } })
+        const row = await tx.cargoPackage.findUniqueOrThrow({ where: { id: v.id }, include: { _count: { select: { items: true, invoices: true, charges: true, files: true, legacyEvents: true, orderLinks: true } } } })
+        if (row._count.orderLinks) throw new CargoError("PACKAGE_HAS_ORDER_LINKS", "Remove linked orders before permanently deleting this package", 409)
         if (row._count.items || row._count.invoices || row._count.charges || row._count.files || row._count.legacyEvents) throw new CargoError("PACKAGE_HAS_HISTORY", "Archive this package because it already has contents, documents, costs, or imported history", 409)
         await tx.cargoPackage.delete({ where: { id: row.id } })
         await audit(tx, actor, "CARGO_PACKAGE_DELETE", "CargoPackage", row.id, { packageNo: row.packageNo })
@@ -522,7 +523,7 @@ export async function cargoShipmentDetail(id: string, permissions: string[]) {
   const docs = permissions.includes("cargo.documents.view")
   return db.cargoShipment.findUnique({ where: { id }, include: {
     forwarder: true, sourceWarehouse: true, createdBy: { select: { name: true } },
-    packages: { include: { vendor: { select: { id: true, name: true } }, items: { orderBy: { sortOrder: "asc" } } }, orderBy: { packageNo: "asc" } },
+    packages: { include: { vendor: { select: { id: true, name: true } }, items: { orderBy: { sortOrder: "asc" } }, orderLinks: { orderBy: { createdAt: "desc" }, include: { order: { select: { id: true, orderNo: true, source: true, status: true } }, linkedBy: { select: { name: true } } } } }, orderBy: { packageNo: "asc" } },
     milestones: { orderBy: { sequence: "asc" } }, trackingLegs: { include: { courier: { select: { name: true } } }, orderBy: { sequence: "asc" } },
     legacyEvents: { orderBy: { occurredAt: "asc" } },
     invoices: costs ? { orderBy: { createdAt: "asc" } } : false,

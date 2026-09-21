@@ -134,6 +134,7 @@ enum ProcurementOrderStatus {
   PLACED
   PAID
   SUPPLIER_SHIPPED
+  RECEIVED
   CLOSED
   CANCELLED
 }
@@ -150,6 +151,7 @@ model User {
   createdAt            DateTime                 @default(now())
   updatedAt            DateTime                 @updatedAt
   itemsCreated         Item[]                   @relation("ItemCreatedBy")
+  procurementOrderPackageLinks ProcurementOrderPackage[] @relation("ProcurementOrderPackageLinkedBy")
   demandsRequested     Demand[]                 @relation("DemandRequestedBy")
   demandsStarted       Demand[]                 @relation("DemandStartedBy")
   demandsClosed        Demand[]                 @relation("DemandClosedBy")
@@ -845,6 +847,7 @@ model CargoPackage {
   charges        CargoCharge[]
   files          CargoFile[]
   legacyEvents  CargoLegacyEvent[]
+  orderLinks    ProcurementOrderPackage[]
 
   @@index([shipmentId])
   @@unique([id, shipmentId])
@@ -1035,12 +1038,30 @@ model ProcurementOrder {
   vendor            Vendor?                @relation(fields: [vendorId], references: [id], onDelete: Restrict)
   createdBy         User                   @relation("ProcurementOrderCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   lines             ProcurementOrderLine[]
+  packageLinks      ProcurementOrderPackage[]
 
   @@unique([source, orderNo])
   @@index([status, submittedAt])
   @@index([vendorId])
   @@index([trackingNumber])
   @@map("procurement_orders")
+}
+
+model ProcurementOrderPackage {
+  id          String           @id @default(cuid())
+  orderId     String
+  packageId   String
+  remarks     String?
+  linkedById  String
+  createdAt   DateTime         @default(now())
+  order       ProcurementOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  package     CargoPackage     @relation(fields: [packageId], references: [id], onDelete: Restrict)
+  linkedBy    User             @relation("ProcurementOrderPackageLinkedBy", fields: [linkedById], references: [id], onDelete: Restrict)
+
+  @@unique([orderId, packageId])
+  @@index([packageId])
+  @@index([orderId, createdAt])
+  @@map("procurement_order_packages")
 }
 
 model ProcurementOrderLine {

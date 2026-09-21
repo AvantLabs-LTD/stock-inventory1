@@ -22,6 +22,11 @@ export async function GET(request: NextRequest) {
       const vendors = await db.vendor.findMany({ where: { status: "ACTIVE" }, select: { id: true, name: true, contactPerson: true, email: true, phone: true }, orderBy: { name: "asc" }, take: 500 })
       return Response.json({ vendors })
     }
+    if (view === "cargo-packages") {
+      if (!hasPermission(session, "cargo.view")) return forbiddenResponse()
+      const packages = await db.cargoPackage.findMany({ where: { status: "ACTIVE", shipment: { status: "ACTIVE" } }, select: { id: true, packageNo: true, shipment: { select: { id: true, shipmentNo: true } } }, orderBy: { createdAt: "desc" }, take: 500 })
+      return Response.json({ packages })
+    }
     if (view === "items") {
       const q = request.nextUrl.searchParams.get("q")?.trim() || ""
       const discipline = z.nativeEnum(ItemDiscipline).optional().safeParse(request.nextUrl.searchParams.get("discipline") || undefined)
