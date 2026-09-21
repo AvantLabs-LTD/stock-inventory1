@@ -55,7 +55,7 @@ export async function listOrders(options: { page: number; limit: number; q?: str
 }
 
 export async function orderDetail(id: string) {
-  return db.procurementOrder.findUnique({ where: { id }, include: { vendor: { select: { id: true, name: true } }, lines: { orderBy: { lineNo: "asc" }, include: { item: { select: { id: true, code: true, title: true } } } } } })
+  return db.procurementOrder.findUnique({ where: { id }, include: { vendor: { select: { id: true, name: true, contactPerson: true, email: true, phone: true } }, lines: { orderBy: { lineNo: "asc" }, include: { item: { select: { id: true, code: true, title: true, specification: true, unit: true } } } } } })
 }
 
 export async function executeOrdersAction(action: string, raw: unknown, actor: Actor) {

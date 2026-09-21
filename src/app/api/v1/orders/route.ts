@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server"
 import { ProcurementOrderStatus, RecordStatus } from "@prisma/client"
 import { z } from "zod"
+import { db } from "@/lib/db"
 import { getSession, hasPermission, forbiddenResponse, unauthorizedResponse } from "@/lib/auth-middleware"
 import { executeOrdersAction, listOrders, orderDetail, ordersActionPermission, ordersApiError } from "@/lib/orders-service"
 
@@ -16,6 +17,16 @@ export async function GET(request: NextRequest) {
       if (!id) return Response.json({ code: "ID_REQUIRED", error: "Order ID required" }, { status: 400 })
       const order = await orderDetail(id)
       return order ? Response.json({ order }) : Response.json({ code: "NOT_FOUND", error: "Order not found" }, { status: 404 })
+    }
+    if (view === "references") {
+      const vendors = await db.vendor.findMany({ where: { status: "ACTIVE" }, select: { id: true, name: true, contactPerson: true, email: true, phone: true }, orderBy: { name: "asc" }, take: 500 })
+      return Response.json({ vendors })
+    }
+    if (view === "items") {
+      const q = request.nextUrl.searchParams.get("q")?.trim() || ""
+      if (q.length < 2) return Response.json({ items: [] })
+      const items = await db.item.findMany({ where: { status: "ACTIVE", OR: [{ code: { contains: q, mode: "insensitive" } }, { title: { contains: q, mode: "insensitive" } }, { manufacturerPartNumber: { contains: q, mode: "insensitive" } }] }, select: { id: true, code: true, title: true, specification: true, unit: true }, orderBy: [{ title: "asc" }, { code: "asc" }], take: 25 })
+      return Response.json({ items })
     }
     if (view !== "orders") return Response.json({ code: "INVALID_VIEW", error: "Unknown Orders view" }, { status: 400 })
     const query = z.object({ page: z.coerce.number().int().min(1).default(1), limit: z.coerce.number().int().min(1).max(100).default(50), q: z.string().trim().max(100).optional(), status: z.nativeEnum(ProcurementOrderStatus).optional(), source: z.string().trim().max(500).optional(), vendorId: z.string().trim().max(100).optional(), recordStatus: z.nativeEnum(RecordStatus).optional() }).safeParse(Object.fromEntries(request.nextUrl.searchParams.entries()))
