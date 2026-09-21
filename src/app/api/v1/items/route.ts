@@ -106,9 +106,16 @@ export async function GET(request: NextRequest) {
     WHERE q."itemId" IN (${Prisma.join(itemIds)}) AND q.allocated>0
     ORDER BY d."requestedAt",dl."sortOrder"
   `) : []
+  const orderLines = itemIds.length ? await db.procurementOrderLine.findMany({
+    where: { itemId: { in: itemIds }, order: { statusRecord: "ACTIVE" } },
+    select: { itemId: true, quantity: true, order: { select: { id: true, source: true, orderNo: true, status: true, submittedAt: true } } },
+    orderBy: { order: { submittedAt: "desc" } },
+  }) : []
   const byItem = new Map(operational.map(row => [row.itemId, row]))
   const sourcesByItem = new Map<string, typeof allocationSources>()
+  const ordersByItem = new Map<string, typeof orderLines>()
   for (const source of allocationSources) sourcesByItem.set(source.itemId, [...(sourcesByItem.get(source.itemId) || []), source])
+  for (const line of orderLines) if (line.itemId) ordersByItem.set(line.itemId, [...(ordersByItem.get(line.itemId) || []), line])
   return Response.json({ items: items.map(i => ({
     ...i,
     free: Number(i.balance?.onHand || 0) - Number(i.balance?.reserved || 0),
@@ -116,6 +123,7 @@ export async function GET(request: NextRequest) {
     procurement: byItem.get(i.id)?.procurement || 0,
     deficit: byItem.get(i.id)?.deficit || 0,
     allocationSources: sourcesByItem.get(i.id) || [],
+    procurementOrders: ordersByItem.get(i.id) || [],
   })), pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) } })
 }
 
