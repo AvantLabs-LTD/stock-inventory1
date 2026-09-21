@@ -476,7 +476,7 @@ export async function listCargoPackages(options: CargoListOptions = {}) {
     ...(options.vendorId ? { vendorId: options.vendorId } : {}),
     ...(options.route || options.forwarderId || options.sourceWarehouseId || stageIds ? { shipment: { ...(options.route ? { route: options.route } : {}), ...(options.forwarderId ? { forwarderId: options.forwarderId } : {}), ...(options.sourceWarehouseId ? { sourceWarehouseId: options.sourceWarehouseId } : {}), ...(stageIds ? { id: { in: stageIds } } : {}) } } : {}),
   }
-  const rows = await db.cargoPackage.findMany({
+  const [rows, total] = await Promise.all([db.cargoPackage.findMany({
     take: limit + (options.cursor ? 1 : 0),
     skip: options.cursor ? 1 : (pageNumber - 1) * limit,
     ...(options.cursor ? { cursor: { id: options.cursor } } : {}),
@@ -495,8 +495,7 @@ export async function listCargoPackages(options: CargoListOptions = {}) {
       },
       _count: { select: { items: true, files: true } },
     },
-  })
-  const total = await db.cargoPackage.count({ where })
+  }), db.cargoPackage.count({ where })])
   const result = options.cursor ? rows.slice(0, limit) : rows
   return {
     packages: result.map(row => ({

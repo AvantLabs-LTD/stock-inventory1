@@ -33,6 +33,8 @@ type Tab = PrimaryTab | "reports" | "management" | "tracking" | "finance" | "das
 type DetailModal = "shipment" | "shipmentCreate" | "packageCreate" | "milestone" | "note" | "tracking" | "invoice" | "charge" | "package" | "item" | "upload" | "reassign" | null
 type CargoReport = { shipments: number; packages: number; stages: Array<{ stage: string; count: number }>; routes: Array<{ route: string; count: number }>; charges: Array<{ category: string; currency: string; amount: string; count: number }> }
 type PendingStatusChange = { shipmentId: string; shipmentNo: string; currentStage: string; nextStage: string }
+let cargoReferencesCache: { value: Refs; loadedAt: number } | null = null
+let cargoReferencesRequest: Promise<Refs> | null = null
 const tabTitles: Record<PrimaryTab, string> = { shipments: "Shipments", packages: "Packages" }
 const tabDescriptions: Record<PrimaryTab, string> = { shipments: "Track each journey, its documents, costs, and grouped packages.", packages: "Inspect cartons, contents, pictures, and their shipment context." }
 const tabIcons = { shipments: Truck, packages: Package }
@@ -47,6 +49,18 @@ const formValue = (form: FormData, name: string) => String(form.get(name) || "")
 const nullable = (form: FormData, name: string) => formValue(form, name) || null
 const money = (value: string | number, currency: string) => `${Number(value).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${currency}`
 const stageRowClass = (stage: string) => ({ NEEDS_REVIEW: "border-l-4 border-l-red-500 bg-red-500/20 hover:bg-red-500/28", AT_VENDOR: "border-l-4 border-l-amber-500 bg-amber-500/20 hover:bg-amber-500/28", TO_SOURCE_WAREHOUSE: "border-l-4 border-l-sky-500 bg-sky-500/20 hover:bg-sky-500/28", AT_SOURCE_WAREHOUSE: "border-l-4 border-l-cyan-500 bg-cyan-500/20 hover:bg-cyan-500/28", IN_INTERNATIONAL_TRANSIT: "border-l-4 border-l-blue-500 bg-blue-500/22 hover:bg-blue-500/30", ARRIVED_IN_COUNTRY: "border-l-4 border-l-violet-500 bg-violet-500/20 hover:bg-violet-500/28", CUSTOMS_PENDING: "border-l-4 border-l-orange-500 bg-orange-500/22 hover:bg-orange-500/30", CUSTOMS_CLEARED: "border-l-4 border-l-teal-500 bg-teal-500/20 hover:bg-teal-500/28", OUT_FOR_DELIVERY: "border-l-4 border-l-lime-500 bg-lime-500/22 hover:bg-lime-500/30", RECEIVED: "border-l-4 border-l-emerald-500 bg-emerald-500/22 hover:bg-emerald-500/30" }[stage] || "hover:bg-muted/50")
+
+async function loadCargoReferences() {
+  if (cargoReferencesCache && Date.now() - cargoReferencesCache.loadedAt < 30_000) return cargoReferencesCache.value
+  if (cargoReferencesRequest) return cargoReferencesRequest
+  cargoReferencesRequest = fetch("/api/v1/cargo?view=references").then(async response => {
+    if (!response.ok) throw new Error("Unable to load Cargo references")
+    const value = await response.json() as Refs
+    cargoReferencesCache = { value, loadedAt: Date.now() }
+    return value
+  })
+  try { return await cargoReferencesRequest } finally { cargoReferencesRequest = null }
+}
 
 function Field({ name, label, type = "text", defaultValue, required = false, step }: { name: string; label: string; type?: string; defaultValue?: string | number | null; required?: boolean; step?: string }) {
   return <div className="space-y-1"><Label htmlFor={name}>{label}</Label><Input id={name} name={name} type={type} defaultValue={defaultValue ?? ""} required={required} step={step}/></div>
@@ -199,29 +213,31 @@ export function CargoPage() {
       if (routeFilter !== "all") params.set("route", routeFilter)
       if (forwarderFilter !== "all") params.set("forwarderId", forwarderFilter)
       if (warehouseFilter !== "all") params.set("sourceWarehouseId", warehouseFilter)
-      const [listResponse, packagesResponse, refsResponse] = await Promise.all([fetch(`/api/v1/cargo?view=shipments&${params}`), fetch(`/api/v1/cargo?view=packages&${params}`), fetch("/api/v1/cargo?view=references")])
-      if (!listResponse.ok || !packagesResponse.ok || !refsResponse.ok) throw new Error("Unable to load Cargo")
-      const shipmentPage = await listResponse.json()
-      const packagePage = await packagesResponse.json()
-      setRows(shipmentPage.shipments)
-      setPackageRows(packagePage.packages)
-      const activePage = tab === "packages" ? packagePage : shipmentPage
-      setPageCount(Math.max(activePage.pageCount || 1, 1))
-      setTotal(activePage.total || 0)
-      setRefs(await refsResponse.json())
       const target = id ?? selectedEntityId ?? selectedShipmentId.current
       if (target) {
+        void loadCargoReferences().then(setRefs).catch(error => toast.error(error instanceof Error ? error.message : "Cargo reference load failed"))
         const response = await fetch(`/api/v1/cargo?view=${tab === "packages" && selectedEntityId ? "package" : "shipment"}&id=${encodeURIComponent(target)}`)
         if (!response.ok) throw new Error(`Unable to load ${tab === "packages" ? "package" : "shipment"}`)
         const body = await response.json()
         selectedShipmentId.current = body.shipment.id
         setShipment(body.shipment)
         setScope(body.packageId || "all")
-      } else {
-        selectedShipmentId.current = null
-        setShipment(null)
-        setScope("all")
+        return
       }
+      selectedShipmentId.current = null
+      setShipment(null)
+      setScope("all")
+      const [listResponse, references] = await Promise.all([
+        fetch(`/api/v1/cargo?view=${tab === "packages" ? "packages" : "shipments"}&${params}`),
+        loadCargoReferences(),
+      ])
+      if (!listResponse.ok) throw new Error("Unable to load Cargo")
+      const activePage = await listResponse.json()
+      if (tab === "packages") setPackageRows(activePage.packages)
+      else setRows(activePage.shipments)
+      setPageCount(Math.max(activePage.pageCount || 1, 1))
+      setTotal(activePage.total || 0)
+      setRefs(references)
     } catch (error) { toast.error(error instanceof Error ? error.message : "Cargo load failed") }
   }, [debouncedSearch, forwarderFilter, page, routeFilter, selectedEntityId, stageFilter, statusFilter, tab, vendorFilter, warehouseFilter])
   useEffect(() => { void load() }, [load])
@@ -231,6 +247,7 @@ export function CargoPage() {
       const response = await fetch("/api/v1/cargo", { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify({ action, data }) })
       const body = await response.json()
       if (!response.ok) throw new Error(body.error || "Cargo update failed")
+      if (action.startsWith("reference.")) cargoReferencesCache = null
       toast.success(action.endsWith(".delete") || action === "item.remove" ? "Deleted" : "Saved")
       await load(selected || (action === "shipment.create" ? body.result.id : action === "package.create" ? body.result.shipmentId : undefined))
       return body.result

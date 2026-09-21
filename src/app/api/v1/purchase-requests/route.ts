@@ -8,11 +8,32 @@ import { validateDemandCoverage } from "@/lib/purchase-service"
 
 export async function GET(request: NextRequest) {
   const session = await getSession(request); if (!session) return unauthorizedResponse(); if (!hasPermission(session, "vault.purchasing.view")) return forbiddenResponse()
-  const requests = await db.purchaseRequest.findMany({ include: {
-    vendor: true, createdBy: { select: { id: true, name: true } },
-    lines: { include: { item: { include: { category: true } }, demandLinks: { include: { demandLine: { include: { demand: { include: { departmentTag: true, requestedBy: { select: { name: true } } } }, projectTag: true } } } }, receiptLines: true } },
-  }, orderBy: { createdAt: "desc" }, take: 200 })
-  return Response.json({ requests })
+  const page = Math.max(1, Number(request.nextUrl.searchParams.get("page")) || 1)
+  const pageSize = Math.min(100, Math.max(1, Number(request.nextUrl.searchParams.get("pageSize")) || 50))
+  const status = request.nextUrl.searchParams.get("status") || "ACTIVE"
+  const q = request.nextUrl.searchParams.get("q")?.trim()
+  const where: Prisma.PurchaseRequestWhereInput = {
+    ...(status === "ACTIVE" ? { status: { not: "RECEIVED_IN_STORE" } } : status === "ALL" ? {} : { status: status as never }),
+    ...(q ? { OR: [
+      { requestNo: { contains: q, mode: "insensitive" } }, { vendor: { name: { contains: q, mode: "insensitive" } } },
+      { lines: { some: { item: { OR: [{ code: { contains: q, mode: "insensitive" } }, { title: { contains: q, mode: "insensitive" } }] } } } },
+      { lines: { some: { demandLinks: { some: { demandLine: { demand: { demandNo: { contains: q, mode: "insensitive" } } } } } } } },
+    ] } : {}),
+  }
+  const [requests, total] = await Promise.all([db.purchaseRequest.findMany({ where, select: {
+    id: true, requestNo: true, status: true, createdAt: true, updatedAt: true, submittedAt: true, orderedAt: true, shippedAt: true, receivedAt: true,
+    trackingNumber: true, boxNumber: true, shippingDetails: true, remarks: true,
+    vendor: { select: { id: true, name: true } }, createdBy: { select: { id: true, name: true } },
+    lines: { select: {
+      id: true, quantity: true, type: true, remarks: true,
+      item: { select: { id: true, code: true, title: true, specification: true, unit: true } },
+      demandLinks: { select: { id: true, quantity: true, demandLine: { select: {
+        id: true, title: true, unit: true, projectTag: { select: { id: true, name: true } },
+        demand: { select: { id: true, demandNo: true, state: true, departmentTag: { select: { id: true, name: true } }, requestedBy: { select: { name: true } } } },
+      } } } },
+    } },
+  }, orderBy: { createdAt: "desc" }, skip: (page - 1) * pageSize, take: pageSize }), db.purchaseRequest.count({ where })])
+  return Response.json({ requests, pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) } })
 }
 
 export async function POST(request: NextRequest) {

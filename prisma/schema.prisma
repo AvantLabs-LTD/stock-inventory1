@@ -398,6 +398,7 @@ model Demand {
 
   @@index([state, requestedAt])
   @@index([requestedById])
+  @@index([requestedById, requestedAt])
   @@map("demands")
 }
 
@@ -608,6 +609,7 @@ model PurchaseRequest {
   attachments     Attachment[]
 
   @@index([status])
+  @@index([status, createdAt])
   @@map("purchase_requests")
 }
 
@@ -818,6 +820,7 @@ model CargoShipment {
 
   @@index([forwarderId])
   @@index([sourceWarehouseId])
+  @@index([status, createdAt])
   @@map("cargo_shipments")
 }
 
@@ -846,6 +849,7 @@ model CargoPackage {
   @@index([shipmentId])
   @@unique([id, shipmentId])
   @@index([vendorId])
+  @@index([status, createdAt])
   @@map("cargo_packages")
 }
 

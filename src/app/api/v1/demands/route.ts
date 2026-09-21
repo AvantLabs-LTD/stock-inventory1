@@ -15,8 +15,11 @@ export async function GET(request: NextRequest) {
     include: { departmentTag: true, requestedBy: { select: { id: true, name: true } }, lines: { select: { id: true } } },
     orderBy: { requestedAt: "desc" }, take: 200,
   })
-  const totals = await db.$queryRaw<Array<{ demandId: string; requested: Prisma.Decimal; approved: Prisma.Decimal; allocated: Prisma.Decimal; netIssued: Prisma.Decimal; remaining: Prisma.Decimal }>>
-    `SELECT "demandId",SUM(requested) requested,SUM(approved) approved,SUM(allocated) allocated,SUM("netIssued") "netIssued",SUM(remaining) remaining FROM "demand_line_quantities" GROUP BY "demandId"`
+  const demandIds = demands.map(demand => demand.id)
+  const totals = demandIds.length ? await db.$queryRaw<Array<{ demandId: string; requested: Prisma.Decimal; approved: Prisma.Decimal; allocated: Prisma.Decimal; netIssued: Prisma.Decimal; remaining: Prisma.Decimal }>>(Prisma.sql`
+    SELECT "demandId",SUM(requested) requested,SUM(approved) approved,SUM(allocated) allocated,SUM("netIssued") "netIssued",SUM(remaining) remaining
+    FROM "demand_line_quantities" WHERE "demandId" IN (${Prisma.join(demandIds)}) GROUP BY "demandId"
+  `) : []
   const byId = new Map(totals.map(x => [x.demandId, x]))
   return Response.json({ demands: demands.map(d => ({ ...d, quantities: byId.get(d.id) || null })) })
 }

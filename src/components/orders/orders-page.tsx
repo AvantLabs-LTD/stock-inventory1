@@ -22,20 +22,22 @@ export function OrdersPage() {
   const canManage = permissions.includes("orders.manage")
   const [orders, setOrders] = useState<Order[]>([])
   const [q, setQ] = useState("")
+  const [debouncedQuery, setDebouncedQuery] = useState("")
   const [status, setStatus] = useState("")
   const [total, setTotal] = useState(0)
   const [createOpen, setCreateOpen] = useState(false)
 
   async function load() {
     const params = new URLSearchParams({ view: "orders", limit: "100" })
-    if (q.trim()) params.set("q", q.trim())
+    if (debouncedQuery) params.set("q", debouncedQuery)
     if (status) params.set("status", status)
     const response = await fetch(`/api/v1/orders?${params}`)
     const body = await response.json()
     if (!response.ok) return toast.error(body.error || "Could not load orders")
     setOrders(body.orders); setTotal(body.total)
   }
-  useEffect(() => { void load() }, [q, status])
+  useEffect(() => { const timer = window.setTimeout(() => setDebouncedQuery(q.trim()), 250); return () => window.clearTimeout(timer) }, [q])
+  useEffect(() => { void load() }, [debouncedQuery, status])
 
   async function create(form: FormData) {
     const body = { action: "order.create", data: { source: String(form.get("source") || "").trim(), orderNo: String(form.get("orderNo") || "").trim(), status: String(form.get("status") || "DRAFT"), supplierName: String(form.get("supplierName") || "").trim(), submittedAt: String(form.get("submittedAt") || "") || null, currency: String(form.get("currency") || "PKR").trim().toUpperCase(), paidAmount: String(form.get("paidAmount") || "") || null, shippingAmount: String(form.get("shippingAmount") || "") || null, courierName: String(form.get("courierName") || "") || null, trackingNumber: String(form.get("trackingNumber") || "") || null, notes: String(form.get("notes") || "") || null, lines: [{ description: String(form.get("lineDescription") || "").trim(), variant: String(form.get("variant") || "") || null, quantity: String(form.get("quantity") || "").trim(), unitPrice: String(form.get("unitPrice") || "") || null }] } }

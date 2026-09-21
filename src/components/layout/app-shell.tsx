@@ -1,22 +1,28 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
-import { useAuthStore } from "@/stores/auth-store"
+import { useEffect, useState } from "react"
+import dynamic from "next/dynamic"
+import { useAuthStore, type User } from "@/stores/auth-store"
 import { useAppStore } from "@/stores/app-store"
 import { AppSidebar } from "@/components/layout/app-sidebar"
 import { TopBar } from "@/components/layout/top-bar"
 import { ChangePasswordDialog } from "@/components/change-password/change-password-dialog"
 import { LoginForm } from "@/components/login/login-form"
-import { InventoryPage, ItemsPage, OverviewPage, ReferenceDataPage } from "@/components/streamlined/pages"
-import { DemandsPage, PurchasingPage } from "@/components/streamlined/demand-purchase-pages"
-import { UsersPage } from "@/components/users/users-page"
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Toaster } from "@/components/ui/sonner"
 import { ThemeProvider } from "@/components/theme-provider"
 import { FluxHome, PlannedModule } from "@/components/layout/flux-home"
-import { CargoPage } from "@/components/cargo/cargo-page"
-import { OrdersPage } from "@/components/orders/orders-page"
+
+const OverviewPage = dynamic(() => import("@/components/streamlined/pages").then(module => module.OverviewPage), { loading: () => <LoadingScreen /> })
+const ItemsPage = dynamic(() => import("@/components/streamlined/pages").then(module => module.ItemsPage), { loading: () => <LoadingScreen /> })
+const InventoryPage = dynamic(() => import("@/components/streamlined/pages").then(module => module.InventoryPage), { loading: () => <LoadingScreen /> })
+const ReferenceDataPage = dynamic(() => import("@/components/streamlined/pages").then(module => module.ReferenceDataPage), { loading: () => <LoadingScreen /> })
+const DemandsPage = dynamic(() => import("@/components/streamlined/demand-purchase-pages").then(module => module.DemandsPage), { loading: () => <LoadingScreen /> })
+const PurchasingPage = dynamic(() => import("@/components/streamlined/demand-purchase-pages").then(module => module.PurchasingPage), { loading: () => <LoadingScreen /> })
+const UsersPage = dynamic(() => import("@/components/users/users-page").then(module => module.UsersPage), { loading: () => <LoadingScreen /> })
+const CargoPage = dynamic(() => import("@/components/cargo/cargo-page").then(module => module.CargoPage), { loading: () => <LoadingScreen /> })
+const OrdersPage = dynamic(() => import("@/components/orders/orders-page").then(module => module.OrdersPage), { loading: () => <LoadingScreen /> })
 
 function LoadingScreen() {
   return (
@@ -80,14 +86,14 @@ function PageContent() {
   }
 }
 
-function AppContent() {
+function AppContent({ hasInitialSession }: { hasInitialSession: boolean }) {
   const { user, isLoading, fetchUser } = useAuthStore()
   const syncFromLocation = useAppStore(state => state.syncFromLocation)
   const [changePasswordOpen, setChangePasswordOpen] = useState(false)
 
   useEffect(() => {
-    fetchUser()
-  }, [fetchUser])
+    if (!hasInitialSession) void fetchUser()
+  }, [fetchUser, hasInitialSession])
   useEffect(() => {
     syncFromLocation()
     window.addEventListener("popstate", syncFromLocation)
@@ -117,11 +123,14 @@ function AppContent() {
   )
 }
 
-export function AppShell() {
+export function AppShell({ initialUser }: { initialUser?: User | null }) {
+  useEffect(() => {
+    if (initialUser !== undefined) useAuthStore.setState({ user: initialUser, isAuthenticated: Boolean(initialUser), isLoading: false })
+  }, [initialUser])
   return (
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
       <div className="min-h-screen bg-background">
-        <AppContent />
+        <AppContent hasInitialSession={initialUser !== undefined} />
       </div>
       <Toaster />
     </ThemeProvider>
