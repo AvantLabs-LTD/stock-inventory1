@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server"
-import { ProcurementOrderStatus, RecordStatus } from "@prisma/client"
+import { ItemDiscipline, ProcurementOrderStatus, RecordStatus } from "@prisma/client"
 import { z } from "zod"
 import { db } from "@/lib/db"
 import { getSession, hasPermission, forbiddenResponse, unauthorizedResponse } from "@/lib/auth-middleware"
@@ -24,8 +24,10 @@ export async function GET(request: NextRequest) {
     }
     if (view === "items") {
       const q = request.nextUrl.searchParams.get("q")?.trim() || ""
+      const discipline = z.nativeEnum(ItemDiscipline).optional().safeParse(request.nextUrl.searchParams.get("discipline") || undefined)
+      if (!discipline.success) return Response.json({ code: "INVALID_FILTER", error: "Invalid component discipline" }, { status: 400 })
       if (q.length < 2) return Response.json({ items: [] })
-      const items = await db.item.findMany({ where: { status: "ACTIVE", OR: [{ code: { contains: q, mode: "insensitive" } }, { title: { contains: q, mode: "insensitive" } }, { manufacturerPartNumber: { contains: q, mode: "insensitive" } }] }, select: { id: true, code: true, title: true, specification: true, unit: true }, orderBy: [{ title: "asc" }, { code: "asc" }], take: 25 })
+      const items = await db.item.findMany({ where: { status: "ACTIVE", ...(discipline.data ? { discipline: discipline.data } : {}), OR: [{ code: { contains: q, mode: "insensitive" } }, { title: { contains: q, mode: "insensitive" } }, { manufacturerPartNumber: { contains: q, mode: "insensitive" } }] }, select: { id: true, code: true, title: true, specification: true, unit: true, discipline: true }, orderBy: [{ title: "asc" }, { code: "asc" }], take: 25 })
       return Response.json({ items })
     }
     if (view !== "orders") return Response.json({ code: "INVALID_VIEW", error: "Unknown Orders view" }, { status: 400 })
