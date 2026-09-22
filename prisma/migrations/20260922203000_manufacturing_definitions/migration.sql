@@ -220,7 +220,8 @@ CREATE TABLE "bom_lines" (
     FOREIGN KEY ("consumptionRouteStepId") REFERENCES "route_steps"("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
-CREATE UNIQUE INDEX "bom_lines_id_bomVersionId_key" ON "bom_lines"("id", "bomVersionId");
+ALTER TABLE "bom_lines" ADD CONSTRAINT "bom_lines_id_bomVersionId_key"
+  UNIQUE ("id", "bomVersionId");
 CREATE UNIQUE INDEX "bom_lines_bomVersionId_sourceLineKey_key" ON "bom_lines"("bomVersionId", "sourceLineKey");
 CREATE INDEX "bom_lines_bomVersionId_sortOrder_idx" ON "bom_lines"("bomVersionId", "sortOrder");
 CREATE INDEX "bom_lines_itemId_idx" ON "bom_lines"("itemId");
