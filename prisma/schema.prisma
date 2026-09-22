@@ -157,6 +157,23 @@ enum DefinitionStatus {
   RETIRED
 }
 
+enum ProductionPlanStatus {
+  DRAFT
+  ACTIVE
+  CLOSED
+  CANCELLED
+}
+
+enum ProductionOrderStatus {
+  DRAFT
+  PLANNED
+  RELEASED
+  IN_PROGRESS
+  COMPLETED
+  CLOSED
+  CANCELLED
+}
+
 enum ProductionResourceType {
   CNC_MACHINE
   LATHE
@@ -247,6 +264,9 @@ model User {
   manufacturingRoutesCreated   ManufacturingRoute[]      @relation("ManufacturingRouteCreatedBy")
   routeVersionsCreated         RouteVersion[]            @relation("RouteVersionCreatedBy")
   routeVersionsApproved        RouteVersion[]            @relation("RouteVersionApprovedBy")
+  productionPlansCreated       ProductionPlan[]          @relation("ProductionPlanCreatedBy")
+  productionOrdersCreated      ProductionOrder[]         @relation("ProductionOrderCreatedBy")
+  productionOrdersReleased     ProductionOrder[]         @relation("ProductionOrderReleasedBy")
 }
 
 model ServiceToken {
@@ -351,16 +371,18 @@ model DepartmentTag {
 }
 
 model ProjectTag {
-  id              String           @id @default(cuid())
-  name            String
-  normalizedName  String           @unique
-  code            String?          @unique
-  description     String?
-  status          RecordStatus     @default(ACTIVE)
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
-  demandLines     DemandLine[]
-  billOfMaterials BillOfMaterial[]
+  id               String            @id @default(cuid())
+  name             String
+  normalizedName   String            @unique
+  code             String?           @unique
+  description      String?
+  status           RecordStatus      @default(ACTIVE)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  demandLines      DemandLine[]
+  billOfMaterials  BillOfMaterial[]
+  productionPlans  ProductionPlan[]
+  productionOrders ProductionOrder[]
 
   @@index([name])
   @@map("project_tags")
@@ -409,42 +431,45 @@ model Vendor {
 }
 
 model Item {
-  id                     String                    @id @default(cuid())
-  code                   String                    @unique
-  title                  String
-  discipline             ItemDiscipline
-  categoryId             String?
-  catalogueState         ItemCatalogueState        @default(COMPLETE)
-  description            String?
-  specification          String?
-  manufacturerName       String?
-  manufacturerPartNumber String?
-  supplierPartNumber     String?
-  function               String?
-  link                   String?
-  optionSelection        String?
-  remarks                String?
-  unit                   String                    @default("pcs")
-  status                 RecordStatus              @default(ACTIVE)
-  importSourceKey        String?                   @unique
-  createdById            String?
-  createdAt              DateTime                  @default(now())
-  updatedAt              DateTime                  @updatedAt
-  category               ItemCategory?             @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  createdBy              User?                     @relation("ItemCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  balance                ItemBalance?
-  demandLines            DemandLine[]
-  issueLines             DemandIssueLine[]
-  returnLines            DemandReturnLine[]
-  ledgerEntries          InventoryLedgerEntry[]
-  purchaseLines          PurchaseRequestLine[]
-  receiptLines           GoodsReceiptLine[]
-  procurementOrderLines  ProcurementOrderLine[]
-  adjustmentLines        InventoryAdjustmentLine[]
-  manufacturingProfile   ManufacturingProfile?
-  manufacturedBoms       BillOfMaterial[]          @relation("BillOfMaterialOutputItem")
-  bomComponentLines      BomLine[]                 @relation("BomLineComponentItem")
-  manufacturingRoutes    ManufacturingRoute[]
+  id                        String                     @id @default(cuid())
+  code                      String                     @unique
+  title                     String
+  discipline                ItemDiscipline
+  categoryId                String?
+  catalogueState            ItemCatalogueState         @default(COMPLETE)
+  description               String?
+  specification             String?
+  manufacturerName          String?
+  manufacturerPartNumber    String?
+  supplierPartNumber        String?
+  function                  String?
+  link                      String?
+  optionSelection           String?
+  remarks                   String?
+  unit                      String                     @default("pcs")
+  status                    RecordStatus               @default(ACTIVE)
+  importSourceKey           String?                    @unique
+  createdById               String?
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+  category                  ItemCategory?              @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  createdBy                 User?                      @relation("ItemCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  balance                   ItemBalance?
+  demandLines               DemandLine[]
+  issueLines                DemandIssueLine[]
+  returnLines               DemandReturnLine[]
+  ledgerEntries             InventoryLedgerEntry[]
+  purchaseLines             PurchaseRequestLine[]
+  receiptLines              GoodsReceiptLine[]
+  procurementOrderLines     ProcurementOrderLine[]
+  productionPlanLines       ProductionPlanLine[]
+  productionOrders          ProductionOrder[]
+  productionOrderComponents ProductionOrderComponent[]
+  adjustmentLines           InventoryAdjustmentLine[]
+  manufacturingProfile      ManufacturingProfile?
+  manufacturedBoms          BillOfMaterial[]           @relation("BillOfMaterialOutputItem")
+  bomComponentLines         BomLine[]                  @relation("BomLineComponentItem")
+  manufacturingRoutes       ManufacturingRoute[]
 
   @@index([title])
   @@index([categoryId, status])
@@ -519,6 +544,7 @@ model BomVersion {
   approvedBy         User?                  @relation("BomVersionApprovedBy", fields: [approvedById], references: [id], onDelete: Restrict)
   lines              BomLine[]
   defaultForProfiles ManufacturingProfile[] @relation("ManufacturingProfileDefaultBomVersion")
+  productionOrders   ProductionOrder[]
 
   @@unique([bomId, revision])
   @@index([status, effectiveFrom, effectiveTo])
@@ -552,16 +578,17 @@ model BomLine {
 }
 
 model WorkCenter {
-  id          String                   @id @default(cuid())
-  code        String                   @unique
-  name        String
-  description String?
-  status      RecordStatus             @default(ACTIVE)
-  createdAt   DateTime                 @default(now())
-  updatedAt   DateTime                 @updatedAt
-  operations  ManufacturingOperation[] @relation("OperationDefaultWorkCenter")
-  resources   ProductionResource[]
-  routeSteps  RouteStep[]
+  id                   String                   @id @default(cuid())
+  code                 String                   @unique
+  name                 String
+  description          String?
+  status               RecordStatus             @default(ACTIVE)
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+  operations           ManufacturingOperation[] @relation("OperationDefaultWorkCenter")
+  resources            ProductionResource[]
+  routeSteps           RouteStep[]
+  productionOperations ProductionOperation[]
 
   @@index([status, name])
   @@map("work_centers")
@@ -585,16 +612,17 @@ model ProductionResource {
 }
 
 model ManufacturingOperation {
-  id                  String       @id @default(cuid())
-  code                String       @unique
-  name                String
-  description         String?
-  defaultWorkCenterId String?
-  status              RecordStatus @default(ACTIVE)
-  createdAt           DateTime     @default(now())
-  updatedAt           DateTime     @updatedAt
-  defaultWorkCenter   WorkCenter?  @relation("OperationDefaultWorkCenter", fields: [defaultWorkCenterId], references: [id], onDelete: SetNull)
-  routeSteps          RouteStep[]
+  id                   String                @id @default(cuid())
+  code                 String                @unique
+  name                 String
+  description          String?
+  defaultWorkCenterId  String?
+  status               RecordStatus          @default(ACTIVE)
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  defaultWorkCenter    WorkCenter?           @relation("OperationDefaultWorkCenter", fields: [defaultWorkCenterId], references: [id], onDelete: SetNull)
+  routeSteps           RouteStep[]
+  productionOperations ProductionOperation[]
 
   @@index([status, name])
   @@map("manufacturing_operations")
@@ -634,6 +662,7 @@ model RouteVersion {
   steps              RouteStep[]
   transitions        RouteTransition[]
   defaultForProfiles ManufacturingProfile[] @relation("ManufacturingProfileDefaultRouteVersion")
+  productionOrders   ProductionOrder[]
 
   @@unique([routeId, revision])
   @@index([status, effectiveFrom, effectiveTo])
@@ -698,6 +727,115 @@ model RouteStepRequirement {
   @@unique([routeStepId, key])
   @@index([routeStepId, sequence])
   @@map("route_step_requirements")
+}
+
+// Planning and released-order snapshots. Execution/WIP is deliberately added in
+// a later phase; a released order never re-reads mutable BOM or route records.
+model ProductionPlan {
+  id           String               @id @default(cuid())
+  projectTagId String
+  name         String
+  status       ProductionPlanStatus @default(DRAFT)
+  notes        String?
+  createdById  String
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  projectTag   ProjectTag           @relation(fields: [projectTagId], references: [id], onDelete: Restrict)
+  createdBy    User                 @relation("ProductionPlanCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  lines        ProductionPlanLine[]
+
+  @@index([projectTagId, status])
+  @@map("production_plans")
+}
+
+model ProductionPlanLine {
+  id               String            @id @default(cuid())
+  productionPlanId String
+  itemId           String
+  targetQty        Decimal           @db.Decimal(18, 6)
+  requiredDate     DateTime?
+  priority         Int?
+  notes            String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  productionPlan   ProductionPlan    @relation(fields: [productionPlanId], references: [id], onDelete: Restrict)
+  item             Item              @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  productionOrders ProductionOrder[]
+
+  @@unique([productionPlanId, itemId])
+  @@index([itemId])
+  @@map("production_plan_lines")
+}
+
+model ProductionOrder {
+  id                   String                     @id @default(cuid())
+  orderNumber          String                     @unique
+  projectTagId         String
+  productionPlanLineId String?
+  itemId               String
+  plannedQty           Decimal                    @db.Decimal(18, 6)
+  bomVersionId         String?
+  routeVersionId       String?
+  status               ProductionOrderStatus      @default(DRAFT)
+  plannedStart         DateTime?
+  plannedEnd           DateTime?
+  actualStart          DateTime?
+  completedAt          DateTime?
+  createdById          String
+  releasedAt           DateTime?
+  releasedById         String?
+  createdAt            DateTime                   @default(now())
+  updatedAt            DateTime                   @updatedAt
+  projectTag           ProjectTag                 @relation(fields: [projectTagId], references: [id], onDelete: Restrict)
+  productionPlanLine   ProductionPlanLine?        @relation(fields: [productionPlanLineId], references: [id], onDelete: Restrict)
+  item                 Item                       @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  bomVersion           BomVersion?                @relation(fields: [bomVersionId], references: [id], onDelete: Restrict)
+  routeVersion         RouteVersion?              @relation(fields: [routeVersionId], references: [id], onDelete: Restrict)
+  createdBy            User                       @relation("ProductionOrderCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  releasedBy           User?                      @relation("ProductionOrderReleasedBy", fields: [releasedById], references: [id], onDelete: Restrict)
+  components           ProductionOrderComponent[]
+  operations           ProductionOperation[]
+
+  @@index([projectTagId, status])
+  @@index([itemId, status])
+  @@index([productionPlanLineId])
+  @@map("production_orders")
+}
+
+model ProductionOrderComponent {
+  id                  String          @id @default(cuid())
+  productionOrderId   String
+  sourceBomLineId     String?
+  itemId              String
+  requiredQty         Decimal         @db.Decimal(18, 6)
+  consumptionSequence Int?
+  createdAt           DateTime        @default(now())
+  productionOrder     ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Restrict)
+  item                Item            @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@unique([productionOrderId, sourceBomLineId])
+  @@index([itemId])
+  @@map("production_order_components")
+}
+
+model ProductionOperation {
+  id                   String                 @id @default(cuid())
+  productionOrderId    String
+  sourceRouteStepId    String?
+  operationId          String
+  sequence             Int
+  name                 String
+  workCenterId         String?
+  executionMode        RouteExecutionMode
+  isSerializationPoint Boolean                @default(false)
+  createdAt            DateTime               @default(now())
+  productionOrder      ProductionOrder        @relation(fields: [productionOrderId], references: [id], onDelete: Restrict)
+  operation            ManufacturingOperation @relation(fields: [operationId], references: [id], onDelete: Restrict)
+  workCenter           WorkCenter?            @relation(fields: [workCenterId], references: [id], onDelete: SetNull)
+
+  @@unique([productionOrderId, sequence])
+  @@index([operationId])
+  @@map("production_operations")
 }
 
 model Demand {

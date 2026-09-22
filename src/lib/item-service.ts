@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto"
-import { ItemDiscipline, Prisma } from "@prisma/client"
+import { ItemCatalogueState, ItemDiscipline, Prisma, RecordStatus } from "@prisma/client"
 import { DomainError } from "@/lib/inventory-service"
 
 const COMPLETE_CODE_PREFIX = "CMP"
@@ -20,6 +20,97 @@ export function provisionalItemCode(title: string) {
 }
 
 type ItemWriter = Pick<Prisma.TransactionClient, "item">
+
+type ItemEditor = Pick<Prisma.TransactionClient, "item" | "itemCategory" | "auditLog">
+
+export type CatalogueItemUpdate = {
+  title?: string
+  discipline?: ItemDiscipline
+  categoryId?: string | null
+  catalogueState?: ItemCatalogueState
+  description?: string | null
+  specification?: string | null
+  manufacturerName?: string | null
+  manufacturerPartNumber?: string | null
+  supplierPartNumber?: string | null
+  function?: string | null
+  link?: string | null
+  optionSelection?: string | null
+  remarks?: string | null
+  unit?: string
+  status?: RecordStatus
+}
+
+const editableItemFields = [
+  "title", "discipline", "categoryId", "catalogueState", "description", "specification",
+  "manufacturerName", "manufacturerPartNumber", "supplierPartNumber", "function", "link",
+  "optionSelection", "remarks", "unit", "status",
+] as const
+
+export async function updateCatalogueItem(
+  tx: ItemEditor,
+  itemId: string,
+  input: CatalogueItemUpdate,
+  actor: { id: string; name: string },
+) {
+  const existing = await tx.item.findUnique({ where: { id: itemId } })
+  if (!existing) throw new DomainError("ITEM_NOT_FOUND", "Component was not found", 404)
+
+  const title = input.title === undefined ? existing.title : input.title.trim()
+  const unit = input.unit === undefined ? existing.unit : input.unit.trim()
+  if (!title) throw new DomainError("ITEM_TITLE_REQUIRED", "Enter a component name")
+  if (!unit) throw new DomainError("ITEM_UNIT_REQUIRED", "Enter a unit")
+
+  const discipline = input.discipline ?? existing.discipline
+  const categoryId = input.categoryId === undefined ? existing.categoryId : input.categoryId
+  const catalogueState = input.catalogueState ?? existing.catalogueState
+  if (catalogueState === "COMPLETE" && !categoryId) {
+    throw new DomainError("CATEGORY_REQUIRED", "A catalogue category is required for a complete component")
+  }
+  if (categoryId) {
+    const category = await tx.itemCategory.findUnique({ where: { id: categoryId } })
+    if (!category) throw new DomainError("CATEGORY_NOT_FOUND", "The selected category was not found", 404)
+    if (category.discipline !== discipline) {
+      throw new DomainError("CATEGORY_DISCIPLINE_MISMATCH", "Category must belong to the selected discipline")
+    }
+  }
+
+  const data: Record<string, unknown> = {}
+  for (const field of editableItemFields) {
+    if (input[field] === undefined) continue
+    const value = input[field]
+    if (["description", "specification", "manufacturerName", "manufacturerPartNumber", "supplierPartNumber", "function", "link", "optionSelection", "remarks"].includes(field)) {
+      data[field] = typeof value === "string" ? value.trim() || null : null
+    } else {
+      data[field] = value
+    }
+  }
+  if (input.title !== undefined) data.title = title
+  if (input.unit !== undefined) data.unit = unit
+
+  const changes: Record<string, { before: unknown; after: unknown }> = {}
+  for (const field of editableItemFields) {
+    if (input[field] === undefined) continue
+    const before = existing[field]
+    const after = data[field] as unknown
+    if (before !== after) changes[field] = { before, after }
+  }
+  if (!Object.keys(changes).length) return existing
+
+  const updated = await tx.item.update({ where: { id: itemId }, data: data as Prisma.ItemUncheckedUpdateInput })
+  await tx.auditLog.create({ data: {
+    userId: actor.id,
+    userName: actor.name,
+    action: "UPDATE_CATALOGUE_ITEM",
+    entityType: "Item",
+    entityId: itemId,
+    rootEntityType: "Item",
+    rootEntityId: itemId,
+    details: JSON.stringify({ code: existing.code, title: updated.title, changes }),
+    metadata: { changedFields: Object.keys(changes) },
+  } })
+  return updated
+}
 
 export async function createCatalogueItem(
   tx: ItemWriter,
