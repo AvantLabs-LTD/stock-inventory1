@@ -209,6 +209,7 @@ CREATE TABLE "bom_lines" (
   "sortOrder" INTEGER NOT NULL DEFAULT 0,
   "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "bom_lines_pkey" PRIMARY KEY ("id"),
+  CONSTRAINT "bom_lines_id_bomVersionId_key" UNIQUE ("id", "bomVersionId"),
   CONSTRAINT "bom_lines_quantity_check" CHECK ("quantity" > 0),
   CONSTRAINT "bom_lines_scrapAllowance_check" CHECK ("scrapAllowance" IS NULL OR "scrapAllowance" >= 0),
   CONSTRAINT "bom_lines_sortOrder_check" CHECK ("sortOrder" >= 0),
@@ -222,7 +223,6 @@ CREATE TABLE "bom_lines" (
     FOREIGN KEY ("consumptionRouteStepId") REFERENCES "route_steps"("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
-CREATE UNIQUE INDEX "bom_lines_id_bomVersionId_key" ON "bom_lines"("id", "bomVersionId");
 CREATE UNIQUE INDEX "bom_lines_bomVersionId_sourceLineKey_key" ON "bom_lines"("bomVersionId", "sourceLineKey");
 CREATE INDEX "bom_lines_bomVersionId_sortOrder_idx" ON "bom_lines"("bomVersionId", "sortOrder");
 CREATE INDEX "bom_lines_itemId_idx" ON "bom_lines"("itemId");
