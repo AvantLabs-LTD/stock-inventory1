@@ -1,7 +1,9 @@
-import { Prisma, PrismaClient, ProcurementType } from "@prisma/client"
+import { Prisma, ProcurementType } from "@prisma/client"
 import { db } from "@/lib/db"
+import { IdempotencyError } from "@/lib/idempotency"
+import { isSerializableConflict, runSerializable } from "@/lib/transaction"
 
-type Tx = Parameters<Parameters<PrismaClient["$transaction"]>[0]>[0]
+type Tx = Prisma.TransactionClient
 const dec = (v: Prisma.Decimal.Value) => new Prisma.Decimal(v)
 const textValue = (value?: string | null) => value?.trim() || null
 
@@ -40,7 +42,9 @@ async function quantities(tx: Tx, lineId: string) {
 }
 
 async function balance(tx: Tx, itemId: string) {
-  return tx.itemBalance.upsert({ where: { itemId }, update: {}, create: { itemId } })
+  await tx.itemBalance.upsert({ where: { itemId }, update: {}, create: { itemId } })
+  await tx.$queryRaw(Prisma.sql`SELECT "itemId" FROM "item_balances" WHERE "itemId"=${itemId} FOR UPDATE`)
+  return tx.itemBalance.findUniqueOrThrow({ where: { itemId } })
 }
 
 async function refreshDemandState(tx: Tx, demandId: string, actorId: string) {
@@ -74,7 +78,7 @@ export async function cancelDemandLine(input: {
   try { amount = dec(input.quantity) } catch { throw new DomainError("INVALID_QUANTITY", "Cancellation quantity is invalid") }
   if (amount.lte(0)) throw new DomainError("INVALID_QUANTITY", "Cancellation quantity must be positive")
 
-  return db.$transaction(async tx => {
+  return runSerializable(async tx => {
     await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "demand_lines" WHERE "id"=${input.lineId} FOR UPDATE`)
     const q = await quantities(tx, input.lineId)
     if (!q.line.approvedAt) throw new DomainError("DEMAND_NOT_APPROVED", "Approve this demand row before cancelling approved quantity")
@@ -121,13 +125,13 @@ export async function cancelDemandLine(input: {
     } })
     await refreshDemandState(tx, q.line.demandId, input.actorId)
     return revision
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+  })
 }
 
 export async function cancelDemand(input: { demandId: string; actorId: string; actorName: string; reason?: string }) {
   const reason = input.reason?.trim()
   if (!reason) throw new DomainError("CANCELLATION_REASON_REQUIRED", "A cancellation reason is required")
-  return db.$transaction(async tx => {
+  return runSerializable(async tx => {
     await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "demands" WHERE "id"=${input.demandId} FOR UPDATE`)
     const demand = await tx.demand.findUnique({ where: { id: input.demandId }, include: { lines: true } })
     if (!demand) throw new DomainError("DEMAND_NOT_FOUND", "Demand was not found", 404)
@@ -163,7 +167,7 @@ export async function cancelDemand(input: { demandId: string; actorId: string; a
       details: JSON.stringify({ reason }),
     } })
     return cancelled
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+  })
 }
 
 export async function createDemand(input: {
@@ -173,7 +177,7 @@ export async function createDemand(input: {
     title?: string; description?: string | null; unit?: string; quantity: Prisma.Decimal.Value; remarks?: string | null }>
 }) {
   if (!input.lines.length) throw new DomainError("DEMAND_LINES_REQUIRED", "At least one demand row is required")
-  return db.$transaction(async tx => {
+  return runSerializable(async tx => {
     let departmentTagId = input.departmentTagId || null
     if (!departmentTagId && input.departmentName?.trim()) {
       const name = input.departmentName.trim()
@@ -208,7 +212,7 @@ export async function createDemand(input: {
       } })
     }
     return tx.demand.findUnique({ where: { id: demand.id }, include: { lines: true } })
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+  })
 }
 
 export async function approveDemandLine(input: {
@@ -231,7 +235,7 @@ export async function approveDemandLine(input: {
   if (approved.lt(0) || fromStock.lt(0) || forProcurement.lt(0)) throw new DomainError("INVALID_QUANTITY", "Approval quantities cannot be negative")
   if (!fromStock.plus(forProcurement).eq(approved)) throw new DomainError("UNBALANCED_APPROVAL", "Approved quantity must equal the stock and procurement portions")
 
-  return db.$transaction(async tx => {
+  return runSerializable(async tx => {
     await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "demand_lines" WHERE "id"=${input.lineId} FOR UPDATE`)
     const line = await tx.demandLine.findUnique({ where: { id: input.lineId }, include: { demand: true } })
     if (!line) throw new DomainError("DEMAND_LINE_NOT_FOUND", "Demand row was not found", 404)
@@ -260,13 +264,13 @@ export async function approveDemandLine(input: {
     } })
     await refreshDemandState(tx, demand.id, input.actorId)
     return updated
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+  })
 }
 
 export async function issueDemand(input: { demandId: string; actorId: string; actorName: string; idempotencyKey?: string; remarks?: string; lines: Array<{ demandLineId: string; quantity: Prisma.Decimal.Value; remarks?: string }> }) {
   if (!input.lines.length) throw new DomainError("ISSUE_LINES_REQUIRED", "At least one issue row is required")
   if (new Set(input.lines.map(row => row.demandLineId)).size !== input.lines.length) throw new DomainError("DUPLICATE_ISSUE_LINE", "Each demand row may appear only once in an issue")
-  return db.$transaction(async tx => {
+  return runSerializable(async tx => {
     if (input.idempotencyKey) {
       const found = await tx.demandIssue.findUnique({ where: { idempotencyKey: input.idempotencyKey }, include: { lines: true } })
       if (found) {
@@ -305,7 +309,7 @@ export async function issueDemand(input: { demandId: string; actorId: string; ac
     await tx.auditLog.create({ data: { userId: input.actorId, userName: input.actorName, action: "POST_DEMAND_ISSUE", entityType: "DemandIssue", entityId: issue.id, details: JSON.stringify({ issueNo: issue.issueNo, demandId: input.demandId, lines: auditLines }) } })
     await refreshDemandState(tx, input.demandId, input.actorId)
     return tx.demandIssue.findUnique({ where: { id: issue.id }, include: { lines: true } })
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+  })
 }
 
 export async function returnIssuedStock(input: { actorId: string; actorName: string; idempotencyKey?: string; reason?: string; remarks?: string; lines: Array<{ issueLineId: string; quantity: Prisma.Decimal.Value; disposition: "REPLACEMENT_REQUIRED" | "REDUCE_APPROVED_QUANTITY"; remarks?: string }> }) {
@@ -313,7 +317,7 @@ export async function returnIssuedStock(input: { actorId: string; actorName: str
   const reason = input.reason?.trim()
   if (!reason) throw new DomainError("RETURN_REASON_REQUIRED", "A reason is required for every return")
   if (new Set(input.lines.map(row => row.issueLineId)).size !== input.lines.length) throw new DomainError("DUPLICATE_RETURN_LINE", "Each issue row may appear only once in a return")
-  return db.$transaction(async tx => {
+  return runSerializable(async tx => {
     if (input.idempotencyKey) {
       const found = await tx.demandReturn.findUnique({ where: { idempotencyKey: input.idempotencyKey }, include: { lines: true } })
       if (found) {
@@ -335,6 +339,7 @@ export async function returnIssuedStock(input: { actorId: string; actorName: str
     for (const row of input.lines) {
       const amount = dec(row.quantity)
       if (!['REPLACEMENT_REQUIRED', 'REDUCE_APPROVED_QUANTITY'].includes(row.disposition)) throw new DomainError("INVALID_RETURN_DISPOSITION", "Choose whether replacement is still required")
+      await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "demand_allocation_lines" WHERE "id"=${row.issueLineId} FOR UPDATE`)
       const original = await tx.demandIssueLine.findUnique({ where: { id: row.issueLineId }, include: { returnLines: true, demandLine: { select: { demandId: true } } } })
       if (!original) throw new DomainError("ISSUE_LINE_NOT_FOUND", "Issue row was not found", 404)
       const previous = original.returnLines.reduce((sum, x) => sum.plus(x.quantity), dec(0))
@@ -356,7 +361,7 @@ export async function returnIssuedStock(input: { actorId: string; actorName: str
     await tx.auditLog.create({ data: { userId: input.actorId, userName: input.actorName, action: "POST_DEMAND_RETURN", entityType: "DemandReturn", entityId: header.id, details: JSON.stringify({ returnNo: header.returnNo, reason, lines: auditLines }) } })
     for (const demandId of affectedDemandIds) await refreshDemandState(tx, demandId, input.actorId)
     return tx.demandReturn.findUnique({ where: { id: header.id }, include: { lines: true } })
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+  })
 }
 
 export async function adjustInventory(input: {
@@ -375,10 +380,21 @@ export async function adjustInventory(input: {
     throw new DomainError("DUPLICATE_ADJUSTMENT_ITEM", "Each component may appear only once in a stock adjustment")
   }
 
-  return db.$transaction(async tx => {
+  return runSerializable(async tx => {
     if (input.idempotencyKey) {
       const found = await tx.inventoryAdjustment.findUnique({ where: { idempotencyKey: input.idempotencyKey }, include: { lines: true } })
-      if (found) return found
+      if (found) {
+        const requested = new Map(input.lines.map(row => [row.itemId, row]))
+        const sameLines = found.lines.length === input.lines.length && found.lines.every(line => {
+          const row = requested.get(line.itemId)
+          if (!row) return false
+          try { return line.quantity.eq(dec(row.quantity)) && textValue(line.remarks) === textValue(row.remarks) } catch { return false }
+        })
+        if (found.postedById !== input.actorId || found.reason !== reason || textValue(found.remarks) !== textValue(input.remarks) || !sameLines) {
+          throw new DomainError("IDEMPOTENCY_CONFLICT", "This idempotency key was already used with different adjustment details", 409)
+        }
+        return found
+      }
     }
 
     const header = await tx.inventoryAdjustment.create({ data: {
@@ -437,11 +453,13 @@ export async function adjustInventory(input: {
       details: JSON.stringify({ adjustmentNo: header.adjustmentNo, reason, remarks: input.remarks?.trim() || null, lines: auditLines }),
     } })
     return tx.inventoryAdjustment.findUnique({ where: { id: header.id }, include: { lines: true } })
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+  })
 }
 
 export function apiError(error: unknown) {
   if (error instanceof DomainError) return Response.json({ error: error.message, code: error.code }, { status: error.status })
+  if (error instanceof IdempotencyError) return Response.json({ error: error.message, code: error.code }, { status: error.status })
+  if (isSerializableConflict(error)) return Response.json({ error: "Concurrent inventory update; retry the request", code: "CONCURRENT_UPDATE" }, { status: 409 })
   console.error(error)
   return Response.json({ error: "Unexpected server error", code: "INTERNAL_ERROR" }, { status: 500 })
 }

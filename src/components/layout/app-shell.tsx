@@ -43,8 +43,8 @@ function PageContent() {
   const permissions = useAuthStore(state => state.user?.permissions || [])
 
   const required: Partial<Record<typeof currentPage, string>> = {
-    dashboard: "vault.overview.view", items: "vault.catalogue.view", demands: "vault.demands.view",
-    inventory: "vault.stock.view", purchasing: "vault.purchasing.view",
+    dashboard: "vault.overview.view", items: "vault.catalogue.view", demands: "vault.demands.view", "demand-detail": "vault.demands.view",
+    inventory: "vault.stock.view", purchasing: "vault.purchasing.view", "purchase-detail": "vault.purchasing.view",
     users: "flux.users.manage", "reference-data": "vault.reference.manage",
     cargo: "cargo.view", "cargo-shipments": "cargo.view", "cargo-packages": "cargo.view",
     "cargo-tracking": "cargo.view", "cargo-finance": "cargo.costs.view",
@@ -70,8 +70,10 @@ function PageContent() {
     case 'items':
       return <ItemsPage />
     case 'demands':
+    case 'demand-detail':
       return <DemandsPage />
     case 'purchasing':
+    case 'purchase-detail':
       return <PurchasingPage />
     case 'inventory':
       return <InventoryPage />

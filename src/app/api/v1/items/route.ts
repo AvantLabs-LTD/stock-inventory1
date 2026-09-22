@@ -121,10 +121,12 @@ export async function GET(request: NextRequest) {
   }
   return Response.json({ items: items.map(i => ({
     ...i,
-    free: Number(i.balance?.onHand || 0) - Number(i.balance?.reserved || 0),
-    demand: byItem.get(i.id)?.demand || 0,
-    procurement: byItem.get(i.id)?.procurement || 0,
-    deficit: byItem.get(i.id)?.deficit || 0,
+    // Quantity values remain exact decimal strings at the HTTP boundary. UI
+    // display may format them, but domain arithmetic must not use JS numbers.
+    free: (i.balance?.onHand || new Prisma.Decimal(0)).minus(i.balance?.reserved || 0).toString(),
+    demand: (byItem.get(i.id)?.demand || new Prisma.Decimal(0)).toString(),
+    procurement: (byItem.get(i.id)?.procurement || new Prisma.Decimal(0)).toString(),
+    deficit: (byItem.get(i.id)?.deficit || new Prisma.Decimal(0)).toString(),
     allocationSources: sourcesByItem.get(i.id) || [],
     procurementOrders: ordersByItem.get(i.id) || [],
   })), pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) } })

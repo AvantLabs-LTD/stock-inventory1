@@ -176,6 +176,7 @@ model User {
   cargoFilesUploaded    CargoFile[]              @relation("CargoFileUploadedBy")
   serviceTokens         ServiceToken[]
   cargoRequestKeys      CargoRequestKey[]
+  apiRequestKeys        ApiRequestKey[]
   procurementOrdersCreated ProcurementOrder[] @relation("ProcurementOrderCreatedBy")
 }
 
@@ -206,6 +207,23 @@ model CargoRequestKey {
 
   @@id([actorId, key])
   @@map("cargo_request_keys")
+}
+
+// Shared idempotency record for consequential APIs outside Cargo. The request
+// hash and stored response make safe retries explicit without coupling future
+// modules to a Cargo-named table.
+model ApiRequestKey {
+  actorId     String   @map("actor_id")
+  key         String
+  action      String
+  requestHash String   @db.VarChar(64)
+  response    Json?
+  createdAt   DateTime @default(now())
+  actor       User     @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@id([actorId, key])
+  @@index([createdAt])
+  @@map("api_request_keys")
 }
 
 model Permission {
@@ -730,18 +748,23 @@ model Attachment {
 }
 
 model AuditLog {
-  id         String   @id @default(cuid())
-  userId     String?
-  userName   String?
-  action     String
-  entityType String?
-  entityId   String?
-  details    String?
-  ipAddress  String?
-  date       DateTime @default(now())
-  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  id             String   @id @default(cuid())
+  userId         String?
+  userName       String?
+  action         String
+  entityType     String?
+  entityId       String?
+  rootEntityType String?
+  rootEntityId   String?
+  details        String?
+  metadata       Json?
+  ipAddress      String?
+  date           DateTime @default(now())
+  user           User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([date])
+  @@index([entityType, entityId, date])
+  @@index([rootEntityType, rootEntityId, date])
   @@map("audit_logs")
 }
 

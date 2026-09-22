@@ -1,6 +1,7 @@
 import { Prisma, PurchaseRequestStatus } from "@prisma/client"
 import { db } from "@/lib/db"
 import { DomainError } from "@/lib/inventory-service"
+import { runSerializable } from "@/lib/transaction"
 
 type TransactionClient = Prisma.TransactionClient
 
@@ -97,9 +98,9 @@ export async function postGoodsReceipt(input: {
   idempotencyKey?: string
   remarks?: string
   lines: unknown
-}) {
+  }) {
   const rows = parseGoodsReceiptRows(input.lines)
-  return db.$transaction(async tx => {
+  return runSerializable(async tx => {
     if (input.idempotencyKey) {
       const found = await tx.goodsReceipt.findUnique({ where: { idempotencyKey: input.idempotencyKey }, include: { lines: true } })
       if (found) {
@@ -120,6 +121,7 @@ export async function postGoodsReceipt(input: {
       }
     }
 
+    await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "purchase_request_lines" WHERE "purchaseRequestId"=${input.purchaseRequestId} FOR UPDATE`)
     const purchase = await tx.purchaseRequest.findUnique({
       where: { id: input.purchaseRequestId },
       include: { lines: { include: { receiptLines: true } } },
@@ -153,7 +155,9 @@ export async function postGoodsReceipt(input: {
         unitCost: row.unitCost,
         remarks: row.remarks,
       } })
-      const stock = await tx.itemBalance.upsert({ where: { itemId: purchaseLine.itemId }, update: {}, create: { itemId: purchaseLine.itemId } })
+      await tx.itemBalance.upsert({ where: { itemId: purchaseLine.itemId }, update: {}, create: { itemId: purchaseLine.itemId } })
+      await tx.$queryRaw(Prisma.sql`SELECT "itemId" FROM "item_balances" WHERE "itemId"=${purchaseLine.itemId} FOR UPDATE`)
+      const stock = await tx.itemBalance.findUniqueOrThrow({ where: { itemId: purchaseLine.itemId } })
       const after = stock.onHand.plus(row.quantity)
       await tx.itemBalance.update({ where: { itemId: purchaseLine.itemId }, data: { onHand: after, version: { increment: 1 } } })
       await tx.inventoryLedgerEntry.create({ data: {
@@ -186,5 +190,5 @@ export async function postGoodsReceipt(input: {
       details: JSON.stringify({ receiptNo: receipt.receiptNo, purchaseRequestId: input.purchaseRequestId, lines: auditLines }),
     } })
     return tx.goodsReceipt.findUniqueOrThrow({ where: { id: receipt.id }, include: { lines: true } })
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+  })
 }

@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server"
 import { forbiddenResponse, getSession, hasPermission, unauthorizedResponse } from "@/lib/auth-middleware"
+import { normalizeIdempotencyKey } from "@/lib/idempotency"
 import { adjustInventory, apiError } from "@/lib/inventory-service"
 
 export async function POST(request: NextRequest) {
@@ -11,7 +12,7 @@ export async function POST(request: NextRequest) {
     const adjustment = await adjustInventory({
       actorId: session.user.id,
       actorName: session.user.name,
-      idempotencyKey: body.idempotencyKey,
+      idempotencyKey: normalizeIdempotencyKey(typeof body.idempotencyKey === "string" ? body.idempotencyKey : null) || undefined,
       reason: body.reason,
       remarks: body.remarks,
       lines: body.lines || [],

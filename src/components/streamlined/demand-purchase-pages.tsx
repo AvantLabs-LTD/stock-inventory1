@@ -25,6 +25,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useAuthStore } from "@/stores/auth-store"
+import { useAppStore } from "@/stores/app-store"
 import { cn } from "@/lib/utils"
 
 type Ref = { id: string; name: string }
@@ -323,8 +324,11 @@ function DemandDetailSheet({ demandId, onClose, onChanged }: { demandId: string 
 
 export function DemandsPage() {
   const user = useAuthStore(state => state.user)
+  const navigate = useAppStore(state => state.navigate), selectedEntityId = useAppStore(state => state.selectedEntityId)
   const [scope, setScope] = useState<"mine" | "all">("mine"), [demands, setDemands] = useState<DemandHeader[]>([]), [items, setItems] = useState<Item[]>([])
-  const [refs, setRefs] = useState<ReferenceData>({ itemCategories: [], departments: [], projects: [], vendors: [] }), [selected, setSelected] = useState<string | null>(null)
+  const [refs, setRefs] = useState<ReferenceData>({ itemCategories: [], departments: [], projects: [], vendors: [] })
+  const selected = selectedEntityId
+  const setSelected = (id: string | null) => navigate(id ? "demand-detail" : "demands", id || undefined)
   const [query, setQuery] = useState(""), [stateFilter, setStateFilter] = useState("OPEN"), [loading, setLoading] = useState(true)
   const load = useCallback(async () => { setLoading(true); try { const demandData = await jsonFetch<{ demands: DemandHeader[] }>(`/api/v1/demands?mine=${scope === "mine"}`); setDemands(demandData.demands) } catch (error) { toast.error((error as Error).message) } finally { setLoading(false) } }, [scope])
   const loadFormData = useCallback(async () => { try { const [catalogue, references] = await Promise.all([loadCatalogue(), loadReferenceData()]); setItems(catalogue); setRefs(references) } catch (error) { toast.error((error as Error).message) } }, [])
@@ -396,7 +400,10 @@ function PurchaseDetailSheet({ purchaseId, onClose, onChanged }: { purchaseId: s
 
 export function PurchasingPage() {
   const permissions = useAuthStore(state => state.user?.permissions || []), canManage = permissions.includes("vault.purchasing.manage")
-  const [requests, setRequests] = useState<PurchaseHeader[]>([]), [loading, setLoading] = useState(true), [composerOpen, setComposerOpen] = useState(false), [selected, setSelected] = useState<string | null>(null)
+  const navigate = useAppStore(state => state.navigate), selectedEntityId = useAppStore(state => state.selectedEntityId)
+  const [requests, setRequests] = useState<PurchaseHeader[]>([]), [loading, setLoading] = useState(true), [composerOpen, setComposerOpen] = useState(false)
+  const selected = selectedEntityId
+  const setSelected = (id: string | null) => navigate(id ? "purchase-detail" : "purchasing", id || undefined)
   const [query, setQuery] = useState(""), [debouncedQuery, setDebouncedQuery] = useState(""), [status, setStatus] = useState("ACTIVE"), [page, setPage] = useState(1), [pagination, setPagination] = useState({ page: 1, totalPages: 1, total: 0 })
   useEffect(() => { const timer = window.setTimeout(() => { setDebouncedQuery(query.trim()); setPage(1) }, 250); return () => window.clearTimeout(timer) }, [query])
   const load = useCallback(async () => { setLoading(true); try { const params = new URLSearchParams({ page: String(page), pageSize: "50", status }); if (debouncedQuery) params.set("q", debouncedQuery); const data = await jsonFetch<{ requests: PurchaseHeader[]; pagination: { page: number; totalPages: number; total: number } }>(`/api/v1/purchase-requests?${params}`); setRequests(data.requests); setPagination(data.pagination) } catch (error) { toast.error((error as Error).message) } finally { setLoading(false) } }, [debouncedQuery, page, status])

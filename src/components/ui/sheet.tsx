@@ -52,9 +52,13 @@ function SheetContent({
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: "top" | "right" | "bottom" | "left"
 }) {
+  // Detail sheets using the wide record layout are durable business records.
+  // Present them as full workspace pages, while preserving the Sheet API for
+  // short contextual panels elsewhere.
+  const fullWorkspace = typeof className === "string" && className.includes("sm:max-w-6xl")
   return (
     <SheetPortal>
-      <SheetOverlay />
+      <SheetOverlay className={fullWorkspace ? "hidden" : undefined} />
       <SheetPrimitive.Content
         data-slot="sheet-content"
         className={cn(
@@ -67,6 +71,7 @@ function SheetContent({
             "data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top inset-x-0 top-0 h-auto border-b",
           side === "bottom" &&
             "data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom inset-x-0 bottom-0 h-auto border-t",
+          fullWorkspace && "inset-0 h-full w-full max-w-none border-0 shadow-none",
           className
         )}
         {...props}
