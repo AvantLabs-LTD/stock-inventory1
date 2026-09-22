@@ -139,45 +139,114 @@ enum ProcurementOrderStatus {
   CANCELLED
 }
 
+enum SupplyMode {
+  BUY
+  MAKE
+  MAKE_OR_BUY
+}
+
+enum TrackingMode {
+  QUANTITY
+  LOT
+  SERIAL
+}
+
+enum DefinitionStatus {
+  DRAFT
+  ACTIVE
+  RETIRED
+}
+
+enum ProductionResourceType {
+  CNC_MACHINE
+  LATHE
+  MILL
+  THREE_D_PRINTER
+  REFLOW_OVEN
+  TEST_BENCH
+  ASSEMBLY_STATION
+  OTHER
+}
+
+enum ProductionResourceStatus {
+  AVAILABLE
+  UNAVAILABLE
+  RETIRED
+}
+
+enum RouteExecutionMode {
+  INTERNAL
+  SUBCONTRACTED
+}
+
+enum RouteTransitionType {
+  NORMAL
+  REWORK
+  ALTERNATIVE
+}
+
+enum RouteStepRequirementType {
+  OPERATOR
+  RESOURCE
+  VENDOR
+  MATERIAL_LOT
+  QUALITY_INSPECTION
+  TEXT
+  NUMBER
+  DATE
+}
+
+enum RouteStepRequirementCapturePoint {
+  START
+  COMPLETE
+  TRANSITION
+}
+
 model User {
-  id                   String                   @id @default(cuid())
-  email                String                   @unique
-  password             String
-  name                 String
-  status               String                   @default("ACTIVE")
-  role                 UserRole                 @default(USER)
-  phone                String?
-  avatar               String?
-  createdAt            DateTime                 @default(now())
-  updatedAt            DateTime                 @updatedAt
-  itemsCreated         Item[]                   @relation("ItemCreatedBy")
+  id                           String                    @id @default(cuid())
+  email                        String                    @unique
+  password                     String
+  name                         String
+  status                       String                    @default("ACTIVE")
+  role                         UserRole                  @default(USER)
+  phone                        String?
+  avatar                       String?
+  createdAt                    DateTime                  @default(now())
+  updatedAt                    DateTime                  @updatedAt
+  itemsCreated                 Item[]                    @relation("ItemCreatedBy")
   procurementOrderPackageLinks ProcurementOrderPackage[] @relation("ProcurementOrderPackageLinkedBy")
-  demandsRequested     Demand[]                 @relation("DemandRequestedBy")
-  demandsStarted       Demand[]                 @relation("DemandStartedBy")
-  demandsClosed        Demand[]                 @relation("DemandClosedBy")
-  demandsCancelled     Demand[]                 @relation("DemandCancelledBy")
-  reservationsCreated  DemandReservationEntry[] @relation("ReservationCreatedBy")
-  cancellationsCreated DemandLineCancellation[] @relation("CancellationCreatedBy")
-  demandLinesApproved  DemandLine[]             @relation("DemandLineApprovedBy")
-  approvalRevisions    DemandApprovalRevision[] @relation("ApprovalRevisionCreatedBy")
-  issuesPosted         DemandIssue[]            @relation("IssuePostedBy")
-  returnsPosted        DemandReturn[]           @relation("ReturnPostedBy")
-  ledgerEntries        InventoryLedgerEntry[]   @relation("LedgerActor")
-  purchaseRequests     PurchaseRequest[]        @relation("PurchaseCreatedBy")
-  receiptsPosted       GoodsReceipt[]           @relation("ReceiptPostedBy")
-  adjustmentsPosted    InventoryAdjustment[]    @relation("AdjustmentPostedBy")
-  attachmentsUploaded  Attachment[]             @relation("AttachmentUploadedBy")
-  auditLogs            AuditLog[]
-  accessGroups         UserAccessGroup[]
-  cargoShipmentsCreated CargoShipment[]          @relation("CargoShipmentCreatedBy")
-  cargoMilestonesPosted CargoMilestone[]         @relation("CargoMilestonePostedBy")
-  cargoInvoicesCreated  CargoInvoice[]           @relation("CargoInvoiceCreatedBy")
-  cargoChargesCreated   CargoCharge[]            @relation("CargoChargeCreatedBy")
-  cargoFilesUploaded    CargoFile[]              @relation("CargoFileUploadedBy")
-  serviceTokens         ServiceToken[]
-  cargoRequestKeys      CargoRequestKey[]
-  apiRequestKeys        ApiRequestKey[]
-  procurementOrdersCreated ProcurementOrder[] @relation("ProcurementOrderCreatedBy")
+  demandsRequested             Demand[]                  @relation("DemandRequestedBy")
+  demandsStarted               Demand[]                  @relation("DemandStartedBy")
+  demandsClosed                Demand[]                  @relation("DemandClosedBy")
+  demandsCancelled             Demand[]                  @relation("DemandCancelledBy")
+  reservationsCreated          DemandReservationEntry[]  @relation("ReservationCreatedBy")
+  cancellationsCreated         DemandLineCancellation[]  @relation("CancellationCreatedBy")
+  demandLinesApproved          DemandLine[]              @relation("DemandLineApprovedBy")
+  approvalRevisions            DemandApprovalRevision[]  @relation("ApprovalRevisionCreatedBy")
+  issuesPosted                 DemandIssue[]             @relation("IssuePostedBy")
+  returnsPosted                DemandReturn[]            @relation("ReturnPostedBy")
+  ledgerEntries                InventoryLedgerEntry[]    @relation("LedgerActor")
+  purchaseRequests             PurchaseRequest[]         @relation("PurchaseCreatedBy")
+  receiptsPosted               GoodsReceipt[]            @relation("ReceiptPostedBy")
+  adjustmentsPosted            InventoryAdjustment[]     @relation("AdjustmentPostedBy")
+  attachmentsUploaded          Attachment[]              @relation("AttachmentUploadedBy")
+  auditLogs                    AuditLog[]
+  accessGroups                 UserAccessGroup[]
+  cargoShipmentsCreated        CargoShipment[]           @relation("CargoShipmentCreatedBy")
+  cargoMilestonesPosted        CargoMilestone[]          @relation("CargoMilestonePostedBy")
+  cargoInvoicesCreated         CargoInvoice[]            @relation("CargoInvoiceCreatedBy")
+  cargoChargesCreated          CargoCharge[]             @relation("CargoChargeCreatedBy")
+  cargoFilesUploaded           CargoFile[]               @relation("CargoFileUploadedBy")
+  serviceTokens                ServiceToken[]
+  cargoRequestKeys             CargoRequestKey[]
+  apiRequestKeys               ApiRequestKey[]
+  procurementOrdersCreated     ProcurementOrder[]        @relation("ProcurementOrderCreatedBy")
+  billOfMaterialsCreated       BillOfMaterial[]          @relation("BillOfMaterialCreatedBy")
+  bomVersionsCreated           BomVersion[]              @relation("BomVersionCreatedBy")
+  bomVersionsApproved          BomVersion[]              @relation("BomVersionApprovedBy")
+  manufacturingRoutesCreated   ManufacturingRoute[]      @relation("ManufacturingRouteCreatedBy")
+  routeVersionsCreated         RouteVersion[]            @relation("RouteVersionCreatedBy")
+  routeVersionsApproved        RouteVersion[]            @relation("RouteVersionApprovedBy")
 }
 
 model ServiceToken {
@@ -282,15 +351,16 @@ model DepartmentTag {
 }
 
 model ProjectTag {
-  id             String       @id @default(cuid())
-  name           String
-  normalizedName String       @unique
-  code           String?      @unique
-  description    String?
-  status         RecordStatus @default(ACTIVE)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  demandLines    DemandLine[]
+  id              String           @id @default(cuid())
+  name            String
+  normalizedName  String           @unique
+  code            String?          @unique
+  description     String?
+  status          RecordStatus     @default(ACTIVE)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  demandLines     DemandLine[]
+  billOfMaterials BillOfMaterial[]
 
   @@index([name])
   @@map("project_tags")
@@ -318,20 +388,20 @@ model ItemCategory {
 }
 
 model Vendor {
-  id               String            @id @default(cuid())
-  name             String
-  normalizedName   String            @unique
-  contactPerson    String?
-  phone            String?
-  email            String?
-  address          String?
-  remarks          String?
-  status           RecordStatus      @default(ACTIVE)
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
-  demandLines      DemandLine[]
-  purchaseRequests PurchaseRequest[]
-  cargoPackages    CargoPackage[]
+  id                String             @id @default(cuid())
+  name              String
+  normalizedName    String             @unique
+  contactPerson     String?
+  phone             String?
+  email             String?
+  address           String?
+  remarks           String?
+  status            RecordStatus       @default(ACTIVE)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  demandLines       DemandLine[]
+  purchaseRequests  PurchaseRequest[]
+  cargoPackages     CargoPackage[]
   procurementOrders ProcurementOrder[]
 
   @@index([name])
@@ -371,6 +441,10 @@ model Item {
   receiptLines           GoodsReceiptLine[]
   procurementOrderLines  ProcurementOrderLine[]
   adjustmentLines        InventoryAdjustmentLine[]
+  manufacturingProfile   ManufacturingProfile?
+  manufacturedBoms       BillOfMaterial[]          @relation("BillOfMaterialOutputItem")
+  bomComponentLines      BomLine[]                 @relation("BomLineComponentItem")
+  manufacturingRoutes    ManufacturingRoute[]
 
   @@index([title])
   @@index([categoryId, status])
@@ -389,6 +463,241 @@ model ItemBalance {
   item      Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
 
   @@map("item_balances")
+}
+
+// Manufacturing definitions are optional Item configuration. Purchased items
+// deliberately have no profile unless their supply/trace policy needs one.
+model ManufacturingProfile {
+  id                     String        @id @default(cuid())
+  itemId                 String        @unique
+  supplyMode             SupplyMode
+  trackingMode           TrackingMode  @default(QUANTITY)
+  defaultBomVersionId    String?
+  defaultRouteVersionId  String?
+  traceInFinishedProduct Boolean       @default(false)
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+  item                   Item          @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  defaultBomVersion      BomVersion?   @relation("ManufacturingProfileDefaultBomVersion", fields: [defaultBomVersionId], references: [id], onDelete: SetNull)
+  defaultRouteVersion    RouteVersion? @relation("ManufacturingProfileDefaultRouteVersion", fields: [defaultRouteVersionId], references: [id], onDelete: SetNull)
+
+  @@map("manufacturing_profiles")
+}
+
+model BillOfMaterial {
+  id           String       @id @default(cuid())
+  itemId       String
+  projectTagId String?
+  name         String
+  status       RecordStatus @default(ACTIVE)
+  createdById  String
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  item         Item         @relation("BillOfMaterialOutputItem", fields: [itemId], references: [id], onDelete: Restrict)
+  projectTag   ProjectTag?  @relation(fields: [projectTagId], references: [id], onDelete: Restrict)
+  createdBy    User         @relation("BillOfMaterialCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  versions     BomVersion[]
+
+  @@index([itemId, status])
+  @@index([projectTagId, status])
+  @@map("bill_of_materials")
+}
+
+model BomVersion {
+  id                 String                 @id @default(cuid())
+  bomId              String
+  revision           String
+  status             DefinitionStatus       @default(DRAFT)
+  effectiveFrom      DateTime?
+  effectiveTo        DateTime?
+  createdById        String
+  approvedAt         DateTime?
+  approvedById       String?
+  createdAt          DateTime               @default(now())
+  bom                BillOfMaterial         @relation(fields: [bomId], references: [id], onDelete: Restrict)
+  createdBy          User                   @relation("BomVersionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  approvedBy         User?                  @relation("BomVersionApprovedBy", fields: [approvedById], references: [id], onDelete: Restrict)
+  lines              BomLine[]
+  defaultForProfiles ManufacturingProfile[] @relation("ManufacturingProfileDefaultBomVersion")
+
+  @@unique([bomId, revision])
+  @@index([status, effectiveFrom, effectiveTo])
+  @@map("bom_versions")
+}
+
+model BomLine {
+  id                     String     @id @default(cuid())
+  bomVersionId           String
+  itemId                 String
+  parentLineId           String?
+  sourceLineKey          String
+  quantity               Decimal    @db.Decimal(18, 6)
+  unit                   String?
+  scrapAllowance         Decimal?   @db.Decimal(18, 6)
+  consumptionRouteStepId String?
+  notes                  String?
+  sortOrder              Int        @default(0)
+  createdAt              DateTime   @default(now())
+  bomVersion             BomVersion @relation(fields: [bomVersionId], references: [id], onDelete: Restrict)
+  item                   Item       @relation("BomLineComponentItem", fields: [itemId], references: [id], onDelete: Restrict)
+  parentLine             BomLine?   @relation("BomLineHierarchy", fields: [parentLineId, bomVersionId], references: [id, bomVersionId], onDelete: Restrict)
+  childLines             BomLine[]  @relation("BomLineHierarchy")
+  consumptionRouteStep   RouteStep? @relation("BomLineConsumptionRouteStep", fields: [consumptionRouteStepId], references: [id], onDelete: SetNull)
+
+  @@unique([id, bomVersionId])
+  @@unique([bomVersionId, sourceLineKey])
+  @@index([bomVersionId, sortOrder])
+  @@index([itemId])
+  @@map("bom_lines")
+}
+
+model WorkCenter {
+  id          String                   @id @default(cuid())
+  code        String                   @unique
+  name        String
+  description String?
+  status      RecordStatus             @default(ACTIVE)
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+  operations  ManufacturingOperation[] @relation("OperationDefaultWorkCenter")
+  resources   ProductionResource[]
+  routeSteps  RouteStep[]
+
+  @@index([status, name])
+  @@map("work_centers")
+}
+
+model ProductionResource {
+  id           String                   @id @default(cuid())
+  code         String                   @unique
+  name         String
+  resourceType ProductionResourceType
+  workCenterId String?
+  status       ProductionResourceStatus @default(AVAILABLE)
+  metadata     Json?
+  createdAt    DateTime                 @default(now())
+  updatedAt    DateTime                 @updatedAt
+  workCenter   WorkCenter?              @relation(fields: [workCenterId], references: [id], onDelete: SetNull)
+
+  @@index([workCenterId, status])
+  @@index([resourceType, status])
+  @@map("production_resources")
+}
+
+model ManufacturingOperation {
+  id                  String       @id @default(cuid())
+  code                String       @unique
+  name                String
+  description         String?
+  defaultWorkCenterId String?
+  status              RecordStatus @default(ACTIVE)
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+  defaultWorkCenter   WorkCenter?  @relation("OperationDefaultWorkCenter", fields: [defaultWorkCenterId], references: [id], onDelete: SetNull)
+  routeSteps          RouteStep[]
+
+  @@index([status, name])
+  @@map("manufacturing_operations")
+}
+
+model ManufacturingRoute {
+  id          String         @id @default(cuid())
+  itemId      String?
+  name        String
+  description String?
+  status      RecordStatus   @default(ACTIVE)
+  createdById String
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  item        Item?          @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  createdBy   User           @relation("ManufacturingRouteCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  versions    RouteVersion[]
+
+  @@index([itemId, status])
+  @@map("manufacturing_routes")
+}
+
+model RouteVersion {
+  id                 String                 @id @default(cuid())
+  routeId            String
+  revision           String
+  status             DefinitionStatus       @default(DRAFT)
+  effectiveFrom      DateTime?
+  effectiveTo        DateTime?
+  createdById        String
+  approvedAt         DateTime?
+  approvedById       String?
+  createdAt          DateTime               @default(now())
+  route              ManufacturingRoute     @relation(fields: [routeId], references: [id], onDelete: Restrict)
+  createdBy          User                   @relation("RouteVersionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  approvedBy         User?                  @relation("RouteVersionApprovedBy", fields: [approvedById], references: [id], onDelete: Restrict)
+  steps              RouteStep[]
+  transitions        RouteTransition[]
+  defaultForProfiles ManufacturingProfile[] @relation("ManufacturingProfileDefaultRouteVersion")
+
+  @@unique([routeId, revision])
+  @@index([status, effectiveFrom, effectiveTo])
+  @@map("route_versions")
+}
+
+model RouteStep {
+  id                   String                 @id @default(cuid())
+  routeVersionId       String
+  operationId          String
+  sequence             Int
+  nameOverride         String?
+  workCenterId         String?
+  executionMode        RouteExecutionMode     @default(INTERNAL)
+  isSerializationPoint Boolean                @default(false)
+  active               Boolean                @default(true)
+  createdAt            DateTime               @default(now())
+  routeVersion         RouteVersion           @relation(fields: [routeVersionId], references: [id], onDelete: Restrict)
+  operation            ManufacturingOperation @relation(fields: [operationId], references: [id], onDelete: Restrict)
+  workCenter           WorkCenter?            @relation(fields: [workCenterId], references: [id], onDelete: SetNull)
+  requirements         RouteStepRequirement[]
+  outgoingTransitions  RouteTransition[]      @relation("RouteTransitionFrom")
+  incomingTransitions  RouteTransition[]      @relation("RouteTransitionTo")
+  consumedBomLines     BomLine[]              @relation("BomLineConsumptionRouteStep")
+
+  @@unique([id, routeVersionId])
+  @@unique([routeVersionId, sequence])
+  @@index([operationId])
+  @@index([workCenterId])
+  @@map("route_steps")
+}
+
+model RouteTransition {
+  id             String              @id @default(cuid())
+  routeVersionId String
+  fromStepId     String
+  toStepId       String
+  transitionType RouteTransitionType @default(NORMAL)
+  createdAt      DateTime            @default(now())
+  routeVersion   RouteVersion        @relation(fields: [routeVersionId], references: [id], onDelete: Restrict)
+  fromStep       RouteStep           @relation("RouteTransitionFrom", fields: [fromStepId, routeVersionId], references: [id, routeVersionId], onDelete: Restrict)
+  toStep         RouteStep           @relation("RouteTransitionTo", fields: [toStepId, routeVersionId], references: [id, routeVersionId], onDelete: Restrict)
+
+  @@unique([routeVersionId, fromStepId, toStepId, transitionType])
+  @@index([routeVersionId, fromStepId])
+  @@map("route_transitions")
+}
+
+model RouteStepRequirement {
+  id              String                           @id @default(cuid())
+  routeStepId     String
+  requirementType RouteStepRequirementType
+  key             String
+  label           String
+  requiredAt      RouteStepRequirementCapturePoint
+  required        Boolean                          @default(false)
+  allowMultiple   Boolean                          @default(false)
+  sequence        Int                              @default(0)
+  createdAt       DateTime                         @default(now())
+  routeStep       RouteStep                        @relation(fields: [routeStepId], references: [id], onDelete: Restrict)
+
+  @@unique([routeStepId, key])
+  @@index([routeStepId, sequence])
+  @@map("route_step_requirements")
 }
 
 model Demand {
@@ -806,16 +1115,16 @@ model CargoSourceWarehouse {
 }
 
 model CargoCourier {
-  id             String       @id @default(cuid())
+  id             String             @id @default(cuid())
   name           String
-  normalizedName String       @unique
-  code           String?      @unique
+  normalizedName String             @unique
+  code           String?            @unique
   phone          String?
   website        String?
   notes          String?
-  status         RecordStatus @default(ACTIVE)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  status         RecordStatus       @default(ACTIVE)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
   trackingLegs   CargoTrackingLeg[]
 
   @@map("cargo_couriers")
@@ -850,30 +1159,30 @@ model CargoShipment {
 }
 
 model CargoPackage {
-  id             String             @id @default(cuid())
-  packageNo      String             @unique
+  id             String                    @id @default(cuid())
+  packageNo      String                    @unique
   shipmentId     String
   vendorId       String?
-  weight         Decimal?           @db.Decimal(12, 3)
-  verifiedWeight Decimal?           @db.Decimal(12, 3)
-  length         Decimal?           @db.Decimal(12, 2)
-  width          Decimal?           @db.Decimal(12, 2)
-  height         Decimal?           @db.Decimal(12, 2)
+  weight         Decimal?                  @db.Decimal(12, 3)
+  verifiedWeight Decimal?                  @db.Decimal(12, 3)
+  length         Decimal?                  @db.Decimal(12, 2)
+  width          Decimal?                  @db.Decimal(12, 2)
+  height         Decimal?                  @db.Decimal(12, 2)
   notes          String?
-  status         RecordStatus       @default(ACTIVE)
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
-  shipment       CargoShipment      @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
-  vendor         Vendor?            @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  status         RecordStatus              @default(ACTIVE)
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+  shipment       CargoShipment             @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  vendor         Vendor?                   @relation(fields: [vendorId], references: [id], onDelete: Restrict)
   items          CargoPackageItem[]
   invoices       CargoInvoice[]
   charges        CargoCharge[]
   files          CargoFile[]
-  legacyEvents  CargoLegacyEvent[]
-  orderLinks    ProcurementOrderPackage[]
+  legacyEvents   CargoLegacyEvent[]
+  orderLinks     ProcurementOrderPackage[]
 
-  @@index([shipmentId])
   @@unique([id, shipmentId])
+  @@index([shipmentId])
   @@index([vendorId])
   @@index([status, createdAt])
   @@map("cargo_packages")
@@ -894,17 +1203,17 @@ model CargoPackageItem {
 }
 
 model CargoMilestone {
-  id          String        @id @default(cuid())
-  shipmentId  String
-  sequence    Int
-  stage       CargoStage
-  occurredAt  DateTime
-  location    String?
-  remarks     String?
-  postedById  String?
-  createdAt   DateTime      @default(now())
-  shipment    CargoShipment @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
-  postedBy    User?         @relation("CargoMilestonePostedBy", fields: [postedById], references: [id], onDelete: SetNull)
+  id         String        @id @default(cuid())
+  shipmentId String
+  sequence   Int
+  stage      CargoStage
+  occurredAt DateTime
+  location   String?
+  remarks    String?
+  postedById String?
+  createdAt  DateTime      @default(now())
+  shipment   CargoShipment @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  postedBy   User?         @relation("CargoMilestonePostedBy", fields: [postedById], references: [id], onDelete: SetNull)
 
   @@unique([shipmentId, sequence])
   @@index([stage, occurredAt])
@@ -912,7 +1221,7 @@ model CargoMilestone {
 }
 
 model CargoTrackingLeg {
-  id             String        @id @default(cuid())
+  id             String         @id @default(cuid())
   shipmentId     String
   sequence       Int
   kind           CargoLegKind
@@ -921,10 +1230,10 @@ model CargoTrackingLeg {
   dispatchedAt   DateTime?
   arrivedAt      DateTime?
   remarks        String?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
-  shipment       CargoShipment @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
-  courier        CargoCourier? @relation(fields: [courierId], references: [id], onDelete: Restrict)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  shipment       CargoShipment  @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  courier        CargoCourier?  @relation(fields: [courierId], references: [id], onDelete: Restrict)
   invoices       CargoInvoice[]
   charges        CargoCharge[]
 
@@ -956,33 +1265,33 @@ model CargoInvoice {
   charges       CargoCharge[]
   files         CargoFile[]
 
+  @@unique([id, shipmentId])
   @@index([shipmentId])
   @@index([packageId])
   @@index([trackingLegId])
-  @@unique([id, shipmentId])
   @@map("cargo_invoices")
 }
 
 model CargoCharge {
-  id             String              @id @default(cuid())
-  shipmentId     String
-  packageId      String?
-  trackingLegId  String?
-  invoiceId      String?
-  category       CargoChargeCategory
-  amount         Decimal             @db.Decimal(18, 4)
-  currency       String              @db.VarChar(3)
-  pkrEquivalent  Decimal?            @db.Decimal(18, 4)
-  pkrNote        String?
-  remarks        String?
-  createdById    String
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
-  shipment       CargoShipment       @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
-  package        CargoPackage?       @relation(fields: [packageId, shipmentId], references: [id, shipmentId], onDelete: Restrict)
-  trackingLeg    CargoTrackingLeg?   @relation(fields: [trackingLegId, shipmentId], references: [id, shipmentId], onDelete: Restrict)
-  invoice        CargoInvoice?       @relation(fields: [invoiceId, shipmentId], references: [id, shipmentId], onDelete: Restrict)
-  createdBy      User                @relation("CargoChargeCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  id            String              @id @default(cuid())
+  shipmentId    String
+  packageId     String?
+  trackingLegId String?
+  invoiceId     String?
+  category      CargoChargeCategory
+  amount        Decimal             @db.Decimal(18, 4)
+  currency      String              @db.VarChar(3)
+  pkrEquivalent Decimal?            @db.Decimal(18, 4)
+  pkrNote       String?
+  remarks       String?
+  createdById   String
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  shipment      CargoShipment       @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  package       CargoPackage?       @relation(fields: [packageId, shipmentId], references: [id, shipmentId], onDelete: Restrict)
+  trackingLeg   CargoTrackingLeg?   @relation(fields: [trackingLegId, shipmentId], references: [id, shipmentId], onDelete: Restrict)
+  invoice       CargoInvoice?       @relation(fields: [invoiceId, shipmentId], references: [id, shipmentId], onDelete: Restrict)
+  createdBy     User                @relation("CargoChargeCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
 
   @@index([shipmentId])
   @@index([packageId])
@@ -1038,30 +1347,30 @@ model CargoLegacyEvent {
 // Orders are generic supplier orders. Marketplace-specific fields are retained
 // only as source provenance, so the same model supports direct and agent orders.
 model ProcurementOrder {
-  id                String                 @id @default(cuid())
-  source            String
-  orderNo           String
-  status            ProcurementOrderStatus @default(DRAFT)
-  sourceStatus      String?
-  vendorId          String?
-  supplierName      String
-  submittedAt       DateTime?
-  currency          String                 @default("PKR") @db.VarChar(3)
-  paidAmount        Decimal?               @db.Decimal(14, 4)
-  shippingAmount    Decimal?               @db.Decimal(14, 4)
-  courierName       String?
-  trackingNumber    String?
-  notes             String?
-  sourceFileName    String?
-  sourcePayload     Json?
-  createdById       String
-  statusRecord      RecordStatus           @default(ACTIVE)
-  createdAt         DateTime               @default(now())
-  updatedAt         DateTime               @updatedAt
-  vendor            Vendor?                @relation(fields: [vendorId], references: [id], onDelete: Restrict)
-  createdBy         User                   @relation("ProcurementOrderCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  lines             ProcurementOrderLine[]
-  packageLinks      ProcurementOrderPackage[]
+  id             String                    @id @default(cuid())
+  source         String
+  orderNo        String
+  status         ProcurementOrderStatus    @default(DRAFT)
+  sourceStatus   String?
+  vendorId       String?
+  supplierName   String
+  submittedAt    DateTime?
+  currency       String                    @default("PKR") @db.VarChar(3)
+  paidAmount     Decimal?                  @db.Decimal(14, 4)
+  shippingAmount Decimal?                  @db.Decimal(14, 4)
+  courierName    String?
+  trackingNumber String?
+  notes          String?
+  sourceFileName String?
+  sourcePayload  Json?
+  createdById    String
+  statusRecord   RecordStatus              @default(ACTIVE)
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+  vendor         Vendor?                   @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  createdBy      User                      @relation("ProcurementOrderCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  lines          ProcurementOrderLine[]
+  packageLinks   ProcurementOrderPackage[]
 
   @@unique([source, orderNo])
   @@index([status, submittedAt])
@@ -1071,15 +1380,15 @@ model ProcurementOrder {
 }
 
 model ProcurementOrderPackage {
-  id          String           @id @default(cuid())
-  orderId     String
-  packageId   String
-  remarks     String?
-  linkedById  String
-  createdAt   DateTime         @default(now())
-  order       ProcurementOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  package     CargoPackage     @relation(fields: [packageId], references: [id], onDelete: Restrict)
-  linkedBy    User             @relation("ProcurementOrderPackageLinkedBy", fields: [linkedById], references: [id], onDelete: Restrict)
+  id         String           @id @default(cuid())
+  orderId    String
+  packageId  String
+  remarks    String?
+  linkedById String
+  createdAt  DateTime         @default(now())
+  order      ProcurementOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  package    CargoPackage     @relation(fields: [packageId], references: [id], onDelete: Restrict)
+  linkedBy   User             @relation("ProcurementOrderPackageLinkedBy", fields: [linkedById], references: [id], onDelete: Restrict)
 
   @@unique([orderId, packageId])
   @@index([packageId])
@@ -1088,20 +1397,20 @@ model ProcurementOrderPackage {
 }
 
 model ProcurementOrderLine {
-  id          String             @id @default(cuid())
+  id          String           @id @default(cuid())
   orderId     String
   lineNo      Int
   itemId      String?
   description String
   productUrl  String?
   variant     String?
-  quantity    Decimal            @db.Decimal(14, 3)
-  unitPrice   Decimal?           @db.Decimal(14, 4)
+  quantity    Decimal          @db.Decimal(14, 3)
+  unitPrice   Decimal?         @db.Decimal(14, 4)
   notes       String?
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
-  order       ProcurementOrder   @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  item        Item?              @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  order       ProcurementOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  item        Item?            @relation(fields: [itemId], references: [id], onDelete: Restrict)
 
   @@unique([orderId, lineNo])
   @@index([itemId])

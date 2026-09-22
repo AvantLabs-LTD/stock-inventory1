@@ -21,6 +21,7 @@ export type AppPage =
   | 'inventory'
   | 'reference-data'
   | 'users'
+  | 'manufacturing'
 
 export const pagePaths: Record<AppPage, string> = {
   flux: '/', cargo: '/cargo', 'cargo-shipments': '/cargo/shipments',
@@ -30,6 +31,7 @@ export const pagePaths: Record<AppPage, string> = {
   dashboard: '/vault', items: '/vault/inventory', demands: '/vault/demands', 'demand-detail': '/vault/demands',
   purchasing: '/vault/legacy-purchasing', 'purchase-detail': '/vault/purchases', inventory: '/vault/movements',
   'reference-data': '/flux/admin/reference-data', users: '/flux/admin/users',
+  manufacturing: '/manufacturing',
 }
 
 export function pageFromPath(pathname: string): AppPage {

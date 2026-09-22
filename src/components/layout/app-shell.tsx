@@ -23,6 +23,7 @@ const PurchasingPage = dynamic(() => import("@/components/streamlined/demand-pur
 const UsersPage = dynamic(() => import("@/components/users/users-page").then(module => module.UsersPage), { loading: () => <LoadingScreen /> })
 const CargoPage = dynamic(() => import("@/components/cargo/cargo-page").then(module => module.CargoPage), { loading: () => <LoadingScreen /> })
 const OrdersPage = dynamic(() => import("@/components/orders/orders-page").then(module => module.OrdersPage), { loading: () => <LoadingScreen /> })
+const ManufacturingPage = dynamic(() => import("@/components/manufacturing/manufacturing-page").then(module => module.ManufacturingPage), { loading: () => <LoadingScreen /> })
 
 function LoadingScreen() {
   return (
@@ -50,6 +51,7 @@ function PageContent() {
     "cargo-tracking": "cargo.view", "cargo-finance": "cargo.costs.view",
     "cargo-management": "cargo.view", "cargo-reports": "cargo.view",
     orders: "orders.view",
+    manufacturing: "manufacturing.view",
   }
   if (required[currentPage] && !permissions.includes(required[currentPage])) {
     return <div className="p-8 text-sm text-muted-foreground">You do not have access to this section.</div>
@@ -65,6 +67,7 @@ function PageContent() {
     case 'cargo-management': return <CargoPage />
     case 'cargo-reports': return <CargoPage />
     case 'orders': return <OrdersPage />
+    case 'manufacturing': return <ManufacturingPage />
     case 'people': return <PlannedModule name="People" />
     case 'ledger': return <PlannedModule name="Ledger" />
     case 'items':
