@@ -159,6 +159,7 @@ export async function POST(request: NextRequest) {
       optionSelection: body.optionSelection,
       remarks: body.remarks,
       unit: body.unit,
+      importSourceKey: typeof body.importSourceKey === "string" && body.importSourceKey.length <= 250 ? body.importSourceKey : undefined,
     }, session.user.id)
     return Response.json({ item }, { status: 201 })
   } catch (error) { return apiError(error) }

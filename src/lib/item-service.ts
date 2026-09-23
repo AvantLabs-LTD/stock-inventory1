@@ -129,10 +129,16 @@ export async function createCatalogueItem(
     optionSelection?: string | null
     remarks?: string | null
     unit?: string | null
+    importSourceKey?: string | null
   },
   actorId: string,
 ) {
   const title = input.title.trim()
+  const importSourceKey = input.importSourceKey?.trim() || null
+  if (importSourceKey) {
+    const existing = await tx.item.findUnique({ where: { importSourceKey }, include: { balance: true, category: true } })
+    if (existing) return existing
+  }
   const codeBase = generatedItemCodeBase(title)
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const code = attempt === 0 ? codeBase : `${codeBase}-${randomBytes(3).toString("hex").toUpperCase()}`
@@ -153,6 +159,7 @@ export async function createCatalogueItem(
         optionSelection: input.optionSelection?.trim() || null,
         remarks: input.remarks?.trim() || null,
         unit: input.unit?.trim() || "pcs",
+        importSourceKey,
         createdById: actorId,
         balance: { create: {} },
       }, include: { balance: true, category: true } })
