@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "purpose": "Explicit, reviewed reconciliation decisions applied while assimilating source BOM workbooks. These decisions do not import or mutate catalogue items or project BOMs.",
+  "decisions": [
+    {
+      "id": "BLAZE_3D_PRINT_SPLIT",
+      "kind": "SOURCE_EXPANSION",
+      "source": {
+        "file": "CM_SupplyChain\\CM_SupplyChain\\Blaze_PMU_Rect\\Master_BOM_Blaze_PMU_Rect.xlsx",
+        "sheet": "Blaze_Master_BOM",
+        "row": 54
+      },
+      "note": "The source sheet omits one of the two distinct Blaze 3D-printed bodies. Preserve the source row and create two reviewed requirements, one for each body, at quantity one per set.",
+      "outputs": [
+        { "canonicalKey": "STORE:IMP-D571B53C9509", "disposition": "EXISTING_STORE_ITEM", "storeItemCode": "IMP-D571B53C9509", "suggestedName": "3D Body — Blaze PMU", "quantityPerSet": "1" },
+        { "canonicalKey": "STORE:IMP-75431F3F1A88", "disposition": "EXISTING_STORE_ITEM", "storeItemCode": "IMP-75431F3F1A88", "suggestedName": "3D Body — Blaze Rectifier", "quantityPerSet": "1" }
+      ]
+    },
+    {
+      "id": "FIRECONSOLE_CONNECTOR_ROWS",
+      "kind": "SOURCE_MAPPING",
+      "note": "The generic Connector identity covers three separately ordered source rows; retain each source row and map it to its reviewed item.",
+      "mappings": [
+        { "source": { "file": "CM_SupplyChain\\CM_SupplyChain\\FireConsole\\V2P1\\MasterBOM\\BOM_New.xlsx", "sheet": "Sheet1", "row": 16 }, "output": { "canonicalKey": "STORE:IMP-7470724BF4B5", "disposition": "EXISTING_STORE_ITEM", "storeItemCode": "IMP-7470724BF4B5", "suggestedName": "XT60-M" } },
+        { "source": { "file": "CM_SupplyChain\\CM_SupplyChain\\FireConsole\\V2P1\\MasterBOM\\BOM_New.xlsx", "sheet": "Sheet1", "row": 17 }, "output": { "canonicalKey": "STORE:IMP-DA79556B0B26", "disposition": "EXISTING_STORE_ITEM", "storeItemCode": "IMP-DA79556B0B26", "suggestedName": "XT90-M" } },
+        { "source": { "file": "CM_SupplyChain\\CM_SupplyChain\\FireConsole\\V2P1\\MasterBOM\\BOM_New.xlsx", "sheet": "Sheet1", "row": 18 }, "output": { "canonicalKey": "STORE:IMP-9779A93BBE79", "disposition": "EXISTING_STORE_ITEM", "storeItemCode": "IMP-9779A93BBE79", "suggestedName": "XT90-F" } }
+      ]
+    },
+    {
+      "id": "GENERIC_MAIN_PCB_SPLIT",
+      "kind": "SOURCE_MAPPING",
+      "note": "The generic Main PCB source identity names different project-specific boards. Keep the two project identities distinct.",
+      "mappings": [
+        { "source": { "file": "CM_SupplyChain\\CM_SupplyChain\\FireConsole\\V2P1\\MasterBOM\\BOM_New.xlsx", "sheet": "Sheet1", "row": 55 }, "output": { "canonicalKey": "NEW:fireconsole-v2-1-main-pcb", "disposition": "NEW_COMPONENT_CANDIDATE", "suggestedName": "FireConsole V2.1 Main PCB" } },
+        { "source": { "file": "CM_SupplyChain\\CM_SupplyChain\\TMD\\V1P2\\MasterBOM\\BOM_New.xlsx", "sheet": "Sheet1", "row": 14 }, "output": { "canonicalKey": "STORE:IMP-48DD723457CD", "disposition": "EXISTING_STORE_ITEM", "storeItemCode": "IMP-48DD723457CD", "suggestedName": "TMD V1.2 Main PCB" } }
+      ]
+    },
+    {
+      "id": "PAPER_TAPE_ONE_INCH",
+      "kind": "SOURCE_MAPPING",
+      "note": "The reviewed Paper Tape occurrences denote one new 1-inch component, despite differing blank or abbreviated specifications.",
+      "mappings": [
+        { "source": { "file": "CM_SupplyChain\\CM_SupplyChain\\Blaze_CHS\\MasterBOM_BL_CHS_Issue6.xlsx", "sheet": "Metal Connector", "row": 63 }, "output": { "canonicalKey": "NEW:paper-tape-1-inch", "disposition": "NEW_COMPONENT_CANDIDATE", "suggestedName": "Paper Tape — 1 inch" } },
+        { "source": { "file": "CM_SupplyChain\\CM_SupplyChain\\SF_CHS\\MasterBOM_SF_XTCable.xlsx", "sheet": "Sheet1", "row": 23 }, "output": { "canonicalKey": "NEW:paper-tape-1-inch", "disposition": "NEW_COMPONENT_CANDIDATE", "suggestedName": "Paper Tape — 1 inch" } },
+        { "source": { "file": "CM_SupplyChain\\CM_SupplyChain\\TMD\\V1P2\\MasterBOM\\BOM_New.xlsx", "sheet": "Sheet1", "row": 13 }, "output": { "canonicalKey": "NEW:paper-tape-1-inch", "disposition": "NEW_COMPONENT_CANDIDATE", "suggestedName": "Paper Tape — 1 inch" } },
+        { "source": { "file": "CM_SupplyChain\\CM_SupplyChain\\TMD\\V1P3\\Master_BOM_TMD_V1P3.xlsx", "sheet": "bom tmd- hdgnss", "row": 18 }, "output": { "canonicalKey": "NEW:paper-tape-1-inch", "disposition": "NEW_COMPONENT_CANDIDATE", "suggestedName": "Paper Tape — 1 inch" } }
+      ]
+    },
+    {
+      "id": "SOLDER_PASTE_NORMALIZATION",
+      "kind": "SOURCE_MAPPING",
+      "note": "Detailed and abbreviated source descriptions identify the same reviewed new solder paste; retain all source specifications as provenance.",
+      "mappings": [
+        { "source": { "file": "CM_SupplyChain\\CM_SupplyChain\\Blaze_PMU_Rect\\Master_BOM_Blaze_PMU_Rect.xlsx", "sheet": "Blaze_Master_BOM", "row": 44 }, "output": { "canonicalKey": "NEW:soldering-paste-mechanic-xgz40-sn63pb37-3-35g", "disposition": "NEW_COMPONENT_CANDIDATE", "suggestedName": "Soldering Paste — Mechanic XGZ40, Sn63Pb37, #3, 35g" } },
+        { "source": { "file": "CM_SupplyChain\\CM_SupplyChain\\TMD\\V1P3\\Master_BOM_TMD_V1P3.xlsx", "sheet": "bom tmd- hdgnss", "row": 15 }, "output": { "canonicalKey": "NEW:soldering-paste-mechanic-xgz40-sn63pb37-3-35g", "disposition": "NEW_COMPONENT_CANDIDATE", "suggestedName": "Soldering Paste — Mechanic XGZ40, Sn63Pb37, #3, 35g" } },
+        { "source": { "file": "CM_SupplyChain\\CM_SupplyChain\\SF_PMU\\Master_BOM_SF_PMU_V3.xlsx", "sheet": "Power Nexus BOM", "row": 31 }, "output": { "canonicalKey": "NEW:soldering-paste-mechanic-xgz40-sn63pb37-3-35g", "disposition": "NEW_COMPONENT_CANDIDATE", "suggestedName": "Soldering Paste — Mechanic XGZ40, Sn63Pb37, #3, 35g" } }
+      ]
+    },
+    {
+      "id": "BLAZE_SPACER_ROWS",
+      "kind": "SOURCE_MAPPING",
+      "note": "The generic Spacer identity covers distinct M3x6 and M3x5 spacer source rows.",
+      "mappings": [
+        { "source": { "file": "CM_SupplyChain\\CM_SupplyChain\\Blaze_PMU_Rect\\Master_BOM_Blaze_PMU_Rect.xlsx", "sheet": "Blaze_Master_BOM", "row": 42 }, "output": { "canonicalKey": "STORE:IMP-6B7C2C711DBF", "disposition": "EXISTING_STORE_ITEM", "storeItemCode": "IMP-6B7C2C711DBF" } },
+        { "source": { "file": "CM_SupplyChain\\CM_SupplyChain\\Blaze_PMU_Rect\\Master_BOM_Blaze_PMU_Rect.xlsx", "sheet": "Blaze_Master_BOM", "row": 43 }, "output": { "canonicalKey": "STORE:IMP-7F38A73E5EA6", "disposition": "EXISTING_STORE_ITEM", "storeItemCode": "IMP-7F38A73E5EA6" } }
+      ]
+    },
+    {
+      "id": "FIRECONSOLE_SOLAR_WIRE_ROWS",
+      "kind": "SOURCE_MAPPING",
+      "note": "The two generic Wire rows are red and black 6 mm² Solar Wire. Both approved catalogue records were updated from pcs to mtr after verifying zero on-hand stock.",
+      "mappings": [
+        { "source": { "file": "CM_SupplyChain\\CM_SupplyChain\\FireConsole\\V2P1\\MasterBOM\\BOM_New.xlsx", "sheet": "Sheet1", "row": 43 }, "output": { "canonicalKey": "STORE:CMP-SOLAR-WIRE", "disposition": "EXISTING_STORE_ITEM", "storeItemCode": "CMP-SOLAR-WIRE", "suggestedName": "Solar Wire — Red, 6 mm²" } },
+        { "source": { "file": "CM_SupplyChain\\CM_SupplyChain\\FireConsole\\V2P1\\MasterBOM\\BOM_New.xlsx", "sheet": "Sheet1", "row": 44 }, "output": { "canonicalKey": "STORE:CMP-SOLAR-WIRE-D47AFF", "disposition": "EXISTING_STORE_ITEM", "storeItemCode": "CMP-SOLAR-WIRE-D47AFF", "suggestedName": "Solar Wire — Black, 6 mm²" } }
+      ]
+    }
+  ]
+}
