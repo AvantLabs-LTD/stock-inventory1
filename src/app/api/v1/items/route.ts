@@ -144,23 +144,40 @@ export async function POST(request: NextRequest) {
     if (!body.categoryId) return Response.json({ error: "A catalogue category is required for a complete component", code: "CATEGORY_REQUIRED" }, { status: 400 })
     const category = await db.itemCategory.findUnique({ where: { id: body.categoryId } })
     if (!category || category.discipline !== body.discipline) return Response.json({ error: "Category must belong to the selected discipline", code: "CATEGORY_DISCIPLINE_MISMATCH" }, { status: 400 })
-    const item = await createCatalogueItem(db, {
-      title: body.title,
-      discipline: body.discipline,
-      categoryId: category.id,
-      catalogueState: body.catalogueState,
-      description: body.description,
-      function: body.function,
-      specification: body.specification,
-      manufacturerName: body.manufacturerName,
-      manufacturerPartNumber: body.manufacturerPartNumber,
-      supplierPartNumber: body.supplierPartNumber,
-      link: body.link,
-      optionSelection: body.optionSelection,
-      remarks: body.remarks,
-      unit: body.unit,
-      importSourceKey: typeof body.importSourceKey === "string" && body.importSourceKey.length <= 250 ? body.importSourceKey : undefined,
-    }, session.user.id)
+    const importSourceKey = typeof body.importSourceKey === "string" && body.importSourceKey.length <= 250 ? body.importSourceKey.trim() || null : null
+    const item = await db.$transaction(async tx => {
+      const existing = importSourceKey ? await tx.item.findUnique({ where: { importSourceKey }, select: { id: true } }) : null
+      const created = await createCatalogueItem(tx, {
+        title: body.title,
+        discipline: body.discipline,
+        categoryId: category.id,
+        catalogueState: body.catalogueState,
+        description: body.description,
+        function: body.function,
+        specification: body.specification,
+        manufacturerName: body.manufacturerName,
+        manufacturerPartNumber: body.manufacturerPartNumber,
+        supplierPartNumber: body.supplierPartNumber,
+        link: body.link,
+        optionSelection: body.optionSelection,
+        remarks: body.remarks,
+        unit: body.unit,
+        importSourceKey,
+      }, session.user.id)
+      if (!existing) {
+        await tx.auditLog.create({ data: {
+          userId: session.user.id,
+          userName: session.user.name,
+          action: "CREATE_CATALOGUE_ITEM",
+          entityType: "Item",
+          entityId: created.id,
+          rootEntityType: "Item",
+          rootEntityId: created.id,
+          details: JSON.stringify({ code: created.code, title: created.title, importSourceKey }),
+        } })
+      }
+      return created
+    })
     return Response.json({ item }, { status: 201 })
   } catch (error) { return apiError(error) }
 }
