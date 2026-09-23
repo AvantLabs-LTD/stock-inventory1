@@ -425,6 +425,7 @@ model Vendor {
   purchaseRequests  PurchaseRequest[]
   cargoPackages     CargoPackage[]
   procurementOrders ProcurementOrder[]
+  supplierLinks     ItemSupplierLink[]
 
   @@index([name])
   @@map("vendors")
@@ -460,6 +461,7 @@ model Item {
   returnLines               DemandReturnLine[]
   ledgerEntries             InventoryLedgerEntry[]
   purchaseLines             PurchaseRequestLine[]
+  supplierLinks             ItemSupplierLink[]
   receiptLines              GoodsReceiptLine[]
   procurementOrderLines     ProcurementOrderLine[]
   productionPlanLines       ProductionPlanLine[]
@@ -488,6 +490,27 @@ model ItemBalance {
   item      Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
 
   @@map("item_balances")
+}
+
+/// A catalogue-level supplier reference. This is procurement metadata only: it
+/// never establishes stock, price, allocation, or a purchase order.
+model ItemSupplierLink {
+  id                 String   @id @default(cuid())
+  itemId             String
+  vendorId           String?
+  url                String
+  supplierPartNumber String?
+  notes              String?
+  isPreferred        Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  item               Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  vendor             Vendor?  @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+
+  @@unique([itemId, url])
+  @@index([vendorId])
+  @@index([itemId, isPreferred])
+  @@map("item_supplier_links")
 }
 
 // Manufacturing definitions are optional Item configuration. Purchased items

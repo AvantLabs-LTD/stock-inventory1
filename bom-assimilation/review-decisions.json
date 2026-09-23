@@ -73,6 +73,42 @@
         { "source": { "file": "CM_SupplyChain\\CM_SupplyChain\\FireConsole\\V2P1\\MasterBOM\\BOM_New.xlsx", "sheet": "Sheet1", "row": 43 }, "output": { "canonicalKey": "STORE:CMP-SOLAR-WIRE", "disposition": "EXISTING_STORE_ITEM", "storeItemCode": "CMP-SOLAR-WIRE", "suggestedName": "Solar Wire — Red, 6 mm²" } },
         { "source": { "file": "CM_SupplyChain\\CM_SupplyChain\\FireConsole\\V2P1\\MasterBOM\\BOM_New.xlsx", "sheet": "Sheet1", "row": 44 }, "output": { "canonicalKey": "STORE:CMP-SOLAR-WIRE-D47AFF", "disposition": "EXISTING_STORE_ITEM", "storeItemCode": "CMP-SOLAR-WIRE-D47AFF", "suggestedName": "Solar Wire — Black, 6 mm²" } }
       ]
+    },
+    {
+      "id": "ALCOHOL_ONE_LITRE_NORMALIZATION",
+      "kind": "SOURCE_MAPPING",
+      "note": "The TMD V1.2 review note explicitly says this source is the same as the reviewed one-litre Alcohol component. Retain both source occurrences under a single catalogue candidate.",
+      "mappings": [
+        { "source": { "file": "CM_SupplyChain\\CM_SupplyChain\\TMD\\V1P3\\Master_BOM_TMD_V1P3.xlsx", "sheet": "bom tmd- hdgnss", "row": 21 }, "output": { "canonicalKey": "NEW:alcohol-1-litre", "disposition": "NEW_COMPONENT_CANDIDATE", "suggestedName": "Alcohol — 1 Litre" } },
+        { "source": { "file": "CM_SupplyChain\\CM_SupplyChain\\TMD\\V1P2\\MasterBOM\\BOM_New.xlsx", "sheet": "Sheet1", "row": 12 }, "output": { "canonicalKey": "NEW:alcohol-1-litre", "disposition": "NEW_COMPONENT_CANDIDATE", "suggestedName": "Alcohol — 1 Litre" } }
+      ]
+    },
+    {
+      "id": "PAPER_TAPE_ALIAS_NORMALIZATION",
+      "kind": "SOURCE_MAPPING",
+      "note": "The reviewer marked Tape — Paper Tape 1 inch as the same component as the existing reviewed Paper Tape — 1 inch candidate.",
+      "mappings": [
+        { "source": { "file": "CM_SupplyChain\\CM_SupplyChain\\Blaze_PMU_Rect\\Master_BOM_Blaze_PMU_Rect.xlsx", "sheet": "Blaze_Master_BOM", "row": 48 }, "output": { "canonicalKey": "NEW:paper-tape-1-inch", "disposition": "NEW_COMPONENT_CANDIDATE", "suggestedName": "Paper Tape — 1 inch" } },
+        { "source": { "file": "CM_SupplyChain\\CM_SupplyChain\\SF_PMU\\Master_BOM_SF_PMU_V3.xlsx", "sheet": "Power Nexus BOM", "row": 36 }, "output": { "canonicalKey": "NEW:paper-tape-1-inch", "disposition": "NEW_COMPONENT_CANDIDATE", "suggestedName": "Paper Tape — 1 inch" } }
+      ]
+    },
+    {
+      "id": "XT90BE_F_REUSE",
+      "kind": "SOURCE_MAPPING",
+      "note": "The reviewed source label exactly matches the active central catalogue record XT90BE-F; reuse it instead of creating a duplicate.",
+      "mappings": [
+        { "source": { "file": "CM_SupplyChain\\CM_SupplyChain\\Blaze_CHS\\MasterBOM_BL_CHS_Issue6.xlsx", "sheet": "Metal Connector", "row": 34 }, "output": { "canonicalKey": "STORE:IMP-779694915D0C", "disposition": "EXISTING_STORE_ITEM", "storeItemCode": "IMP-779694915D0C", "suggestedName": "XT90BE-F" } }
+      ]
+    },
+    {
+      "id": "PACKING_BOX_NORMALIZATION",
+      "kind": "SOURCE_MAPPING",
+      "note": "Confirmed by the business: Cardboard Box and Packing Box with the same 12 × 9 × 2.2 inch dimensions are one central packaging item.",
+      "mappings": [
+        { "source": { "file": "CM_SupplyChain\\CM_SupplyChain\\TMD\\V1P3\\Master_BOM_TMD_V1P3.xlsx", "sheet": "bom tmd- hdgnss", "row": 20 }, "output": { "canonicalKey": "NEW:packing-box-12x9x2-2-inch", "disposition": "NEW_COMPONENT_CANDIDATE", "suggestedName": "Packing Box — 12 × 9 × 2.2 inch" } },
+        { "source": { "file": "CM_SupplyChain\\CM_SupplyChain\\Blaze_PMU_Rect\\Master_BOM_Blaze_PMU_Rect.xlsx", "sheet": "Blaze_Master_BOM", "row": 50 }, "output": { "canonicalKey": "NEW:packing-box-12x9x2-2-inch", "disposition": "NEW_COMPONENT_CANDIDATE", "suggestedName": "Packing Box — 12 × 9 × 2.2 inch" } },
+        { "source": { "file": "CM_SupplyChain\\CM_SupplyChain\\SF_PMU\\Master_BOM_SF_PMU_V3.xlsx", "sheet": "Power Nexus BOM", "row": 38 }, "output": { "canonicalKey": "NEW:packing-box-12x9x2-2-inch", "disposition": "NEW_COMPONENT_CANDIDATE", "suggestedName": "Packing Box — 12 × 9 × 2.2 inch" } }
+      ]
     }
   ]
 }

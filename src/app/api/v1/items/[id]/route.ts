@@ -28,12 +28,16 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
   const { id } = await context.params
   const item = await db.item.findUnique({ where: { id }, include: {
     balance: true, category: { include: { parent: true } },
+    supplierLinks: { include: { vendor: true }, orderBy: [{ isPreferred: "desc" }, { createdAt: "asc" }] },
     demandLines: { include: { demand: true, vendor: true, projectTag: true, suggestedCategory: true }, orderBy: { createdAt: "desc" }, take: 100 },
     purchaseLines: { include: { purchaseRequest: { include: { vendor: true } } }, orderBy: { createdAt: "desc" }, take: 100 },
   } })
   if (!item) return Response.json({ error: "Item not found" }, { status: 404 })
   const auditTrail = hasPermission(session, "vault.catalogue.manage") ? await db.auditLog.findMany({
-    where: { entityType: "Item", entityId: id },
+    where: { OR: [
+      { entityType: "Item", entityId: id },
+      { rootEntityType: "Item", rootEntityId: id },
+    ] },
     orderBy: { date: "desc" },
     take: 50,
     select: { id: true, userName: true, action: true, details: true, metadata: true, date: true },
