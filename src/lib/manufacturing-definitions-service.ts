@@ -205,6 +205,40 @@ export async function createBillOfMaterial(raw: unknown, actor: Actor, idempoten
   })
 }
 
+/** Draft definitions are editable because they are not released history. Once
+ * active, the only supported change is a new revision. */
+export async function replaceDraftBomVersion(versionId: string, raw: unknown, actor: Actor, idempotencyKey: string | null = null) {
+  const input = z.object({ lines: z.array(bomLineSchema).min(1).max(1000) }).parse(raw)
+  validateBomHierarchy(input.lines)
+  return runSerializable(async tx => {
+    const replay = await replayOrStartIdempotentRequest(tx, {
+      actorId: actor.id,
+      key: idempotencyKey,
+      action: "manufacturing.bom-version.replace-draft",
+      payload: { versionId, lines: input.lines.map(line => ({ ...line, quantity: line.quantity.toString(), scrapAllowance: line.scrapAllowance?.toString() ?? null })) },
+    })
+    if (replay) return replay as unknown
+    const version = await tx.bomVersion.findUnique({ where: { id: versionId }, include: { lines: { select: { id: true } } } })
+    if (!version) throw new ManufacturingDefinitionError("BOM_VERSION_NOT_FOUND", "BOM version was not found", 404)
+    if (version.status !== DefinitionStatus.DRAFT) throw new ManufacturingDefinitionError("BOM_VERSION_IMMUTABLE", "Only Draft BOM revisions may be corrected")
+    const itemIds = [...new Set(input.lines.map(line => line.itemId))]
+    if ((await tx.item.count({ where: { id: { in: itemIds } } })) !== itemIds.length) throw new ManufacturingDefinitionError("ITEM_NOT_FOUND", "One or more BOM components were not found", 404)
+    const stepIds = [...new Set(input.lines.flatMap(line => line.consumptionRouteStepId ? [line.consumptionRouteStepId] : []))]
+    if (stepIds.length && (await tx.routeStep.count({ where: { id: { in: stepIds } } })) !== stepIds.length) throw new ManufacturingDefinitionError("ROUTE_STEP_NOT_FOUND", "A BOM consumption step was not found", 404)
+    // Parent links are removed first so this remains valid for hierarchical Drafts.
+    await tx.bomLine.updateMany({ where: { bomVersionId: versionId, parentLineId: { not: null } }, data: { parentLineId: null } })
+    await tx.bomLine.deleteMany({ where: { bomVersionId: versionId } })
+    const idsByKey = new Map(input.lines.map(line => [line.sourceLineKey, randomUUID()]))
+    for (const [index, line] of input.lines.entries()) {
+      await tx.bomLine.create({ data: { id: idsByKey.get(line.sourceLineKey), bomVersionId: versionId, itemId: line.itemId, parentLineId: line.parentSourceLineKey ? idsByKey.get(line.parentSourceLineKey) : null, sourceLineKey: line.sourceLineKey, quantity: line.quantity, unit: line.unit, scrapAllowance: line.scrapAllowance, consumptionRouteStepId: line.consumptionRouteStepId, notes: line.notes, sortOrder: line.sortOrder ?? index } })
+    }
+    const result = await tx.bomVersion.findUniqueOrThrow({ where: { id: versionId }, include: { lines: { orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }], include: { item: { select: { id: true, code: true, title: true, unit: true } } } } } })
+    await audit(tx, actor, "MANUFACTURING_BOM_VERSION_DRAFT_REPLACE", "BomVersion", versionId, { bomId: version.bomId, replacedLineCount: version.lines.length, lines: input.lines.map(line => ({ ...line, quantity: line.quantity.toString(), scrapAllowance: line.scrapAllowance?.toString() ?? null })) })
+    await completeIdempotentRequest(tx, { actorId: actor.id, key: idempotencyKey, response: result })
+    return result
+  })
+}
+
 export async function createManufacturingRoute(raw: unknown, actor: Actor) {
   const input = z.object({ routeId: optionalId, itemId: optionalId, name: text, description: optionalText, revision: text, effectiveFrom: z.coerce.date().nullish().transform(value => value ?? null), effectiveTo: z.coerce.date().nullish().transform(value => value ?? null), steps: z.array(routeStepSchema).min(1).max(100).superRefine((steps, context) => {
     if (steps.filter(step => step.isSerializationPoint).length > 1) context.addIssue({ code: z.ZodIssueCode.custom, message: "A route version may have only one serialization point" })
