@@ -40,6 +40,11 @@ const requirementSchema = z.object({
   sequence: z.number().int().min(0).max(10000).optional(),
 })
 
+const bomLineApplicabilitySchema = z.object({
+  tag: z.string().trim().regex(/^[A-Z][A-Z0-9_]{0,63}$/, "Use an uppercase applicability tag such as PMU_MAIN"),
+  quantity: decimal,
+})
+
 const bomLineSchema = z.object({
   sourceLineKey: z.string().trim().min(1).max(100),
   parentSourceLineKey: z.string().trim().min(1).max(100).nullish().transform(value => value || null),
@@ -50,7 +55,23 @@ const bomLineSchema = z.object({
   consumptionRouteStepId: optionalId,
   notes: optionalText,
   sortOrder: z.number().int().min(0).max(100000).optional(),
+  applicability: z.array(bomLineApplicabilitySchema).max(10).default([]),
+}).superRefine((line, context) => {
+  const tags = new Set<string>()
+  line.applicability.forEach((entry, index) => {
+    if (tags.has(entry.tag)) context.addIssue({ code: z.ZodIssueCode.custom, path: ["applicability", index, "tag"], message: "Applicability tags must be unique per BOM line" })
+    tags.add(entry.tag)
+  })
 })
+
+function serializableBomLine(line: z.infer<typeof bomLineSchema>) {
+  return {
+    ...line,
+    quantity: line.quantity.toString(),
+    scrapAllowance: line.scrapAllowance?.toString() ?? null,
+    applicability: line.applicability.map(entry => ({ tag: entry.tag, quantity: entry.quantity.toString() })),
+  }
+}
 
 const routeStepSchema = z.object({
   operationId: id,
@@ -113,6 +134,7 @@ export async function bomDetail(id: string) {
             orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
             include: {
               item: { select: { id: true, code: true, title: true, unit: true } },
+              applicability: { orderBy: { tag: "asc" } },
               parentLine: { select: { id: true, sourceLineKey: true } },
               consumptionRouteStep: { select: { id: true, sequence: true, operation: { select: { code: true, name: true } } } },
             },
@@ -175,7 +197,7 @@ export async function createBillOfMaterial(raw: unknown, actor: Actor, idempoten
         ...input,
         effectiveFrom: input.effectiveFrom?.toISOString() ?? null,
         effectiveTo: input.effectiveTo?.toISOString() ?? null,
-        lines: input.lines.map(line => ({ ...line, quantity: line.quantity.toString(), scrapAllowance: line.scrapAllowance?.toString() ?? null })),
+        lines: input.lines.map(serializableBomLine),
       },
     })
     if (replay) return replay as unknown as Awaited<ReturnType<typeof bomDetail>>
@@ -196,9 +218,9 @@ export async function createBillOfMaterial(raw: unknown, actor: Actor, idempoten
     const version = await tx.bomVersion.create({ data: { bomId: bom.id, revision: input.revision, effectiveFrom: input.effectiveFrom, effectiveTo: input.effectiveTo, createdById: actor.id } })
     const idsByKey = new Map(input.lines.map(line => [line.sourceLineKey, randomUUID()]))
     for (const [index, line] of input.lines.entries()) {
-      await tx.bomLine.create({ data: { id: idsByKey.get(line.sourceLineKey), bomVersionId: version.id, itemId: line.itemId, parentLineId: line.parentSourceLineKey ? idsByKey.get(line.parentSourceLineKey) : null, sourceLineKey: line.sourceLineKey, quantity: line.quantity, unit: line.unit, scrapAllowance: line.scrapAllowance, consumptionRouteStepId: line.consumptionRouteStepId, notes: line.notes, sortOrder: line.sortOrder ?? index } })
+      await tx.bomLine.create({ data: { id: idsByKey.get(line.sourceLineKey), bomVersionId: version.id, itemId: line.itemId, parentLineId: line.parentSourceLineKey ? idsByKey.get(line.parentSourceLineKey) : null, sourceLineKey: line.sourceLineKey, quantity: line.quantity, unit: line.unit, scrapAllowance: line.scrapAllowance, consumptionRouteStepId: line.consumptionRouteStepId, notes: line.notes, sortOrder: line.sortOrder ?? index, applicability: { create: line.applicability } } })
     }
-    await audit(tx, actor, input.bomId ? "MANUFACTURING_BOM_VERSION_CREATE" : "MANUFACTURING_BOM_CREATE", "BillOfMaterial", bom.id, { ...input, lines: input.lines.map(line => ({ ...line, quantity: line.quantity.toString(), scrapAllowance: line.scrapAllowance?.toString() ?? null })) })
+    await audit(tx, actor, input.bomId ? "MANUFACTURING_BOM_VERSION_CREATE" : "MANUFACTURING_BOM_CREATE", "BillOfMaterial", bom.id, { ...input, lines: input.lines.map(serializableBomLine) })
     const result = await tx.billOfMaterial.findUniqueOrThrow({ where: { id: bom.id }, include: { versions: { include: { lines: true } } } })
     await completeIdempotentRequest(tx, { actorId: actor.id, key: idempotencyKey, response: result })
     return result
@@ -215,7 +237,7 @@ export async function replaceDraftBomVersion(versionId: string, raw: unknown, ac
       actorId: actor.id,
       key: idempotencyKey,
       action: "manufacturing.bom-version.replace-draft",
-      payload: { versionId, lines: input.lines.map(line => ({ ...line, quantity: line.quantity.toString(), scrapAllowance: line.scrapAllowance?.toString() ?? null })) },
+      payload: { versionId, lines: input.lines.map(serializableBomLine) },
     })
     if (replay) return replay as unknown
     const version = await tx.bomVersion.findUnique({ where: { id: versionId }, include: { lines: { select: { id: true } } } })
@@ -230,10 +252,10 @@ export async function replaceDraftBomVersion(versionId: string, raw: unknown, ac
     await tx.bomLine.deleteMany({ where: { bomVersionId: versionId } })
     const idsByKey = new Map(input.lines.map(line => [line.sourceLineKey, randomUUID()]))
     for (const [index, line] of input.lines.entries()) {
-      await tx.bomLine.create({ data: { id: idsByKey.get(line.sourceLineKey), bomVersionId: versionId, itemId: line.itemId, parentLineId: line.parentSourceLineKey ? idsByKey.get(line.parentSourceLineKey) : null, sourceLineKey: line.sourceLineKey, quantity: line.quantity, unit: line.unit, scrapAllowance: line.scrapAllowance, consumptionRouteStepId: line.consumptionRouteStepId, notes: line.notes, sortOrder: line.sortOrder ?? index } })
+      await tx.bomLine.create({ data: { id: idsByKey.get(line.sourceLineKey), bomVersionId: versionId, itemId: line.itemId, parentLineId: line.parentSourceLineKey ? idsByKey.get(line.parentSourceLineKey) : null, sourceLineKey: line.sourceLineKey, quantity: line.quantity, unit: line.unit, scrapAllowance: line.scrapAllowance, consumptionRouteStepId: line.consumptionRouteStepId, notes: line.notes, sortOrder: line.sortOrder ?? index, applicability: { create: line.applicability } } })
     }
-    const result = await tx.bomVersion.findUniqueOrThrow({ where: { id: versionId }, include: { lines: { orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }], include: { item: { select: { id: true, code: true, title: true, unit: true } } } } } })
-    await audit(tx, actor, "MANUFACTURING_BOM_VERSION_DRAFT_REPLACE", "BomVersion", versionId, { bomId: version.bomId, replacedLineCount: version.lines.length, lines: input.lines.map(line => ({ ...line, quantity: line.quantity.toString(), scrapAllowance: line.scrapAllowance?.toString() ?? null })) })
+    const result = await tx.bomVersion.findUniqueOrThrow({ where: { id: versionId }, include: { lines: { orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }], include: { item: { select: { id: true, code: true, title: true, unit: true } }, applicability: { orderBy: { tag: "asc" } } } } } })
+    await audit(tx, actor, "MANUFACTURING_BOM_VERSION_DRAFT_REPLACE", "BomVersion", versionId, { bomId: version.bomId, replacedLineCount: version.lines.length, lines: input.lines.map(serializableBomLine) })
     await completeIdempotentRequest(tx, { actorId: actor.id, key: idempotencyKey, response: result })
     return result
   })
