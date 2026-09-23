@@ -261,6 +261,56 @@ export async function replaceDraftBomVersion(versionId: string, raw: unknown, ac
   })
 }
 
+/** Corrects a project scope only while the definition is still entirely Draft
+ * and has never been used by an order. Released history is never re-scoped. */
+export async function reassignDraftBomProject(bomId: string, raw: unknown, actor: Actor, idempotencyKey: string | null = null) {
+  const input = z.object({ projectTagId: optionalId }).parse(raw)
+  return runSerializable(async tx => {
+    const replay = await replayOrStartIdempotentRequest(tx, {
+      actorId: actor.id,
+      key: idempotencyKey,
+      action: "manufacturing.bom.reassign-project",
+      payload: { bomId, projectTagId: input.projectTagId },
+    })
+    if (replay) return replay as unknown as Awaited<ReturnType<typeof bomDetail>>
+    const bom = await tx.billOfMaterial.findUnique({
+      where: { id: bomId },
+      include: { versions: { select: { id: true, status: true, _count: { select: { productionOrders: true } } } } },
+    })
+    if (!bom) throw new ManufacturingDefinitionError("BOM_NOT_FOUND", "BOM was not found", 404)
+    if (bom.versions.some(version => version.status !== DefinitionStatus.DRAFT || version._count.productionOrders > 0)) {
+      throw new ManufacturingDefinitionError("BOM_PROJECT_IMMUTABLE", "Only wholly Draft BOMs with no production orders may be re-scoped")
+    }
+    if (input.projectTagId && !await tx.projectTag.findUnique({ where: { id: input.projectTagId }, select: { id: true } })) {
+      throw new ManufacturingDefinitionError("PROJECT_NOT_FOUND", "Project was not found", 404)
+    }
+    const updated = await tx.billOfMaterial.update({ where: { id: bomId }, data: { projectTagId: input.projectTagId } })
+    await audit(tx, actor, "MANUFACTURING_BOM_PROJECT_REASSIGN", "BillOfMaterial", bomId, { previousProjectTagId: bom.projectTagId, projectTagId: input.projectTagId })
+    const result = await tx.billOfMaterial.findUniqueOrThrow({
+      where: { id: updated.id },
+      include: {
+        item: { select: { id: true, code: true, title: true, unit: true } },
+        projectTag: { select: { id: true, name: true } },
+        versions: {
+          orderBy: { createdAt: "desc" },
+          include: {
+            lines: {
+              orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+              include: {
+                item: { select: { id: true, code: true, title: true, unit: true } },
+                applicability: { orderBy: { tag: "asc" } },
+                parentLine: { select: { id: true, sourceLineKey: true } },
+              },
+            },
+          },
+        },
+      },
+    })
+    await completeIdempotentRequest(tx, { actorId: actor.id, key: idempotencyKey, response: result })
+    return result
+  })
+}
+
 export async function createManufacturingRoute(raw: unknown, actor: Actor) {
   const input = z.object({ routeId: optionalId, itemId: optionalId, name: text, description: optionalText, revision: text, effectiveFrom: z.coerce.date().nullish().transform(value => value ?? null), effectiveTo: z.coerce.date().nullish().transform(value => value ?? null), steps: z.array(routeStepSchema).min(1).max(100).superRefine((steps, context) => {
     if (steps.filter(step => step.isSerializationPoint).length > 1) context.addIssue({ code: z.ZodIssueCode.custom, message: "A route version may have only one serialization point" })
