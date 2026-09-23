@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import { DefinitionStatus, Prisma, RecordStatus, RouteExecutionMode, RouteStepRequirementCapturePoint, RouteStepRequirementType, RouteTransitionType, SupplyMode, TrackingMode } from "@prisma/client"
 import { z } from "zod"
 import { db } from "@/lib/db"
+import { IdempotencyError, completeIdempotentRequest, replayOrStartIdempotentRequest } from "@/lib/idempotency"
 import { runSerializable } from "@/lib/transaction"
 
 type Actor = { id: string; name: string }
@@ -13,6 +14,7 @@ export class ManufacturingDefinitionError extends Error {
 
 export function manufacturingDefinitionApiError(error: unknown) {
   if (error instanceof ManufacturingDefinitionError) return Response.json({ code: error.code, error: error.message }, { status: error.status })
+  if (error instanceof IdempotencyError) return Response.json({ code: error.code, error: error.message }, { status: error.status })
   if (error instanceof z.ZodError) return Response.json({ code: "INVALID_INPUT", error: error.issues.map(issue => issue.message).join("; ") }, { status: 400 })
   if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return Response.json({ code: "CONFLICT", error: "A record with this identifier already exists" }, { status: 409 })
   if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003") return Response.json({ code: "INVALID_REFERENCE", error: "A related record was not found" }, { status: 400 })
@@ -160,11 +162,23 @@ export async function createManufacturingProfile(raw: unknown, actor: Actor) {
   })
 }
 
-export async function createBillOfMaterial(raw: unknown, actor: Actor) {
+export async function createBillOfMaterial(raw: unknown, actor: Actor, idempotencyKey: string | null = null) {
   const input = z.object({ bomId: optionalId, itemId: id, projectTagId: optionalId, name: text, revision: text, effectiveFrom: z.coerce.date().nullish().transform(value => value ?? null), effectiveTo: z.coerce.date().nullish().transform(value => value ?? null), lines: z.array(bomLineSchema).min(1).max(1000) }).parse(raw)
   validateBomHierarchy(input.lines)
   if (input.effectiveFrom && input.effectiveTo && input.effectiveTo < input.effectiveFrom) throw new ManufacturingDefinitionError("INVALID_EFFECTIVITY", "Effective end cannot precede effective start")
   return runSerializable(async tx => {
+    const replay = await replayOrStartIdempotentRequest(tx, {
+      actorId: actor.id,
+      key: idempotencyKey,
+      action: "manufacturing.bom.create",
+      payload: {
+        ...input,
+        effectiveFrom: input.effectiveFrom?.toISOString() ?? null,
+        effectiveTo: input.effectiveTo?.toISOString() ?? null,
+        lines: input.lines.map(line => ({ ...line, quantity: line.quantity.toString(), scrapAllowance: line.scrapAllowance?.toString() ?? null })),
+      },
+    })
+    if (replay) return replay as unknown as Awaited<ReturnType<typeof bomDetail>>
     const itemIds = [...new Set([input.itemId, ...input.lines.map(line => line.itemId)])]
     const found = await tx.item.findMany({ where: { id: { in: itemIds } }, select: { id: true } })
     if (found.length !== itemIds.length) throw new ManufacturingDefinitionError("ITEM_NOT_FOUND", "One or more BOM components were not found", 404)
@@ -185,7 +199,9 @@ export async function createBillOfMaterial(raw: unknown, actor: Actor) {
       await tx.bomLine.create({ data: { id: idsByKey.get(line.sourceLineKey), bomVersionId: version.id, itemId: line.itemId, parentLineId: line.parentSourceLineKey ? idsByKey.get(line.parentSourceLineKey) : null, sourceLineKey: line.sourceLineKey, quantity: line.quantity, unit: line.unit, scrapAllowance: line.scrapAllowance, consumptionRouteStepId: line.consumptionRouteStepId, notes: line.notes, sortOrder: line.sortOrder ?? index } })
     }
     await audit(tx, actor, input.bomId ? "MANUFACTURING_BOM_VERSION_CREATE" : "MANUFACTURING_BOM_CREATE", "BillOfMaterial", bom.id, { ...input, lines: input.lines.map(line => ({ ...line, quantity: line.quantity.toString(), scrapAllowance: line.scrapAllowance?.toString() ?? null })) })
-    return tx.billOfMaterial.findUniqueOrThrow({ where: { id: bom.id }, include: { versions: { include: { lines: true } } } })
+    const result = await tx.billOfMaterial.findUniqueOrThrow({ where: { id: bom.id }, include: { versions: { include: { lines: true } } } })
+    await completeIdempotentRequest(tx, { actorId: actor.id, key: idempotencyKey, response: result })
+    return result
   })
 }
 
