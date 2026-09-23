@@ -42,8 +42,11 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
         const vendor = await tx.vendor.findUnique({ where: { id: input.vendorId }, select: { id: true } })
         if (!vendor) throw new DomainError("VENDOR_NOT_FOUND", "Vendor was not found", 404)
       }
+      const url = input.url.trim()
+      const duplicate = await tx.itemSupplierLink.findUnique({ where: { itemId_url: { itemId: id, url } }, select: { id: true } })
+      if (duplicate) throw new DomainError("ITEM_SUPPLIER_LINK_EXISTS", "This supplier link is already recorded for the component", 409)
       const created = await tx.itemSupplierLink.create({ data: {
-        itemId: id, vendorId: input.vendorId || null, url: input.url.trim(),
+        itemId: id, vendorId: input.vendorId || null, url,
         supplierPartNumber: input.supplierPartNumber?.trim() || null, notes: input.notes?.trim() || null,
         isPreferred: input.isPreferred ?? false,
       }, include: { vendor: true } })

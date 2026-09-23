@@ -29,6 +29,10 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
         const vendor = await tx.vendor.findUnique({ where: { id: input.vendorId }, select: { id: true } })
         if (!vendor) throw new DomainError("VENDOR_NOT_FOUND", "Vendor was not found", 404)
       }
+      if (input.url && input.url.trim() !== existing.url) {
+        const duplicate = await tx.itemSupplierLink.findFirst({ where: { itemId: id, url: input.url.trim(), id: { not: linkId } }, select: { id: true } })
+        if (duplicate) throw new DomainError("ITEM_SUPPLIER_LINK_EXISTS", "This supplier link is already recorded for the component", 409)
+      }
       const data = {
         ...(input.vendorId !== undefined ? { vendorId: input.vendorId } : {}),
         ...(input.url !== undefined ? { url: input.url.trim() } : {}),
