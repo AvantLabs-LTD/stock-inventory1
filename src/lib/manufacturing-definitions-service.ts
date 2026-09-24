@@ -196,7 +196,8 @@ export async function manufacturingPlanningRollup() {
     bomNames: Set<string>
   }>()
   for (const version of versions) {
-    if (!version.bom.projectTag) continue
+    const project = version.bom.projectTag
+    if (!project) continue
     const children = new Map<string, typeof version.lines>()
     for (const line of version.lines) {
       if (line.parentLineId) children.set(line.parentLineId, [...(children.get(line.parentLineId) || []), line])
@@ -213,7 +214,7 @@ export async function manufacturingPlanningRollup() {
         existing.bomNames.add(version.bom.name)
       } else {
         rows.set(key, {
-          project: version.bom.projectTag,
+          project,
           category: { id: line.item.categoryId, name: category },
           item: { id: line.item.id, code: line.item.code, title: line.item.title, unit: line.item.unit },
           quantityPerBuild: requirement,
