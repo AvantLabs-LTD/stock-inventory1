@@ -50,7 +50,10 @@ export function AppSidebar() {
         <SidebarMenuItem><SidebarMenuButton isActive={current === "orders"} tooltip="Orders" onClick={() => go("orders")}><ShoppingCart className="size-4"/><span>Orders</span></SidebarMenuButton></SidebarMenuItem>
       </SidebarMenu></SidebarGroup>}
       {allowed("manufacturing.view") && <SidebarGroup><SidebarGroupLabel>Manufacturing</SidebarGroupLabel><SidebarMenu>
-        <SidebarMenuItem><SidebarMenuButton isActive={current === "manufacturing"} tooltip="Manufacturing" onClick={() => go("manufacturing")}><Factory className="size-4"/><span>Production definitions</span></SidebarMenuButton></SidebarMenuItem>
+        <SidebarMenuItem><SidebarMenuButton isActive={current === "manufacturing"} tooltip="Manufacturing overview" onClick={() => go("manufacturing")}><Factory className="size-4"/><span>Overview</span></SidebarMenuButton></SidebarMenuItem>
+        <SidebarMenuItem><SidebarMenuButton isActive={current === "manufacturing-boms" || current === "manufacturing-bom-detail"} tooltip="BOM register" onClick={() => go("manufacturing-boms")}><ClipboardList className="size-4"/><span>BOM register</span></SidebarMenuButton></SidebarMenuItem>
+        <SidebarMenuItem><SidebarMenuButton isActive={current === "manufacturing-projects" || current === "manufacturing-project-detail"} tooltip="Manufacturing projects" onClick={() => go("manufacturing-projects")}><Package className="size-4"/><span>Projects</span></SidebarMenuButton></SidebarMenuItem>
+        <SidebarMenuItem><SidebarMenuButton isActive={current === "manufacturing-planning"} tooltip="Production planning" onClick={() => go("manufacturing-planning")}><Gauge className="size-4"/><span>Production planning</span></SidebarMenuButton></SidebarMenuItem>
       </SidebarMenu></SidebarGroup>}
       <SidebarGroup><SidebarGroupLabel>Planned modules</SidebarGroupLabel><SidebarMenu>
         <SidebarMenuItem><SidebarMenuButton isActive={current === "people"} tooltip="People · HR" onClick={() => go("people")}><Users className="size-4"/><span>People <span className="text-xs text-muted-foreground">planned</span></span></SidebarMenuButton></SidebarMenuItem>

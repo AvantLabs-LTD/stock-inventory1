@@ -165,6 +165,75 @@ export async function routeDetail(id: string) {
   return route
 }
 
+/**
+ * A read-only per-build material roll-up for active project BOMs. Quantities
+ * are derived through the accepted hierarchy; this is intentionally not a
+ * stock allocation or a production-plan quantity.
+ */
+export async function manufacturingPlanningRollup() {
+  const versions = await db.bomVersion.findMany({
+    where: { status: DefinitionStatus.ACTIVE, bom: { status: RecordStatus.ACTIVE, projectTagId: { not: null } } },
+    include: {
+      bom: { include: { projectTag: { select: { id: true, name: true } } } },
+      lines: {
+        include: {
+          item: {
+            include: {
+              category: { select: { id: true, name: true, parent: { select: { id: true, name: true } } } },
+            },
+          },
+        },
+      },
+    },
+    orderBy: [{ bom: { projectTag: { name: "asc" } } }, { bom: { name: "asc" } }],
+  })
+  const rows = new Map<string, {
+    project: { id: string; name: string }
+    category: { id: string | null; name: string }
+    item: { id: string; code: string; title: string; unit: string }
+    quantityPerBuild: Prisma.Decimal
+    bomCount: number
+    bomNames: Set<string>
+  }>()
+  for (const version of versions) {
+    if (!version.bom.projectTag) continue
+    const children = new Map<string, typeof version.lines>()
+    for (const line of version.lines) {
+      if (line.parentLineId) children.set(line.parentLineId, [...(children.get(line.parentLineId) || []), line])
+    }
+    const visit = (line: typeof version.lines[number], multiplier: Prisma.Decimal) => {
+      const requirement = multiplier.mul(line.quantity)
+      const category = line.item.category?.parent?.name
+        ? `${line.item.category.parent.name} / ${line.item.category.name}`
+        : line.item.category?.name || "Uncategorised"
+      const key = [version.bom.projectTagId, line.item.categoryId || "none", line.itemId].join(":")
+      const existing = rows.get(key)
+      if (existing) {
+        existing.quantityPerBuild = existing.quantityPerBuild.plus(requirement)
+        existing.bomNames.add(version.bom.name)
+      } else {
+        rows.set(key, {
+          project: version.bom.projectTag,
+          category: { id: line.item.categoryId, name: category },
+          item: { id: line.item.id, code: line.item.code, title: line.item.title, unit: line.item.unit },
+          quantityPerBuild: requirement,
+          bomCount: 1,
+          bomNames: new Set([version.bom.name]),
+        })
+      }
+      for (const child of children.get(line.id) || []) visit(child, requirement)
+    }
+    for (const root of version.lines.filter(line => !line.parentLineId)) visit(root, new Prisma.Decimal(1))
+  }
+  return {
+    generatedAt: new Date().toISOString(),
+    basis: "Quantities required to build one output of each active BOM; stock, allocations, purchase coverage, and future production-plan quantities are excluded.",
+    rows: [...rows.values()]
+      .map(row => ({ ...row, quantityPerBuild: row.quantityPerBuild.toString(), bomCount: row.bomNames.size, bomNames: [...row.bomNames].sort() }))
+      .sort((left, right) => left.project.name.localeCompare(right.project.name) || left.category.name.localeCompare(right.category.name) || left.item.title.localeCompare(right.item.title)),
+  }
+}
+
 export async function createManufacturingProfile(raw: unknown, actor: Actor) {
   const input = z.object({ itemId: id, supplyMode: z.nativeEnum(SupplyMode), trackingMode: z.nativeEnum(TrackingMode).default(TrackingMode.QUANTITY), defaultBomVersionId: optionalId, defaultRouteVersionId: optionalId, traceInFinishedProduct: z.boolean().default(false) }).parse(raw)
   return runSerializable(async tx => {

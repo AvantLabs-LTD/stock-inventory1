@@ -51,7 +51,9 @@ function PageContent() {
     "cargo-tracking": "cargo.view", "cargo-finance": "cargo.costs.view",
     "cargo-management": "cargo.view", "cargo-reports": "cargo.view",
     orders: "orders.view",
-    manufacturing: "manufacturing.view",
+    manufacturing: "manufacturing.view", "manufacturing-boms": "manufacturing.view", "manufacturing-bom-detail": "manufacturing.view",
+    "manufacturing-routes": "manufacturing.view", "manufacturing-route-detail": "manufacturing.view",
+    "manufacturing-projects": "manufacturing.view", "manufacturing-project-detail": "manufacturing.view", "manufacturing-planning": "manufacturing.view",
   }
   if (required[currentPage] && !permissions.includes(required[currentPage])) {
     return <div className="p-8 text-sm text-muted-foreground">You do not have access to this section.</div>
@@ -67,7 +69,14 @@ function PageContent() {
     case 'cargo-management': return <CargoPage />
     case 'cargo-reports': return <CargoPage />
     case 'orders': return <OrdersPage />
-    case 'manufacturing': return <ManufacturingPage />
+    case 'manufacturing':
+    case 'manufacturing-boms':
+    case 'manufacturing-bom-detail':
+    case 'manufacturing-routes':
+    case 'manufacturing-route-detail':
+    case 'manufacturing-projects':
+    case 'manufacturing-project-detail':
+    case 'manufacturing-planning': return <ManufacturingPage />
     case 'people': return <PlannedModule name="People" />
     case 'ledger': return <PlannedModule name="Ledger" />
     case 'items':

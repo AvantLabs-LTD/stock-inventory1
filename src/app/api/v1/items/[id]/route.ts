@@ -29,6 +29,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
   const item = await db.item.findUnique({ where: { id }, include: {
     balance: true, category: { include: { parent: true } },
     supplierLinks: { include: { vendor: true }, orderBy: [{ isPreferred: "desc" }, { createdAt: "asc" }] },
+    priceHistory: { include: { vendor: { select: { id: true, name: true } }, recordedBy: { select: { id: true, name: true } } }, orderBy: [{ effectiveAt: "desc" }, { createdAt: "desc" }], take: 50 },
     demandLines: { include: { demand: true, vendor: true, projectTag: true, suggestedCategory: true }, orderBy: { createdAt: "desc" }, take: 100 },
     purchaseLines: { include: { purchaseRequest: { include: { vendor: true } } }, orderBy: { createdAt: "desc" }, take: 100 },
   } })

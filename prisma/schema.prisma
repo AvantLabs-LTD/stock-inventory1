@@ -219,6 +219,13 @@ enum RouteStepRequirementCapturePoint {
   TRANSITION
 }
 
+enum ItemPriceSource {
+  MANUAL
+  GOODS_RECEIPT
+  QUOTATION
+  SUPPLIER_CATALOGUE
+}
+
 model User {
   id                           String                    @id @default(cuid())
   email                        String                    @unique
@@ -267,6 +274,7 @@ model User {
   productionPlansCreated       ProductionPlan[]          @relation("ProductionPlanCreatedBy")
   productionOrdersCreated      ProductionOrder[]         @relation("ProductionOrderCreatedBy")
   productionOrdersReleased     ProductionOrder[]         @relation("ProductionOrderReleasedBy")
+  itemPricesRecorded           ItemPriceRecord[]         @relation("ItemPriceRecordedBy")
 }
 
 model ServiceToken {
@@ -426,6 +434,7 @@ model Vendor {
   cargoPackages     CargoPackage[]
   procurementOrders ProcurementOrder[]
   supplierLinks     ItemSupplierLink[]
+  itemPrices        ItemPriceRecord[]
 
   @@index([name])
   @@map("vendors")
@@ -472,6 +481,7 @@ model Item {
   manufacturedBoms          BillOfMaterial[]           @relation("BillOfMaterialOutputItem")
   bomComponentLines         BomLine[]                  @relation("BomLineComponentItem")
   manufacturingRoutes       ManufacturingRoute[]
+  priceHistory              ItemPriceRecord[]
 
   @@index([title])
   @@index([categoryId, status])
@@ -511,6 +521,30 @@ model ItemSupplierLink {
   @@index([vendorId])
   @@index([itemId, isPreferred])
   @@map("item_supplier_links")
+}
+
+/// Immutable price evidence for a catalogue component. A price records what
+/// was observed or agreed at a point in time; it never changes stock or
+/// overwrites a current-item cost field.
+model ItemPriceRecord {
+  id           String          @id @default(cuid())
+  itemId       String
+  vendorId     String?
+  amount       Decimal         @db.Decimal(18, 4)
+  currency     String          @db.VarChar(3)
+  source       ItemPriceSource @default(MANUAL)
+  effectiveAt  DateTime        @default(now())
+  reference    String?
+  notes        String?
+  recordedById String
+  createdAt    DateTime        @default(now())
+  item         Item            @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  vendor       Vendor?         @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  recordedBy   User            @relation("ItemPriceRecordedBy", fields: [recordedById], references: [id], onDelete: Restrict)
+
+  @@index([itemId, effectiveAt])
+  @@index([vendorId, effectiveAt])
+  @@map("item_price_records")
 }
 
 // Manufacturing definitions are optional Item configuration. Purchased items
