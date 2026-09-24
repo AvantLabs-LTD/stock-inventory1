@@ -133,7 +133,14 @@ export async function bomDetail(id: string) {
           lines: {
             orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
             include: {
-              item: { select: { id: true, code: true, title: true, unit: true } },
+              item: { select: {
+                id: true, code: true, title: true, unit: true, discipline: true, specification: true, description: true,
+                manufacturerName: true, manufacturerPartNumber: true, supplierPartNumber: true, function: true, link: true,
+                optionSelection: true, remarks: true, catalogueState: true, status: true, categoryId: true,
+                category: { select: { id: true, name: true, discipline: true, parentId: true } },
+                balance: { select: { onHand: true, reserved: true } },
+                purchaseLines: { take: 5, orderBy: { createdAt: "desc" }, select: { quantity: true, purchaseRequest: { select: { id: true, requestNo: true, status: true } } } },
+              } },
               applicability: { orderBy: { tag: "asc" } },
               parentLine: { select: { id: true, sourceLineKey: true } },
               consumptionRouteStep: { select: { id: true, sequence: true, operation: { select: { code: true, name: true } } } },

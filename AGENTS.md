@@ -644,3 +644,50 @@ Before implementing a feature:
 Prefer the smallest coherent change that advances this contract. Do not combine unrelated refactors, visual redesigns, reports, notifications, or infrastructure changes with a domain fix unless they are necessary for correctness.
 
 When a business rule is genuinely ambiguous and materially changes stored data or workflow behaviour, stop and ask. Do not resolve ambiguity by creating another mutable status or counter.
+
+## 25. API-client use and cross-repository boundary
+
+The adjacent `D:\CSD Software\Store\api-client` repository is the approved
+automation client for this portal. Before using or changing it, read its own
+`AGENTS.md`.
+
+- Use the client only through same-origin `/api/...` endpoints; never connect
+  an automation script directly to PostgreSQL or import application internals.
+- Do not read, print, commit, or request the contents of
+  `api-client/.env.local`. It contains local operator credentials.
+- Prefer named read-only client commands. Generic API writes require explicit
+  `--confirm-write`, and consequential endpoint retries must reuse their
+  idempotency key only when the server supports that protocol.
+- Use the API client for read-only deployment verification (health and versioned
+  GET endpoints) when the local Compose database is unavailable. A successful
+  health check is not a substitute for migration, authorization, or workflow
+  tests.
+- The client configures stdout as UTF-8 where possible because live catalogue
+  and BOM content can contain Unicode. Preserve that behavior when changing its
+  output path.
+
+## 26. Manufacturing handoff — 2026-09-24
+
+The first Manufacturing UI and pricing slice is implemented and must be
+extended rather than replaced:
+
+- URL-backed Manufacturing routes now cover overview, BOM register/detail,
+  project register/detail, and planning. Detail routes use the app-store URL
+  registry and must remain shareable through refresh, Back, and Forward.
+- BOM register separates Draft, Active, and Retired revisions. The detail grid
+  shows hierarchy and source evidence. Draft editing is atomic for the whole
+  revision, but intentionally keeps component identity fixed for now.
+- `GET /api/v1/manufacturing/planning/rollup` is a read-only active-BOM roll-up
+  by project, catalogue category, and component. Its quantities are **per one
+  output build** and exclude stock, reservations, purchase coverage, and future
+  cycle/plan quantities. Do not present it as a stock deficit or production
+  plan until canonical manufacturing cycles exist.
+- `ItemPriceRecord` is immutable price evidence. Migration
+  `20260924103000_item_price_history` adds manual, quotation, supplier-catalogue,
+  and goods-receipt source types. It does not overwrite receipt facts or move
+  stock. The catalogue item editor uses `/api/v1/items/:id/prices` for history.
+- The next Manufacturing slice is source-document/reconciliation provenance and
+  a full BOM grid (component picker, add/remove rows, TSV paste, revision
+  cloning). After that, connect production plans/cycles to canonical reservation,
+  allocation, issue, deficit, blocker, and purchase-coverage facts; do not let
+  `ProductionOrder` become a parallel mutable demand source.
