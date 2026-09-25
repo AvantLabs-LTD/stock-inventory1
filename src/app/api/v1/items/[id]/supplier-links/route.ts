@@ -8,6 +8,8 @@ const supplierLinkSchema = z.object({
   vendorId: z.string().cuid().nullable().optional(),
   url: z.string().url().max(2000).refine(value => /^https?:\/\//i.test(value), "Supplier links must use http or https"),
   supplierPartNumber: z.string().max(250).nullable().optional(),
+  description: z.string().max(2000).nullable().optional(),
+  optionSelection: z.string().max(1000).nullable().optional(),
   notes: z.string().max(2000).nullable().optional(),
   isPreferred: z.boolean().optional(),
 }).strict()
@@ -47,7 +49,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       if (duplicate) throw new DomainError("ITEM_SUPPLIER_LINK_EXISTS", "This supplier link is already recorded for the component", 409)
       const created = await tx.itemSupplierLink.create({ data: {
         itemId: id, vendorId: input.vendorId || null, url,
-        supplierPartNumber: input.supplierPartNumber?.trim() || null, notes: input.notes?.trim() || null,
+        supplierPartNumber: input.supplierPartNumber?.trim() || null, description: input.description?.trim() || null, optionSelection: input.optionSelection?.trim() || null, notes: input.notes?.trim() || null,
         isPreferred: input.isPreferred ?? false,
       }, include: { vendor: true } })
       await tx.auditLog.create({ data: {

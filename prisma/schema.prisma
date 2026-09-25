@@ -510,6 +510,8 @@ model ItemSupplierLink {
   vendorId           String?
   url                String
   supplierPartNumber String?
+  description        String?
+  optionSelection    String?
   notes              String?
   isPreferred        Boolean  @default(false)
   createdAt          DateTime @default(now())

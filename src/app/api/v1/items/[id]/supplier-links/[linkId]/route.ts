@@ -8,6 +8,8 @@ const updateSchema = z.object({
   vendorId: z.string().cuid().nullable().optional(),
   url: z.string().url().max(2000).refine(value => /^https?:\/\//i.test(value), "Supplier links must use http or https").optional(),
   supplierPartNumber: z.string().max(250).nullable().optional(),
+  description: z.string().max(2000).nullable().optional(),
+  optionSelection: z.string().max(1000).nullable().optional(),
   notes: z.string().max(2000).nullable().optional(),
   isPreferred: z.boolean().optional(),
 }).strict().refine(value => Object.keys(value).length > 0, "At least one editable field is required")
@@ -37,6 +39,8 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
         ...(input.vendorId !== undefined ? { vendorId: input.vendorId } : {}),
         ...(input.url !== undefined ? { url: input.url.trim() } : {}),
         ...(input.supplierPartNumber !== undefined ? { supplierPartNumber: input.supplierPartNumber?.trim() || null } : {}),
+        ...(input.description !== undefined ? { description: input.description?.trim() || null } : {}),
+        ...(input.optionSelection !== undefined ? { optionSelection: input.optionSelection?.trim() || null } : {}),
         ...(input.notes !== undefined ? { notes: input.notes?.trim() || null } : {}),
         ...(input.isPreferred !== undefined ? { isPreferred: input.isPreferred } : {}),
       }
