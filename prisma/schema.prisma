@@ -275,6 +275,8 @@ model User {
   productionOrdersCreated      ProductionOrder[]         @relation("ProductionOrderCreatedBy")
   productionOrdersReleased     ProductionOrder[]         @relation("ProductionOrderReleasedBy")
   itemPricesRecorded           ItemPriceRecord[]         @relation("ItemPriceRecordedBy")
+  alternativeGroupsCreated     ItemAlternativeGroup[]
+  itemMergesPerformed          ItemMerge[]               @relation("ItemMergePerformedBy")
 }
 
 model ServiceToken {
@@ -482,6 +484,9 @@ model Item {
   bomComponentLines         BomLine[]                  @relation("BomLineComponentItem")
   manufacturingRoutes       ManufacturingRoute[]
   priceHistory              ItemPriceRecord[]
+  alternativeMemberships    ItemAlternativeMembership[]
+  mergeSources              ItemMerge[]                @relation("ItemMergeSource")
+  mergeTargets              ItemMerge[]                @relation("ItemMergeTarget")
 
   @@index([title])
   @@index([categoryId, status])
@@ -489,6 +494,56 @@ model Item {
   @@index([supplierPartNumber])
   @@index([status])
   @@map("items")
+}
+
+/// Explicit, manager-curated substitution group. Similarity scoring is a UI
+/// discovery aid and is intentionally not stored here.
+model ItemAlternativeGroup {
+  id          String                      @id @default(cuid())
+  name        String
+  description String?
+  createdById String
+  createdAt   DateTime                    @default(now())
+  updatedAt   DateTime                    @updatedAt
+  createdBy   User                        @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  memberships ItemAlternativeMembership[]
+
+  @@unique([name])
+  @@map("item_alternative_groups")
+}
+
+model ItemAlternativeMembership {
+  groupId   String
+  itemId    String
+  createdAt DateTime              @default(now())
+  group     ItemAlternativeGroup  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  item      Item                   @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@id([groupId, itemId])
+  @@index([itemId])
+  @@map("item_alternative_memberships")
+}
+
+/// Records a corrective consolidation without rewriting historical stock,
+/// receipt, or order evidence that belongs to the source component.
+model ItemMerge {
+  id             String   @id @default(cuid())
+  sourceItemId   String
+  targetItemId   String
+  moveBalance    Boolean  @default(false)
+  moveBomLines   Boolean  @default(false)
+  moveOpenDemand Boolean  @default(false)
+  moveOpenPurchases Boolean @default(false)
+  remarks        String?
+  mergedById     String
+  mergedAt       DateTime @default(now())
+  sourceItem     Item     @relation("ItemMergeSource", fields: [sourceItemId], references: [id], onDelete: Restrict)
+  targetItem     Item     @relation("ItemMergeTarget", fields: [targetItemId], references: [id], onDelete: Restrict)
+  mergedBy       User     @relation("ItemMergePerformedBy", fields: [mergedById], references: [id], onDelete: Restrict)
+
+  @@unique([sourceItemId])
+  @@index([targetItemId])
+  @@map("item_merges")
 }
 
 model ItemBalance {
