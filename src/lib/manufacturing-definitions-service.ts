@@ -242,6 +242,48 @@ export async function manufacturingPlanningRollup() {
   }
 }
 
+/** A read-only scenario analysis. It stores no plan facts: callers supply the
+ * project quantities and the response is always derived from active BOMs and
+ * immutable price evidence. Other planning insights can reuse this input. */
+export async function manufacturingPlanningAnalysis(raw: unknown) {
+  const input = z.object({ projects: z.array(z.object({ projectTagId: id, quantity: z.coerce.number().positive().max(1_000_000) })).min(1).max(100) }).parse(raw)
+  const selected = new Map(input.projects.map(row => [row.projectTagId, new Prisma.Decimal(row.quantity)]))
+  if (selected.size !== input.projects.length) throw new ManufacturingDefinitionError("DUPLICATE_PROJECT", "Select each project only once")
+  const versions = await db.bomVersion.findMany({
+    where: { status: DefinitionStatus.ACTIVE, bom: { status: RecordStatus.ACTIVE, projectTagId: { in: [...selected.keys()] } } },
+    include: { bom: { include: { projectTag: { select: { id: true, name: true } } } }, lines: { include: { item: { include: { category: { select: { id: true, name: true } }, priceHistory: { orderBy: [{ effectiveAt: "desc" }, { createdAt: "desc" }], take: 1 } } } } } },
+  })
+  const rows = new Map<string, { item: typeof versions[number]["lines"][number]["item"]; quantity: Prisma.Decimal; projects: Map<string, Prisma.Decimal>; bomNames: Set<string> }>()
+  for (const version of versions) {
+    const project = version.bom.projectTag
+    if (!project) continue
+    const buildQuantity = selected.get(project.id)
+    if (!buildQuantity) continue
+    const children = new Map<string, typeof version.lines>()
+    for (const line of version.lines) if (line.parentLineId) children.set(line.parentLineId, [...(children.get(line.parentLineId) || []), line])
+    const visit = (line: typeof version.lines[number], multiplier: Prisma.Decimal) => {
+      const required = multiplier.mul(line.quantity)
+      const descendants = children.get(line.id) || []
+      if (descendants.length) { descendants.forEach(child => visit(child, required)); return }
+      const existing = rows.get(line.itemId) || { item: line.item, quantity: new Prisma.Decimal(0), projects: new Map(), bomNames: new Set() }
+      existing.quantity = existing.quantity.plus(required)
+      existing.projects.set(project.name, existing.projects.get(project.name)?.plus(required) || required)
+      existing.bomNames.add(version.bom.name)
+      rows.set(line.itemId, existing)
+    }
+    version.lines.filter(line => !line.parentLineId).forEach(line => visit(line, buildQuantity))
+  }
+  const totals = new Map<string, Prisma.Decimal>(), missingPrices: string[] = []
+  const materials = [...rows.values()].map(row => {
+    const price = row.item.priceHistory[0] || null
+    const extendedCost = price ? row.quantity.mul(price.amount) : null
+    if (extendedCost && price) totals.set(price.currency, totals.get(price.currency)?.plus(extendedCost) || extendedCost)
+    if (!price) missingPrices.push(row.item.title)
+    return { item: { id: row.item.id, code: row.item.code, title: row.item.title, unit: row.item.unit, category: row.item.category }, quantity: row.quantity.toString(), projectQuantities: [...row.projects.entries()].map(([project, quantity]) => ({ project, quantity: quantity.toString() })), bomNames: [...row.bomNames].sort(), latestPrice: price ? { amount: price.amount.toString(), currency: price.currency, effectiveAt: price.effectiveAt.toISOString(), source: price.source } : null, extendedCost: extendedCost?.toString() || null }
+  }).sort((a, b) => (a.item.category?.name || "").localeCompare(b.item.category?.name || "") || a.item.title.localeCompare(b.item.title))
+  return { basis: "Leaf components of active project BOMs. Quantities are recursively derived for the selected project build quantities; costs use each component’s latest immutable price record and are never converted across currencies.", selections: input.projects, materials, totals: [...totals.entries()].map(([currency, amount]) => ({ currency, amount: amount.toString() })), missingPrices }
+}
+
 export async function createManufacturingProfile(raw: unknown, actor: Actor) {
   const input = z.object({ itemId: id, supplyMode: z.nativeEnum(SupplyMode), trackingMode: z.nativeEnum(TrackingMode).default(TrackingMode.QUANTITY), defaultBomVersionId: optionalId, defaultRouteVersionId: optionalId, traceInFinishedProduct: z.boolean().default(false) }).parse(raw)
   return runSerializable(async tx => {
@@ -259,6 +301,34 @@ export async function createManufacturingProfile(raw: unknown, actor: Actor) {
     await audit(tx, actor, "MANUFACTURING_PROFILE_SAVE", "ManufacturingProfile", profile.id, input)
     return profile
   })
+}
+
+/** Publish reviewed sandbox deltas as new drafts, never mutate accepted lines. */
+export async function commitPlanningChanges(raw: unknown, actor: Actor, key: string) {
+  const input=z.object({note:z.string().trim().min(1).max(2000),revisions:z.array(z.object({versionId:id,lines:z.array(bomLineSchema).min(1).max(1000)})).min(1).max(30)}).parse(raw)
+  if(new Set(input.revisions.map(row=>row.versionId)).size!==input.revisions.length)throw new ManufacturingDefinitionError("DUPLICATE_BOM","Select each BOM once")
+  for(const revision of input.revisions)validateBomHierarchy(revision.lines)
+  return runSerializable(async tx=>{
+    const payload={note:input.note,revisions:input.revisions.map(row=>({...row,lines:row.lines.map(serializableBomLine)}))}
+    const replay=await replayOrStartIdempotentRequest(tx,{actorId:actor.id,key,action:"planning.commit",payload})
+    if(replay)return replay
+    const created:Array<{id:string;bomId:string;revision:string}>=[]
+    for(const change of input.revisions){
+      const base=await tx.bomVersion.findUnique({where:{id:change.versionId},include:{bom:true}})
+      if(!base||base.status!=="ACTIVE")throw new ManufacturingDefinitionError("BOM_CHANGED","The source BOM is no longer active. Refresh and review the new revision before committing.",409)
+      const itemIds=[...new Set(change.lines.map(line=>line.itemId))]
+      const items=await tx.item.findMany({where:{id:{in:itemIds}},select:{id:true,unit:true}})
+      if(items.length!==itemIds.length)throw new ManufacturingDefinitionError("ITEM_NOT_FOUND","A component is no longer available")
+      if(change.lines.some(line=>line.unit&&line.unit!==items.find(item=>item.id===line.itemId)?.unit))throw new ManufacturingDefinitionError("UNIT_MISMATCH","Reconcile component units before committing")
+      const version=await tx.bomVersion.create({data:{bomId:base.bomId,revision:`scenario-${randomUUID()}`,createdById:actor.id}})
+      const ids=new Map(change.lines.map(line=>[line.sourceLineKey,randomUUID()]))
+      const depth=(line:typeof change.lines[number])=>{let count=0,parent=line.parentSourceLineKey;while(parent){count++;parent=change.lines.find(row=>row.sourceLineKey===parent)!.parentSourceLineKey}return count}
+      for(const line of [...change.lines].sort((a,b)=>depth(a)-depth(b)))await tx.bomLine.create({data:{id:ids.get(line.sourceLineKey),bomVersionId:version.id,itemId:line.itemId,parentLineId:line.parentSourceLineKey?ids.get(line.parentSourceLineKey):null,sourceLineKey:line.sourceLineKey,quantity:line.quantity,unit:line.unit,notes:line.notes,sortOrder:line.sortOrder??0,scrapAllowance:line.scrapAllowance,consumptionRouteStepId:line.consumptionRouteStepId,applicability:{create:line.applicability}}})
+      await audit(tx,actor,"PLANNING_BOM_DRAFT_CREATE","BomVersion",version.id,{baseVersionId:base.id,note:input.note,lines:change.lines.map(serializableBomLine)})
+      created.push({id:version.id,bomId:version.bomId,revision:version.revision})
+    }
+    const result={revisions:created};await completeIdempotentRequest(tx,{actorId:actor.id,key,response:result});return result
+  },{timeout:30000})
 }
 
 export async function createBillOfMaterial(raw: unknown, actor: Actor, idempotencyKey: string | null = null) {
