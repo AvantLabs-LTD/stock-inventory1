@@ -1,6 +1,6 @@
 "use client"
 
-import { Boxes, ClipboardList, Package, ShoppingCart, Users, Wallet } from "lucide-react"
+import { Boxes, ClipboardList, Factory, Package, ShoppingCart, Users, Wallet } from "lucide-react"
 import { useAuthStore } from "@/stores/auth-store"
 import { useAppStore, type AppPage } from "@/stores/app-store"
 import { PageHeader } from "@/components/shared/page-header"
@@ -10,6 +10,7 @@ const modules: Array<{ page: AppPage; title: string; subtitle: string; icon: typ
   { page: "dashboard", title: "Vault", subtitle: "Inventory, stock movements and demands", icon: Boxes, permission: "vault.overview.view", available: true },
   { page: "cargo", title: "Cargo", subtitle: "Packages and shipment journeys", icon: Package, permission: "cargo.view", available: true },
   { page: "orders", title: "Orders", subtitle: "Procurement", icon: ShoppingCart, permission: "orders.view", available: true },
+  { page: "manufacturing", title: "Manufacturing", subtitle: "BOM definitions and production planning", icon: Factory, permission: "manufacturing.view", available: true },
   { page: "people", title: "People", subtitle: "HR", icon: Users, available: false },
   { page: "ledger", title: "Ledger", subtitle: "Finance", icon: Wallet, available: false },
 ]
