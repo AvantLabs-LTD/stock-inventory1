@@ -139,6 +139,7 @@ export async function bomDetail(id: string) {
                 optionSelection: true, remarks: true, catalogueState: true, status: true, categoryId: true,
                 category: { select: { id: true, name: true, discipline: true, parentId: true } },
                 balance: { select: { onHand: true, reserved: true } },
+                alternativeMemberships: { select: { group: { select: { id: true, name: true, memberships: { where: { item: { status: "ACTIVE" } }, select: { item: { select: { id: true, code: true, title: true } } } } } } } },
                 purchaseLines: { take: 5, orderBy: { createdAt: "desc" }, select: { quantity: true, purchaseRequest: { select: { id: true, requestNo: true, status: true } } } },
               } },
               applicability: { orderBy: { tag: "asc" } },

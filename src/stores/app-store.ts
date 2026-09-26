@@ -14,6 +14,7 @@ export type AppPage =
   | 'ledger'
   | 'dashboard'
   | 'items'
+  | 'item-simplification'
   | 'demands'
   | 'demand-detail'
   | 'purchasing'
@@ -29,13 +30,14 @@ export type AppPage =
   | 'manufacturing-projects'
   | 'manufacturing-project-detail'
   | 'manufacturing-planning'
+  | 'manufacturing-bom-optimization'
 
 export const pagePaths: Record<AppPage, string> = {
   flux: '/', cargo: '/cargo', 'cargo-shipments': '/cargo/shipments',
   'cargo-packages': '/cargo/packages', 'cargo-tracking': '/cargo/tracking',
   'cargo-finance': '/cargo/finance', 'cargo-management': '/cargo/management',
   'cargo-reports': '/cargo/reports', orders: '/orders', people: '/people', ledger: '/ledger',
-  dashboard: '/vault', items: '/vault/inventory', demands: '/vault/demands', 'demand-detail': '/vault/demands',
+  dashboard: '/vault', items: '/vault/inventory', 'item-simplification': '/vault/item-simplification', demands: '/vault/demands', 'demand-detail': '/vault/demands',
   purchasing: '/vault/legacy-purchasing', 'purchase-detail': '/vault/purchases', inventory: '/vault/movements',
   'reference-data': '/flux/admin/reference-data', users: '/flux/admin/users',
   manufacturing: '/manufacturing',
@@ -43,6 +45,7 @@ export const pagePaths: Record<AppPage, string> = {
   'manufacturing-routes': '/manufacturing/routes', 'manufacturing-route-detail': '/manufacturing/routes',
   'manufacturing-projects': '/manufacturing/projects', 'manufacturing-project-detail': '/manufacturing/projects',
   'manufacturing-planning': '/manufacturing/planning',
+  'manufacturing-bom-optimization': '/manufacturing/bom-optimization',
 }
 
 export function pageFromPath(pathname: string): AppPage {
@@ -51,6 +54,8 @@ export function pageFromPath(pathname: string): AppPage {
   if (/^\/cargo\/shipments\/[^/]+$/.test(path)) return 'cargo-shipments'
   if (/^\/cargo\/packages\/[^/]+$/.test(path)) return 'cargo-packages'
   if (/^\/vault\/demands\/[^/]+$/.test(path)) return 'demand-detail'
+  if (path === '/vault/item-simplification') return 'item-simplification'
+  if (path === '/manufacturing/bom-optimization') return 'manufacturing-bom-optimization'
   if (/^\/vault\/purchases\/[^/]+$/.test(path)) return 'purchase-detail'
   if (/^\/manufacturing\/boms\/[^/]+$/.test(path)) return 'manufacturing-bom-detail'
   if (/^\/manufacturing\/routes\/[^/]+$/.test(path)) return 'manufacturing-route-detail'

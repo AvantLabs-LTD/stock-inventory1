@@ -16,6 +16,7 @@ import { FluxHome, PlannedModule } from "@/components/layout/flux-home"
 
 const OverviewPage = dynamic(() => import("@/components/streamlined/pages").then(module => module.OverviewPage), { loading: () => <LoadingScreen /> })
 const ItemsPage = dynamic(() => import("@/components/streamlined/pages").then(module => module.ItemsPage), { loading: () => <LoadingScreen /> })
+const ItemSimplificationPage = dynamic(() => import("@/components/streamlined/item-simplification-page").then(module => module.ItemSimplificationPage), { loading: () => <LoadingScreen /> })
 const InventoryPage = dynamic(() => import("@/components/streamlined/pages").then(module => module.InventoryPage), { loading: () => <LoadingScreen /> })
 const ReferenceDataPage = dynamic(() => import("@/components/streamlined/pages").then(module => module.ReferenceDataPage), { loading: () => <LoadingScreen /> })
 const DemandsPage = dynamic(() => import("@/components/streamlined/demand-purchase-pages").then(module => module.DemandsPage), { loading: () => <LoadingScreen /> })
@@ -44,7 +45,7 @@ function PageContent() {
   const permissions = useAuthStore(state => state.user?.permissions || [])
 
   const required: Partial<Record<typeof currentPage, string>> = {
-    dashboard: "vault.overview.view", items: "vault.catalogue.view", demands: "vault.demands.view", "demand-detail": "vault.demands.view",
+    dashboard: "vault.overview.view", items: "vault.catalogue.view", "item-simplification": "vault.catalogue.manage", demands: "vault.demands.view", "demand-detail": "vault.demands.view",
     inventory: "vault.stock.view", purchasing: "vault.purchasing.view", "purchase-detail": "vault.purchasing.view",
     users: "flux.users.manage", "reference-data": "vault.reference.manage",
     cargo: "cargo.view", "cargo-shipments": "cargo.view", "cargo-packages": "cargo.view",
@@ -53,7 +54,7 @@ function PageContent() {
     orders: "orders.view",
     manufacturing: "manufacturing.view", "manufacturing-boms": "manufacturing.view", "manufacturing-bom-detail": "manufacturing.view",
     "manufacturing-routes": "manufacturing.view", "manufacturing-route-detail": "manufacturing.view",
-    "manufacturing-projects": "manufacturing.view", "manufacturing-project-detail": "manufacturing.view", "manufacturing-planning": "manufacturing.view",
+    "manufacturing-projects": "manufacturing.view", "manufacturing-project-detail": "manufacturing.view", "manufacturing-planning": "manufacturing.view", "manufacturing-bom-optimization": "manufacturing.view",
   }
   if (required[currentPage] && !permissions.includes(required[currentPage])) {
     return <div className="p-8 text-sm text-muted-foreground">You do not have access to this section.</div>
@@ -77,10 +78,12 @@ function PageContent() {
     case 'manufacturing-projects':
     case 'manufacturing-project-detail':
     case 'manufacturing-planning': return <ManufacturingPage />
+    case 'manufacturing-bom-optimization': return <ManufacturingPage />
     case 'people': return <PlannedModule name="People" />
     case 'ledger': return <PlannedModule name="Ledger" />
     case 'items':
       return <ItemsPage />
+    case 'item-simplification': return <ItemSimplificationPage />
     case 'demands':
     case 'demand-detail':
       return <DemandsPage />

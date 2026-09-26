@@ -1,6 +1,6 @@
 "use client"
 
-import { Boxes, ClipboardList, Factory, Gauge, Package, Settings2, ShoppingCart, Truck, Users, Wallet, Warehouse } from "lucide-react"
+import { Boxes, ClipboardList, Factory, Gauge, GitCompareArrows, Package, Settings2, ShoppingCart, Truck, Users, Wallet, Warehouse } from "lucide-react"
 import { useAuthStore } from "@/stores/auth-store"
 import { useAppStore, type AppPage } from "@/stores/app-store"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -11,6 +11,7 @@ type NavItem = { title: string; page: AppPage; permission: string; icon: React.E
 const vaultItems: NavItem[] = [
   { title: "Overview", page: "dashboard", permission: "vault.overview.view", icon: Gauge },
   { title: "Inventory", page: "items", permission: "vault.catalogue.view", icon: Boxes },
+  { title: "Item simplification", page: "item-simplification", permission: "vault.catalogue.manage", icon: GitCompareArrows },
   { title: "Stock movements", page: "inventory", permission: "vault.stock.view", icon: Warehouse },
   { title: "Demands", page: "demands", permission: "vault.demands.view", icon: ClipboardList },
   { title: "Reference data", page: "reference-data", permission: "vault.reference.manage", icon: Settings2 },
@@ -54,6 +55,7 @@ export function AppSidebar() {
         <SidebarMenuItem><SidebarMenuButton isActive={current === "manufacturing-boms" || current === "manufacturing-bom-detail"} tooltip="BOM register" onClick={() => go("manufacturing-boms")}><ClipboardList className="size-4"/><span>BOM register</span></SidebarMenuButton></SidebarMenuItem>
         <SidebarMenuItem><SidebarMenuButton isActive={current === "manufacturing-projects" || current === "manufacturing-project-detail"} tooltip="Manufacturing projects" onClick={() => go("manufacturing-projects")}><Package className="size-4"/><span>Projects</span></SidebarMenuButton></SidebarMenuItem>
         <SidebarMenuItem><SidebarMenuButton isActive={current === "manufacturing-planning"} tooltip="Production planning" onClick={() => go("manufacturing-planning")}><Gauge className="size-4"/><span>Production planning</span></SidebarMenuButton></SidebarMenuItem>
+        <SidebarMenuItem><SidebarMenuButton isActive={current === "manufacturing-bom-optimization"} tooltip="BOM optimization" onClick={() => go("manufacturing-bom-optimization")}><GitCompareArrows className="size-4"/><span>BOM optimization</span></SidebarMenuButton></SidebarMenuItem>
       </SidebarMenu></SidebarGroup>}
       <SidebarGroup><SidebarGroupLabel>Planned modules</SidebarGroupLabel><SidebarMenu>
         <SidebarMenuItem><SidebarMenuButton isActive={current === "people"} tooltip="People · HR" onClick={() => go("people")}><Users className="size-4"/><span>People <span className="text-xs text-muted-foreground">planned</span></span></SidebarMenuButton></SidebarMenuItem>

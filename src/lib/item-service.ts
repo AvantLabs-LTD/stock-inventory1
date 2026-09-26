@@ -55,6 +55,9 @@ export async function updateCatalogueItem(
 ) {
   const existing = await tx.item.findUnique({ where: { id: itemId } })
   if (!existing) throw new DomainError("ITEM_NOT_FOUND", "Component was not found", 404)
+  if (input.status === "ACTIVE" && await tx.item.findFirst({ where: { id: itemId, mergeSources: { some: {} } }, select: { id: true } })) {
+    throw new DomainError("ITEM_MERGED", "This component was merged into a surviving record and cannot be reactivated", 409)
+  }
 
   const title = input.title === undefined ? existing.title : input.title.trim()
   const unit = input.unit === undefined ? existing.unit : input.unit.trim()

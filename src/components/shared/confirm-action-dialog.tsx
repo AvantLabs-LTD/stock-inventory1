@@ -13,14 +13,15 @@ type ConfirmActionDialogProps = {
   onConfirm: () => void | Promise<void>
   destructive?: boolean
   busy?: boolean
+  disabled?: boolean
   children?: ReactNode
 }
 
 /** A consistent, consequence-first guard for changes that cannot be casually undone. */
-export function ConfirmActionDialog({ open, onOpenChange, title, description, confirmLabel, onConfirm, destructive = false, busy = false, children }: ConfirmActionDialogProps) {
+export function ConfirmActionDialog({ open, onOpenChange, title, description, confirmLabel, onConfirm, destructive = false, busy = false, disabled = false, children }: ConfirmActionDialogProps) {
   return <AlertDialog open={open} onOpenChange={onOpenChange}><AlertDialogContent>
     <AlertDialogHeader><AlertDialogTitle>{title}</AlertDialogTitle><AlertDialogDescription>{description}</AlertDialogDescription></AlertDialogHeader>
     {children && <div className="rounded-lg border bg-muted/25 p-3 text-sm">{children}</div>}
-    <AlertDialogFooter><AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel><AlertDialogAction asChild><Button variant={destructive ? "destructive" : "default"} disabled={busy} onClick={event => { event.preventDefault(); void onConfirm() }}>{busy ? "Working…" : confirmLabel}</Button></AlertDialogAction></AlertDialogFooter>
+    <AlertDialogFooter><AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel><AlertDialogAction asChild><Button variant={destructive ? "destructive" : "default"} disabled={busy || disabled} onClick={event => { event.preventDefault(); void onConfirm() }}>{busy ? "Working…" : confirmLabel}</Button></AlertDialogAction></AlertDialogFooter>
   </AlertDialogContent></AlertDialog>
 }
